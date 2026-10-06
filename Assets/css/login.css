@@ -1,0 +1,113 @@
+/* Reset básico para márgenes y fuentes */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background: linear-gradient(135deg, #001f3f 0%, #003366 100%);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+/* Cuadrilátero del Login */
+.login-container {
+    background-color: #ffffff;
+    width: 100%;
+    max-width: 420px;
+    padding: 45px 40px;
+    border-radius: 20px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Encabezado del formulario */
+.login-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.login-header h2 {
+    font-size: 32px;
+    margin-bottom: 5px;
+    letter-spacing: 1px;
+    font-weight: 800;
+}
+
+/* Clases para los colores del nombre del minimarket */
+.gold-text {
+    color: #D4AF37;
+}
+
+.blue-text {
+    color: #003366;
+}
+
+.login-header p {
+    color: #666666;
+    font-size: 14px;
+}
+
+/* Agrupación de inputs */
+.input-group {
+    margin-bottom: 20px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: #003366;
+    font-weight: 700;
+}
+
+/* Estilos de las cajas de texto */
+.input-group input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #cccccc;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    color: #333333;
+    font-size: 14px;
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+/* Efecto al hacer clic en los inputs */
+.input-group input:focus {
+    outline: none;
+    border-color: #D4AF37;
+    box-shadow: 0 0 8px rgba(212, 175, 55, 0.3);
+    background-color: #ffffff;
+}
+
+.login-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #0052D4, #4364F7);
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-top: 15px;
+    box-shadow: 0 4px 15px rgba(0, 82, 212, 0.3);
+}
+
+/* Efecto hover en el botón*/
+.login-btn:hover {
+    background: linear-gradient(135deg, #0042a4, #3354e7);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 82, 212, 0.4);
+}
+
+.login-btn:active {
+    transform: scale(0.98);
+}

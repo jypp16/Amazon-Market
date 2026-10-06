@@ -1,0 +1,18 @@
+# Variables de entorno (credenciales)
+.env
+
+# Logs
+*.log
+
+# Temporales
+*.tmp
+
+#Imagenes
+*.jpg
+*.png
+*.jpeg
+*.webp
+
+# Sistema
+Thumbs.db
+.DS_Store
