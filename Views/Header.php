@@ -60,6 +60,10 @@ $slugs = array_column($permisos, 'slug');
                 </a>
                 <?php endif; ?>
 
+                <a href="<?= BASE_URL ?>/Proveedor" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Proveedor') !== false) ? 'active' : '' ?>">
+                    <i class="fa-solid fa-truck-field"></i> <span>Proveedores</span>
+                </a>
+
                 <?php if (in_array('clientes.listar', $slugs)): ?>
                 <a href="<?= BASE_URL ?>/Cliente" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Cliente') !== false) ? 'active' : '' ?>">
                     <i class="fa-solid fa-users"></i> <span>Clientes</span>

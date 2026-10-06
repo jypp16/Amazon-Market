@@ -26,6 +26,12 @@ const ModalForm = {
         const body = document.createElement('div');
         body.className = 'modal-form-body';
 
+        if (typeof config.contentHtml === 'string') {
+            body.innerHTML = config.contentHtml;
+            body.querySelectorAll('[data-modal-close]').forEach(button => {
+                button.addEventListener('click', () => this._close());
+            });
+        } else {
         const form = document.createElement('form');
         form.id = 'modal_form';
         form.className = 'form-grid';
@@ -164,6 +170,8 @@ const ModalForm = {
         });
 
         body.appendChild(form);
+        }
+
         container.appendChild(header);
         container.appendChild(body);
         overlay.appendChild(container);
@@ -176,10 +184,11 @@ const ModalForm = {
             if (e.target === overlay) this._close();
         });
 
-        const firstInput = form.querySelector('input, select, textarea');
+        const formElement = body.querySelector('form');
+        const firstInput = body.querySelector('input, select, textarea');
         if (firstInput) setTimeout(() => firstInput.focus(), 100);
 
-        if (config.onMount) setTimeout(() => config.onMount(form), 50);
+        if (config.onMount) setTimeout(() => config.onMount(formElement), 50);
     },
 
     _close() {
