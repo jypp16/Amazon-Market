@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+    cargarProveedores();
     const botonCrear = document.getElementById('btn_crear_proveedor');
 
     if (!botonCrear) return;
@@ -98,30 +99,100 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         formulario.querySelectorAll('[data-custom-select]').forEach(crearSelectPersonalizado);
-        tipoDocumento.addEventListener('change', actualizarValidacionDocumento);
+        tipoDocumento.addEventListener('change', () => {
+            actualizarValidacionDocumento();
+            evaluarEstadoBoton();
+        });
         numeroDocumento.addEventListener('input', () => {
             if (documentoTouched) validarDocumento();
+            evaluarEstadoBoton();
         });
         numeroDocumento.addEventListener('blur', () => {
             documentoTouched = true;
             validarDocumento();
+            evaluarEstadoBoton();
         });
         nombre.addEventListener('input', () => {
             if (nombreTouched) validarNombre();
+            evaluarEstadoBoton();
         });
         nombre.addEventListener('blur', () => {
             nombreTouched = true;
             validarNombre();
+            evaluarEstadoBoton();
         });
         telefono.addEventListener('input', () => {
             if (telefonoTouched) validarTelefono();
+            evaluarEstadoBoton();
         });
         telefono.addEventListener('blur', () => {
             telefonoTouched = true;
             validarTelefono();
+            evaluarEstadoBoton();
         });
         tipoDocumento.value = tipoDocumento.value || '2';
         actualizarValidacionDocumento();
+
+        function evaluarEstadoBoton() {
+            const btnGuardar = formulario.querySelector('.btn-gold');
+            if (!btnGuardar) return;
+
+            const digitos = tipoDocumento.value === '1' ? 8 : 11;
+            const docValido = new RegExp('^[0-9]{' + digitos + '}$').test(numeroDocumento.value.trim());
+            const nomValido = nombre.value.trim().length >= 2 && nombre.value.trim().length <= 150;
+            
+            const cantidadDigitos = telefono.value.replace(/\D/g, '').length;
+            const soloCaracteresTelefono = /^[0-9+()\s.-]+$/.test(telefono.value);
+            const telValido = telefono.value.trim() && soloCaracteresTelefono && cantidadDigitos >= 7 && cantidadDigitos <= 15;
+
+            btnGuardar.disabled = !(docValido && nomValido && telValido);
+        }
+
+        const btnGuardar = formulario.querySelector('.btn-gold');
+        if (btnGuardar) {
+            btnGuardar.addEventListener('click', async () => {
+                btnGuardar.disabled = true;
+                const originalHtml = btnGuardar.innerHTML;
+                btnGuardar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando...';
+                
+                try {
+                    const formData = new FormData(formulario);
+                    const data = Object.fromEntries(formData.entries());
+                    
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                    const respuesta = await fetch(BASE_URL + '/api/proveedores', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-Token': csrfToken
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    
+                    const json = await respuesta.json();
+                    if (!respuesta.ok || !json.status) {
+                        throw new Error(json.message || 'Error al guardar el proveedor');
+                    }
+                    
+                    document.querySelector('.modal-close-btn').click();
+                    if (typeof Modal !== 'undefined' && Modal.success) {
+                        await Modal.success('¡Éxito!', 'Proveedor registrado correctamente.');
+                    } else {
+                        alert('Proveedor registrado correctamente.');
+                    }
+                    if (typeof cargarProveedores === 'function') cargarProveedores();
+                } catch (error) {
+                    if (typeof Modal !== 'undefined' && Modal.error) {
+                        await Modal.error('Error', error.message);
+                    } else {
+                        alert('Error: ' + error.message);
+                    }
+                    btnGuardar.disabled = false;
+                    btnGuardar.innerHTML = originalHtml;
+                }
+            });
+        }
 
         function crearSelectPersonalizado(select) {
             const wrapper = document.createElement('div');
@@ -241,3 +312,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 });
+
+async function cargarProveedores() {
+    try {
+        const respuesta = await fetch(BASE_URL + '/api/proveedores', {
+            headers: { 'Accept': 'application/json' }
+        });
+        const json = await respuesta.json();
+        const tbody = document.getElementById('tabla_proveedores');
+        if (!tbody) return;
+        
+        if (!json.status) throw new Error(json.message);
+
+        if (json.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Aún no hay proveedores para mostrar.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        json.data.forEach(prov => {
+            const tr = document.createElement('tr');
+            const estadoBadge = prov.estado == 1 ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-danger">Inactivo</span>';
+            tr.innerHTML = `
+                <td>${prov.nombre_tipo_documento}</td>
+                <td>${prov.numero_documento}</td>
+                <td>${prov.razon_social}</td>
+                <td>${prov.telefono}</td>
+                <td>${estadoBadge}</td>
+                <td>
+                    <button class="btn-icon" title="Editar"><i class="fa-solid fa-pen"></i></button>
+                    <button class="btn-icon text-danger" title="Desactivar"><i class="fa-solid fa-trash"></i></button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+        
+        const pagInfo = document.querySelector('.pag-info');
+        if (pagInfo) {
+            pagInfo.textContent = `Mostrando ${json.data.length} proveedores`;
+        }
+    } catch (error) {
+        console.error(error);
+    }
+}
