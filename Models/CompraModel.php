@@ -30,7 +30,7 @@ class CompraModel extends Model {
         $this->select([
             'compra.*',
             'proveedor.razon_social',
-            'proveedor.ruc',
+            'proveedor.numero_documento',
             'tipo_comprobante.nombre as tipo_comprobante'
         ])
         ->join('proveedor', 'compra.id_proveedor = proveedor.id_proveedor')
@@ -41,7 +41,7 @@ class CompraModel extends Model {
                 'compra.serie' => $busqueda,
                 'compra.numero' => $busqueda,
                 'proveedor.razon_social' => $busqueda,
-                'proveedor.ruc' => $busqueda
+                'proveedor.numero_documento' => $busqueda
             ]);
         }
 
@@ -65,7 +65,7 @@ class CompraModel extends Model {
         return $this->select([
             'compra.*',
             'proveedor.razon_social',
-            'proveedor.ruc',
+            'proveedor.numero_documento',
             'tipo_comprobante.nombre as tipo_comprobante'
         ])
         ->join('proveedor', 'compra.id_proveedor = proveedor.id_proveedor')
