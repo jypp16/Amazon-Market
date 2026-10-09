@@ -1,5 +1,24 @@
 document.addEventListener('DOMContentLoaded', () => {
     cargarProveedores();
+
+    const inputBusqueda = document.getElementById('busqueda_proveedor');
+    if (inputBusqueda) {
+        const debounceFn = (typeof debounce === 'function') 
+            ? debounce 
+            : (fn, ms) => {
+                let t;
+                return (...args) => {
+                    clearTimeout(t);
+                    t = setTimeout(() => fn(...args), ms);
+                };
+            };
+
+        inputBusqueda.addEventListener('input', debounceFn((e) => {
+            const query = e.target.value.trim();
+            cargarProveedores(1, query);
+        }, 350));
+    }
+
     const botonCrear = document.getElementById('btn_crear_proveedor');
 
     if (!botonCrear) return;
@@ -313,24 +332,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-async function cargarProveedores() {
+let paginaActual = 1;
+let busquedaActual = '';
+const porPagina = 2; // Configurado temporalmente en 2 para probar la paginación con los 3 registros existentes
+
+async function cargarProveedores(pagina = paginaActual, busqueda = busquedaActual) {
+    paginaActual = pagina;
+    busquedaActual = busqueda;
+
+    const tbody = document.getElementById('tabla_proveedores');
+    if (!tbody) return;
+
     try {
-        const respuesta = await fetch(BASE_URL + '/api/proveedores', {
+        const params = new URLSearchParams({
+            search: busquedaActual,
+            page: paginaActual,
+            limit: porPagina
+        });
+
+        const respuesta = await fetch(BASE_URL + '/api/proveedores?' + params.toString(), {
             headers: { 'Accept': 'application/json' }
         });
         const json = await respuesta.json();
-        const tbody = document.getElementById('tabla_proveedores');
-        if (!tbody) return;
         
         if (!json.status) throw new Error(json.message);
 
-        if (json.data.length === 0) {
+        const proveedores = json.data || [];
+        if (proveedores.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Aún no hay proveedores para mostrar.</td></tr>';
+            renderizarPaginacion({
+                page: 1,
+                total_pages: 1,
+                total: 0,
+                per_page: porPagina
+            });
             return;
         }
 
         tbody.innerHTML = '';
-        json.data.forEach(prov => {
+        proveedores.forEach(prov => {
             const tr = document.createElement('tr');
             const estadoBadge = prov.estado == 1 ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-danger">Inactivo</span>';
             tr.innerHTML = `
@@ -347,11 +387,72 @@ async function cargarProveedores() {
             tbody.appendChild(tr);
         });
         
-        const pagInfo = document.querySelector('.pag-info');
-        if (pagInfo) {
-            pagInfo.textContent = `Mostrando ${json.data.length} proveedores`;
-        }
+        renderizarPaginacion({
+            page: json.pagina_actual || 1,
+            total_pages: json.paginas || 1,
+            total: json.total || 0,
+            per_page: json.por_pagina || porPagina
+        });
     } catch (error) {
         console.error(error);
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#dc3545; padding:20px;">Error al cargar proveedores: ${error.message}</td></tr>`;
     }
+}
+
+function renderizarPaginacion(info) {
+    const pagInfoSpan = document.querySelector('.pag-info');
+    const pagBtnsDiv = document.querySelector('.pag-btns');
+    if (!pagBtnsDiv) return;
+
+    const { page, total_pages, total, per_page } = info;
+
+    if (pagInfoSpan) {
+        if (total === 0) {
+            pagInfoSpan.textContent = 'Mostrando 0 proveedores';
+        } else {
+            const inicio = (page - 1) * per_page + 1;
+            const fin = Math.min(page * per_page, total);
+            pagInfoSpan.textContent = `Mostrando ${inicio}-${fin} de ${total} proveedores`;
+        }
+    }
+
+    pagBtnsDiv.innerHTML = '';
+
+    // Botón Anterior
+    const btnPrev = document.createElement('button');
+    btnPrev.type = 'button';
+    btnPrev.className = 'pag-btn';
+    btnPrev.setAttribute('aria-label', 'Página anterior');
+    btnPrev.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+    btnPrev.disabled = page <= 1;
+    btnPrev.addEventListener('click', () => {
+        if (page > 1) cargarProveedores(page - 1, busquedaActual);
+    });
+    pagBtnsDiv.appendChild(btnPrev);
+
+    // Botones numéricos de página
+    for (let p = 1; p <= total_pages; p++) {
+        const btnPage = document.createElement('button');
+        btnPage.type = 'button';
+        btnPage.className = 'pag-btn' + (p === page ? ' pag-active' : '');
+        btnPage.textContent = p;
+        if (p === page) {
+            btnPage.setAttribute('aria-current', 'page');
+        } else {
+            btnPage.addEventListener('click', () => cargarProveedores(p, busquedaActual));
+        }
+        pagBtnsDiv.appendChild(btnPage);
+    }
+
+    // Botón Siguiente
+    const btnNext = document.createElement('button');
+    btnNext.type = 'button';
+    btnNext.className = 'pag-btn';
+    btnNext.setAttribute('aria-label', 'Página siguiente');
+    btnNext.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+    btnNext.disabled = page >= total_pages;
+    btnNext.addEventListener('click', () => {
+        if (page < total_pages) cargarProveedores(page + 1, busquedaActual);
+    });
+    pagBtnsDiv.appendChild(btnNext);
 }

@@ -23,9 +23,20 @@ class ProveedorApiController extends ApiController {
                 $proveedor = $this->proveedorService->obtenerProveedor((int)$id);
                 $this->sendJsonResponse(['status' => true, 'message' => 'Proveedor encontrado', 'data' => $proveedor], 200);
             } else {
-                $busqueda = $_GET['search'] ?? '';
-                $proveedores = $this->proveedorService->obtenerProveedores($busqueda);
-                $this->sendJsonResponse(['status' => true, 'message' => 'Lista de proveedores', 'data' => $proveedores], 200);
+                $busqueda = trim($_GET['search'] ?? '');
+                $pagina = max(1, (int)($_GET['page'] ?? 1));
+                $porPagina = max(1, (int)($_GET['limit'] ?? 10));
+
+                $resultado = $this->proveedorService->obtenerProveedoresPaginado($busqueda, $pagina, $porPagina);
+                $this->sendJsonResponse([
+                    'status' => true,
+                    'message' => 'Lista de proveedores',
+                    'data' => $resultado['data'],
+                    'total' => $resultado['total'],
+                    'paginas' => $resultado['paginas'],
+                    'pagina_actual' => $resultado['pagina_actual'],
+                    'por_pagina' => $resultado['por_pagina']
+                ], 200);
             }
         } catch (\Exception $e) {
             $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
