@@ -19,4 +19,20 @@ class ProductoModel extends Model {
             ->orderBy('producto.id_producto', 'ASC')
             ->get();
     }
+
+    public function actualizarStock($id_producto, $cantidad, $operacion = 'sumar') {
+        $producto = $this->find($id_producto);
+        if (!$producto) {
+            return false;
+        }
+
+        $nuevoStock = $producto['stock'];
+        if ($operacion === 'sumar') {
+            $nuevoStock += $cantidad;
+        } elseif ($operacion === 'restar') {
+            $nuevoStock -= $cantidad;
+        }
+
+        return $this->update($id_producto, ['stock' => $nuevoStock]);
+    }
 }
