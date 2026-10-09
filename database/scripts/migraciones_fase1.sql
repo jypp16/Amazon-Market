@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS `kardex` (
   CONSTRAINT `fk_kardex_producto` FOREIGN KEY (`id_producto`) REFERENCES `producto` (`id_producto`),
   CONSTRAINT `fk_kardex_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuario` (`id_usuario`),
   CONSTRAINT `fk_kardex_compra` FOREIGN KEY (`id_accion_compra`) REFERENCES `compra` (`id_compra`),
-  CONSTRAINT `fk_kardex_detalle_compra` FOREIGN KEY (`id_detalle_compra`) REFERENCES `detalle_compra` (`id_detalle_compra`),
+  CONSTRAINT `fk_kardex_detalle_compra` FOREIGN KEY (`id_detalle_compra`) REFERENCES `detalle_compra` (`id_detalle_compra`) ON DELETE SET NULL,
   CONSTRAINT `fk_kardex_venta` FOREIGN KEY (`id_accion_venta`) REFERENCES `venta` (`id_venta`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
