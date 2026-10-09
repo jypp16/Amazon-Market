@@ -15,6 +15,10 @@ class ProveedorService {
         return $this->model->selectProveedores($busqueda);
     }
 
+    public function obtenerProveedoresPaginado(string $busqueda = '', int $pagina = 1, int $porPagina = 10) {
+        return $this->model->selectProveedoresPaginado($busqueda, $pagina, $porPagina);
+    }
+
     public function obtenerProveedor(int $id) {
         $proveedor = $this->model->selectProveedor($id);
         if (!$proveedor) {
