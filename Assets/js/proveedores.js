@@ -334,7 +334,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let paginaActual = 1;
 let busquedaActual = '';
-const porPagina = 2; // Configurado temporalmente en 2 para probar la paginación con los 3 registros existentes
+const porPagina = 10;
 
 async function cargarProveedores(pagina = paginaActual, busqueda = busquedaActual) {
     paginaActual = pagina;
