@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 titulo: 'Registrar Nuevo Proveedor',
                 width: '700px',
                 contentHtml: contenido,
-                onMount: inicializarFormularioProveedor
+                onMount: () => inicializarFormularioProveedor()
             });
         } catch (error) {
             await Modal.error('Error', error.message);
