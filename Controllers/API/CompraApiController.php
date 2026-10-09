@@ -65,4 +65,91 @@ class CompraApiController extends ApiController {
             $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
         }
     }
+
+    /**
+     * GET /api/compras
+     * GET /api/compras/{id}
+     */
+    public function get(?string $id = ''): void {
+        try {
+            if (!empty($id)) {
+                $compra = $this->compraService->obtenerCompra((int)$id);
+                if (!$compra) {
+                    $this->sendJsonResponse(['status' => false, 'message' => 'Compra no encontrada'], 404);
+                }
+                $this->sendJsonResponse(['status' => true, 'message' => 'Detalle de compra', 'data' => $compra], 200);
+            } else {
+                $busqueda = trim($this->getParam('search', ''));
+                $pagina = max(1, (int)$this->getParam('page', 1));
+                $porPagina = max(1, (int)$this->getParam('limit', 10));
+
+                $resultado = $this->compraService->obtenerComprasPaginado($busqueda, $pagina, $porPagina);
+                $this->sendJsonResponse([
+                    'status' => true,
+                    'message' => 'Lista de compras',
+                    'data' => $resultado['data'],
+                    'total' => $resultado['total'],
+                    'paginas' => $resultado['paginas'],
+                    'pagina_actual' => $resultado['pagina_actual'],
+                    'por_pagina' => $resultado['por_pagina']
+                ], 200);
+            }
+        } catch (\Exception $e) {
+            $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    /**
+     * PUT /api/compras/{id}
+     */
+    public function put(?string $id = ''): void {
+        try {
+            if (empty($id)) {
+                throw new \Exception("ID de la compra es requerido para corregir.");
+            }
+
+            $input = $this->getInput();
+            if (empty($input) || empty($input['detalles']) || !is_array($input['detalles'])) {
+                $this->sendJsonResponse(['status' => false, 'message' => 'Datos inválidos para la corrección.'], 400);
+            }
+
+            $id_usuario = $this->authenticatedUserId ?? 1;
+            
+            $detalles = $input['detalles'];
+            unset($input['detalles']);
+            $cabecera = $input;
+
+            $resultado = $this->compraService->corregirCompra((int)$id, $cabecera, $detalles, $id_usuario);
+
+            if ($resultado['status']) {
+                $this->sendJsonResponse($resultado, 200);
+            } else {
+                $this->sendJsonResponse($resultado, 400);
+            }
+        } catch (\Exception $e) {
+            $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    /**
+     * DELETE /api/compras/{id}
+     */
+    public function delete(?string $id = ''): void {
+        try {
+            if (empty($id)) {
+                throw new \Exception("ID de la compra es requerido para anular.");
+            }
+
+            $id_usuario = $this->authenticatedUserId ?? 1;
+            $resultado = $this->compraService->anularCompra((int)$id, $id_usuario);
+
+            if ($resultado['status']) {
+                $this->sendJsonResponse($resultado, 200);
+            } else {
+                $this->sendJsonResponse($resultado, 400);
+            }
+        } catch (\Exception $e) {
+            $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
+        }
+    }
 }

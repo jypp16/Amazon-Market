@@ -85,3 +85,122 @@ Registra una nueva compra (cabecera), sus detalles (productos y presentaciones),
   "message": "Producto no encontrado ID: 999"
 }
 ```
+
+## 2. Historial de Compras (Fase 3)
+
+Lista todas las compras de forma paginada para la vista de historial.
+
+- **URL:** `/api/compras`
+- **Método:** `GET`
+- **Parámetros Query (Opcionales):** `page`, `per_page`, `search`
+
+**Éxito (200 OK):**
+```json
+{
+  "status": true,
+  "data": [
+    {
+      "id_compra": 1,
+      "fecha_recepcion": "2026-10-09",
+      "proveedor": "Distribuidora XYZ",
+      "tipo_comprobante": "Factura",
+      "serie_numero": "F001-00001234",
+      "total_documento": 1500.50,
+      "estado_compra": "Registrado"
+    }
+  ],
+  "pagination": {
+    "total": 1,
+    "page": 1,
+    "per_page": 10,
+    "total_pages": 1
+  }
+}
+```
+
+## 3. Anular Compra (RC02 - Fase 3)
+
+Anula una compra registrada. Esta acción resta el stock sumado originalmente e invalida el movimiento. El sistema validará que al anular no queden productos con stock negativo.
+
+- **URL:** `/api/compras/{id}`
+- **Método:** `DELETE`
+
+**Éxito (200 OK):**
+```json
+{
+  "status": true,
+  "message": "Compra anulada exitosamente."
+}
+```
+
+**Error por stock negativo (400 Bad Request):**
+```json
+{
+  "status": false,
+  "message": "No se puede revertir el detalle porque el producto XYZ quedaría con stock negativo."
+}
+```
+
+## 4. Corregir / Editar Compra (RC01 - Fase 3)
+
+Edita una compra existente (cambiar detalles, cantidades, etc.). Revertirá internamente los ingresos previos y registrará los nuevos movimientos. Valida estrictamente para evitar stocks negativos.
+
+- **URL:** `/api/compras/{id}`
+- **Método:** `PUT`
+- **Content-Type:** `application/json`
+
+### Body (JSON)
+*La estructura es la misma que al Crear Compra.*
+
+**Éxito (200 OK):**
+```json
+{
+  "status": true,
+  "message": "Compra corregida exitosamente."
+}
+```
+
+## 5. Alertas de Stock Bajo (Fase 3)
+
+Obtiene los productos cuyo `stock_actual` está por debajo de su `stock_minimo`.
+
+- **URL:** `/api/alertas/stock`
+- **Método:** `GET`
+
+**Éxito (200 OK):**
+```json
+{
+  "status": true,
+  "data": [
+    {
+      "id_producto": 5,
+      "nombre": "Aceite 1L",
+      "stock_actual": 2,
+      "stock_minimo": 10
+    }
+  ]
+}
+```
+
+## 6. Alertas de Vencimientos (Fase 3)
+
+Obtiene los productos o lotes que vencen dentro de los próximos 15 días (o ya vencidos).
+
+- **URL:** `/api/alertas/vencimientos`
+- **Método:** `GET`
+
+**Éxito (200 OK):**
+```json
+{
+  "status": true,
+  "data": [
+    {
+      "id_producto": 8,
+      "nombre": "Yogurt de Fresa",
+      "numero_lote": "LOTE-123",
+      "fecha_vencimiento": "2026-10-15",
+      "dias_restantes": 6
+    }
+  ]
+}
+```
