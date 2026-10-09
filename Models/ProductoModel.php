@@ -26,13 +26,13 @@ class ProductoModel extends Model {
             return false;
         }
 
-        $nuevoStock = $producto['stock'];
+        $nuevoStock = $producto['stock_actual'];
         if ($operacion === 'sumar') {
             $nuevoStock += $cantidad;
         } elseif ($operacion === 'restar') {
             $nuevoStock -= $cantidad;
         }
 
-        return $this->update($id_producto, ['stock' => $nuevoStock]);
+        return $this->update($id_producto, ['stock_actual' => $nuevoStock]);
     }
 }

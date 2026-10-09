@@ -93,7 +93,7 @@ class CompraService {
                     throw new Exception("Producto no encontrado ID: " . $detalle['id_producto']);
                 }
 
-                $stock_anterior = (int) $producto['stock'];
+                $stock_anterior = (int) $producto['stock_actual'];
                 $stock_resultante = $stock_anterior + $cantidad_base;
 
                 if (!$this->productoModel->actualizarStock($detalle['id_producto'], $cantidad_base, 'sumar')) {
