@@ -15,7 +15,7 @@
     <script src="<?= BASE_URL ?>/Assets/js/productos.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/clientes.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/usuarios.js"></script>
-    <script src="<?= BASE_URL ?>/Assets/js/proveedores.js"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/proveedores.js?v=<?= time() ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/venta.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/reportes.js"></script>
 
