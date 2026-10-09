@@ -44,6 +44,14 @@ class CompraApiController extends ApiController {
                         $this->sendJsonResponse(['status' => false, 'message' => "Falta el campo '$campo' en el detalle índice $index."], 400);
                     }
                 }
+                
+                if ($detalle['cantidad_presentaciones'] <= 0 || $detalle['equivalencia_aplicada'] <= 0) {
+                    $this->sendJsonResponse(['status' => false, 'message' => "Las cantidades y equivalencias deben ser mayores a cero en el detalle índice $index."], 400);
+                }
+                
+                if ($detalle['importe_final_linea'] < 0) {
+                    $this->sendJsonResponse(['status' => false, 'message' => "El importe no puede ser negativo en el detalle índice $index."], 400);
+                }
             }
 
             // Usar el ID de usuario autenticado del ApiController
@@ -111,6 +119,19 @@ class CompraApiController extends ApiController {
             $input = $this->getInput();
             if (empty($input) || empty($input['detalles']) || !is_array($input['detalles'])) {
                 $this->sendJsonResponse(['status' => false, 'message' => 'Datos inválidos para la corrección.'], 400);
+            }
+
+            // Validaciones básicas de detalles para PUT
+            foreach ($input['detalles'] as $index => $detalle) {
+                if (isset($detalle['cantidad_presentaciones']) && $detalle['cantidad_presentaciones'] <= 0) {
+                    $this->sendJsonResponse(['status' => false, 'message' => "Las cantidades deben ser mayores a cero en el detalle índice $index."], 400);
+                }
+                if (isset($detalle['equivalencia_aplicada']) && $detalle['equivalencia_aplicada'] <= 0) {
+                    $this->sendJsonResponse(['status' => false, 'message' => "Las equivalencias deben ser mayores a cero en el detalle índice $index."], 400);
+                }
+                if (isset($detalle['importe_final_linea']) && $detalle['importe_final_linea'] < 0) {
+                    $this->sendJsonResponse(['status' => false, 'message' => "El importe no puede ser negativo en el detalle índice $index."], 400);
+                }
             }
 
             $id_usuario = $this->authenticatedUserId ?? 1;
