@@ -350,6 +350,17 @@ button, select, input, textarea { font-family: inherit; }
 .stock-badge { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 30px; }
 .stock-badge.stock-low { background-color: var(--color-danger-light); color: var(--color-danger); }
 .stock-badge.stock-normal { background-color: var(--color-success-light); color: var(--color-success); }
+.proveedor-estado-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 30px; font-size: 12px; font-weight: 600;
+}
+.proveedor-estado-badge::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px;
+}
+.proveedor-estado-activo { background-color: var(--color-success-light); color: #15803d; }
+.proveedor-estado-activo::before { background-color: #16a34a; }
+.proveedor-estado-inactivo { background-color: var(--color-danger-light); color: #b91c1c; }
+.proveedor-estado-inactivo::before { background-color: var(--color-danger); }
 .badge-neutral { background-color: #e2e8f0; color: var(--text-secondary); padding: 4px 10px; border-radius: 30px; font-size: 12px; font-weight: 600; }
 .badge-accent { background-color: var(--accent-gold-light); color: #a18115; padding: 4px 10px; border-radius: 30px; font-size: 12px; font-weight: 600; }
 .document-badge {
@@ -390,6 +401,13 @@ button, select, input, textarea { font-family: inherit; }
 .btn-edit:hover { background-color: #2563eb; color: var(--text-white); }
 .btn-delete { background-color: var(--color-danger-light); color: var(--color-danger); }
 .btn-delete:hover { background-color: var(--color-danger); color: var(--text-white); }
+.actions-group .btn-delete:disabled {
+    background-color: #f1f5f9; color: #94a3b8; opacity: 1; cursor: not-allowed;
+    box-shadow: none; transform: none;
+}
+.actions-group .btn-delete:disabled:hover {
+    background-color: #f1f5f9; color: #94a3b8; transform: none;
+}
 .btn-outline-success {
     background-color: transparent;
     color: var(--color-success);
