@@ -95,7 +95,7 @@ $nombre = e($_SESSION['nombre'] ?? '');
             <?php else: ?>
                 <div class="dash-table-wrap">
                     <table class="dash-table">
-                        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="text-right">Total</th><th>Hora</th></tr></thead>
+                        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="text-right">Total</th><th class="text-right">Hora</th></tr></thead>
                         <tbody>
                             <?php foreach ($ventasRecientes as $v): ?>
                                 <tr>
@@ -103,7 +103,7 @@ $nombre = e($_SESSION['nombre'] ?? '');
                                     <td class="text-ellipsis"><?= e($v['cliente'] ?? 'Cliente General') ?></td>
                                     <td><span class="pago-badge"><?= e($v['metodo_pago'] ?? '-') ?></span></td>
                                     <td class="text-right fw-bold">S/. <?= number_format(floatval($v['total']), 2) ?></td>
-                                    <td class="text-muted"><?= date('d/m H:i', strtotime($v['fecha_venta'])) ?></td>
+                                    <td class="text-muted text-right" style="white-space: nowrap;"><?= date('d/m H:i', strtotime($v['fecha_venta'])) ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -281,7 +281,7 @@ $nombre = e($_SESSION['nombre'] ?? '');
             <?php else: ?>
                 <div class="dash-table-wrap">
                     <table class="dash-table">
-                        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="text-right">Total</th><th>Hora</th></tr></thead>
+                        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Pago</th><th class="text-right">Total</th><th class="text-right">Hora</th></tr></thead>
                         <tbody>
                             <?php foreach ($ventasRecientes as $v): ?>
                                 <tr>
@@ -289,7 +289,7 @@ $nombre = e($_SESSION['nombre'] ?? '');
                                     <td class="text-ellipsis"><?= e($v['cliente'] ?? 'Cliente General') ?></td>
                                     <td><span class="pago-badge"><?= e($v['metodo_pago'] ?? '-') ?></span></td>
                                     <td class="text-right fw-bold">S/. <?= number_format(floatval($v['total']), 2) ?></td>
-                                    <td class="text-muted"><?= date('d/m H:i', strtotime($v['fecha_venta'])) ?></td>
+                                    <td class="text-muted text-right" style="white-space: nowrap;"><?= date('d/m H:i', strtotime($v['fecha_venta'])) ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
