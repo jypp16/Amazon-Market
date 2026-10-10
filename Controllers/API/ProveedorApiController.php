@@ -19,6 +19,7 @@ class ProveedorApiController extends ApiController {
      */
     public function get(?string $id = ''): void {
         try {
+            $this->requirePermission('proveedores.listar');
             if (!empty($id)) {
                 $proveedor = $this->proveedorService->obtenerProveedor((int)$id);
                 $this->sendJsonResponse(['status' => true, 'message' => 'Proveedor encontrado', 'data' => $proveedor], 200);
@@ -48,6 +49,7 @@ class ProveedorApiController extends ApiController {
      */
     public function post(?string $id = ''): void {
         try {
+            $this->requirePermission('proveedores.crear');
             $datos = $this->getInput();
             $newId = $this->proveedorService->registrarProveedor($datos);
             
@@ -62,6 +64,7 @@ class ProveedorApiController extends ApiController {
      */
     public function put(?string $id = ''): void {
         try {
+            $this->requirePermission('proveedores.editar');
             if (empty($id)) {
                 throw new \Exception("ID del proveedor es requerido para actualizar.");
             }
@@ -80,6 +83,7 @@ class ProveedorApiController extends ApiController {
      */
     public function delete(?string $id = ''): void {
         try {
+            $this->requirePermission('proveedores.eliminar');
             if (empty($id)) {
                 throw new \Exception("ID del proveedor es requerido para desactivar.");
             }
