@@ -151,15 +151,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function validarTelefono() {
-            const cantidadDigitos = telefono.value.replace(/\D/g, '').length;
-            const soloCaracteresTelefono = /^[0-9+()\s.-]+$/.test(telefono.value);
             const mensaje = !telefono.value.trim()
                 ? 'Ingresa el teléfono.'
-                : !soloCaracteresTelefono
-                    ? 'El teléfono solo puede contener números y los símbolos + ( ) - .'
-                    : cantidadDigitos < 7 || cantidadDigitos > 15
-                        ? 'El teléfono debe contener entre 7 y 15 dígitos.'
-                        : '';
+                : !/^[0-9]{9}$/.test(telefono.value.trim())
+                    ? 'El teléfono debe contener exactamente 9 dígitos numéricos.'
+                    : '';
             mostrarError(telefono, mensaje);
             return !mensaje;
         }
@@ -208,9 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const docValido = new RegExp('^[0-9]{' + digitos + '}$').test(numeroDocumento.value.trim());
             const nomValido = nombre.value.trim().length >= 2 && nombre.value.trim().length <= 150;
             
-            const cantidadDigitos = telefono.value.replace(/\D/g, '').length;
-            const soloCaracteresTelefono = /^[0-9+()\s.-]+$/.test(telefono.value);
-            const telValido = telefono.value.trim() && soloCaracteresTelefono && cantidadDigitos >= 7 && cantidadDigitos <= 15;
+            const telValido = /^[0-9]{9}$/.test(telefono.value.trim());
 
             btnGuardar.disabled = !(docValido && nomValido && telValido);
         }
