@@ -89,6 +89,14 @@ class RBACMiddleware extends Middleware {
                 'actualizar' => 'clientes.editar',
                 'eliminar' => 'clientes.eliminar',
             ],
+            'proveedor' => [
+                'index'    => 'proveedores.listar',
+                'crear'    => 'proveedores.crear',
+                'guardar'  => 'proveedores.crear',
+                'editar'   => 'proveedores.editar',
+                'actualizar' => 'proveedores.editar',
+                'eliminar' => 'proveedores.eliminar',
+            ],
             'usuario' => [
                 'index'    => 'usuarios.listar',
                 'crear'    => 'usuarios.crear',
