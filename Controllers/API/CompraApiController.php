@@ -18,6 +18,7 @@ class CompraApiController extends ApiController {
      */
     public function post(?string $id = ''): void {
         try {
+            $this->requirePermission('compras.crear');
             $input = $this->getInput();
 
             if (empty($input)) {
@@ -80,6 +81,7 @@ class CompraApiController extends ApiController {
      */
     public function get(?string $id = ''): void {
         try {
+            $this->requirePermission('compras.listar');
             if (!empty($id)) {
                 $compra = $this->compraService->obtenerCompra((int)$id);
                 if (!$compra) {
@@ -112,6 +114,7 @@ class CompraApiController extends ApiController {
      */
     public function put(?string $id = ''): void {
         try {
+            $this->requirePermission('compras.editar');
             if (empty($id)) {
                 throw new \Exception("ID de la compra es requerido para corregir.");
             }
@@ -157,6 +160,7 @@ class CompraApiController extends ApiController {
      */
     public function delete(?string $id = ''): void {
         try {
+            $this->requirePermission('compras.eliminar');
             if (empty($id)) {
                 throw new \Exception("ID de la compra es requerido para anular.");
             }
