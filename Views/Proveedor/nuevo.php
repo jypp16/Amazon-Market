@@ -1,6 +1,6 @@
 <form class="form-grid" id="form_nuevo_proveedor">
     <div class="form-group col-6">
-        <label for="proveedor_tipo_documento">Tipo de documento <span class="required">*</span></label>
+        <label for="proveedor_tipo_documento">Tipo de documento</label>
         <select id="proveedor_tipo_documento" name="id_tipo_documento" required data-custom-select>
             <option value="1">DNI</option>
             <option value="2" selected>RUC</option>
@@ -20,7 +20,7 @@
     </div>
 
     <div class="form-group col-6">
-        <label for="proveedor_estado">Estado <span class="required">*</span></label>
+        <label for="proveedor_estado">Estado</label>
         <select id="proveedor_estado" name="estado" required data-custom-select>
             <option value="1" selected>Activo</option>
             <option value="0">Inactivo</option>
@@ -29,7 +29,7 @@
 
     <div class="form-group col-6">
         <label for="proveedor_telefono">Teléfono <span class="required">*</span></label>
-        <input type="tel" id="proveedor_telefono" name="telefono" placeholder="Ej. 01559 8877" required minlength="7" maxlength="20" autocomplete="tel" inputmode="tel" aria-describedby="error_proveedor_telefono">
+        <input type="tel" id="proveedor_telefono" name="telefono" placeholder="9 dígitos" required minlength="9" maxlength="9" pattern="[0-9]{9}" autocomplete="tel" inputmode="numeric" aria-describedby="error_proveedor_telefono">
         <small class="field-error" id="error_proveedor_telefono" aria-live="polite"></small>
     </div>
 

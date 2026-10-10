@@ -104,10 +104,8 @@ class ProveedorService {
             throw new \Exception("Tipo de documento no válido.");
         }
 
-        // Validación de teléfono (solo números, permitiendo +, -, espacios, parentesis, entre 7 y 15 digitos)
-        $digitosTelefono = preg_replace('/\D/', '', $telefono);
-        if (strlen($digitosTelefono) < 7 || strlen($digitosTelefono) > 15) {
-            throw new \Exception("El teléfono debe contener entre 7 y 15 dígitos.");
+        if (!preg_match('/^[0-9]{9}$/', $telefono)) {
+            throw new \Exception("El teléfono debe contener exactamente 9 dígitos numéricos.");
         }
 
         return [
@@ -119,4 +117,3 @@ class ProveedorService {
         ];
     }
 }
-
