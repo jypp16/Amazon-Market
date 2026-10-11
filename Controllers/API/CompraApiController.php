@@ -92,12 +92,19 @@ class CompraApiController extends ApiController {
                 $busqueda = trim($this->getParam('search', ''));
                 $pagina = max(1, (int)$this->getParam('page', 1));
                 $porPagina = max(1, (int)$this->getParam('limit', 10));
+                $filtros = [
+                    'proveedor' => $this->getParam('proveedor', ''),
+                    'fecha_desde' => $this->getParam('fecha_desde', ''),
+                    'fecha_hasta' => $this->getParam('fecha_hasta', ''),
+                    'estado' => $this->getParam('estado', '')
+                ];
 
-                $resultado = $this->compraService->obtenerComprasPaginado($busqueda, $pagina, $porPagina);
+                $resultado = $this->compraService->obtenerComprasPaginado($busqueda, $pagina, $porPagina, $filtros);
                 $this->sendJsonResponse([
                     'status' => true,
                     'message' => 'Lista de compras',
                     'data' => $resultado['data'],
+                    'resumen' => $resultado['resumen'],
                     'total' => $resultado['total'],
                     'paginas' => $resultado['paginas'],
                     'pagina_actual' => $resultado['pagina_actual'],
@@ -166,6 +173,9 @@ class CompraApiController extends ApiController {
     public function delete(?string $id = ''): void {
         try {
             $this->requirePermission('compras.eliminar');
+            if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+                $this->sendJsonResponse(['status' => false, 'message' => 'Solo un administrador puede anular compras.'], 403);
+            }
             if (empty($id)) {
                 throw new \Exception("ID de la compra es requerido para anular.");
             }

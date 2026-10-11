@@ -109,6 +109,12 @@ class RBACMiddleware extends Middleware {
                 'index'  => 'ventas.acceder',
                 'guardar' => 'ventas.procesar',
             ],
+            'compra' => [
+                'index' => 'compras.listar',
+                'registrar' => 'compras.crear',
+                'detalle' => 'compras.listar',
+                'corregir' => 'compras.editar',
+            ],
             'reporte' => [
                 'index' => 'reportes.ver',
                 'ventas' => 'reportes.ver',
