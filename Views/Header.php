@@ -66,6 +66,33 @@ $slugs = array_column($permisos, 'slug');
                 </a>
                 <?php endif; ?>
 
+                <?php
+                $puedeListarCompras = in_array('compras.listar', $slugs);
+                $puedeCrearCompras = in_array('compras.crear', $slugs);
+                $enSeccionCompras = strpos($_GET['url'] ?? '', 'Compra') !== false;
+                ?>
+                <?php if ($puedeListarCompras || $puedeCrearCompras): ?>
+                <details class="menu-group" <?= $enSeccionCompras ? 'open' : '' ?>>
+                    <summary class="menu-link menu-group-toggle <?= $enSeccionCompras ? 'active' : '' ?>">
+                        <i class="fa-solid fa-cart-shopping"></i>
+                        <span>Compras</span>
+                        <i class="fa-solid fa-chevron-down menu-chevron"></i>
+                    </summary>
+                    <div class="menu-submenu">
+                        <?php if ($puedeListarCompras): ?>
+                        <a href="<?= BASE_URL ?>/Compra" class="menu-sublink <?= (($_GET['url'] ?? '') === 'Compra' || strpos($_GET['url'] ?? '', 'Compra/detalle') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-list"></i><span>Historial de compras</span>
+                        </a>
+                        <?php endif; ?>
+                        <?php if ($puedeCrearCompras): ?>
+                        <a href="<?= BASE_URL ?>/Compra/registrar" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Compra/registrar') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-cart-plus"></i><span>Registrar compra</span>
+                        </a>
+                        <?php endif; ?>
+                    </div>
+                </details>
+                <?php endif; ?>
+
                 <?php if (in_array('clientes.listar', $slugs)): ?>
                 <a href="<?= BASE_URL ?>/Cliente" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Cliente') !== false) ? 'active' : '' ?>">
                     <i class="fa-solid fa-users"></i> <span>Clientes</span>

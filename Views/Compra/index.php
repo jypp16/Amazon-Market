@@ -1,0 +1,102 @@
+<?php require_once "Views/Header.php"; ?>
+
+<section class="purchase-history">
+    <header class="purchase-history-header">
+        <nav class="purchase-breadcrumb" aria-label="Ruta de navegación">
+            <span>Compras</span>
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+            <span aria-current="page">Historial de compras</span>
+        </nav>
+        <?php if (can('compras.crear')): ?>
+        <a href="<?= BASE_URL ?>/Compra/registrar" class="btn btn-gold">
+            <i class="fa-solid fa-cart-plus"></i> Registrar compra
+        </a>
+        <?php endif; ?>
+    </header>
+
+    <form class="purchase-filters" method="get" action="<?= BASE_URL ?>/Compra">
+        <input type="hidden" name="url" value="Compra">
+        <div class="purchase-filter-field purchase-filter-provider">
+            <label for="filtro_proveedor_compra">Proveedor</label>
+            <select id="filtro_proveedor_compra" name="proveedor">
+                <option value="">Todos los proveedores</option>
+                <?php foreach ($data['proveedores'] as $proveedor): ?>
+                <option value="<?= (int)$proveedor['id_proveedor'] ?>">
+                    <?= e($proveedor['razon_social']) ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="purchase-filter-field">
+            <label for="fecha_desde_compra">Desde (recepción)</label>
+            <input type="date" id="fecha_desde_compra" name="fecha_desde" value="<?= e($data['fecha_desde']) ?>">
+        </div>
+        <div class="purchase-filter-field">
+            <label for="fecha_hasta_compra">Hasta (recepción)</label>
+            <input type="date" id="fecha_hasta_compra" name="fecha_hasta" value="<?= e($data['fecha_hasta']) ?>">
+        </div>
+        <div class="purchase-filter-field">
+            <label for="estado_compra">Estado</label>
+            <select id="estado_compra" name="estado">
+                <option value="">Todos</option>
+                <option value="Confirmada">Confirmada</option>
+                <option value="Corregida">Corregida</option>
+                <option value="Anulada">Anulada</option>
+            </select>
+        </div>
+        <div class="purchase-filter-actions">
+            <button type="submit" class="btn btn-gold"><i class="fa-solid fa-filter"></i> Filtrar</button>
+            <a href="<?= BASE_URL ?>/Compra" class="btn btn-secondary">Limpiar</a>
+        </div>
+    </form>
+
+    <section class="purchase-summary" aria-label="Resumen de compras">
+        <article class="purchase-summary-card">
+            <h3>Total de compras válidas (todo el filtro)</h3>
+            <p id="compras_total_valido">S/ 0.00</p>
+        </article>
+        <article class="purchase-summary-card">
+            <h3>Compras válidas (todo el filtro)</h3>
+            <p id="compras_cantidad_valida">0</p>
+        </article>
+        <article class="purchase-summary-card">
+            <h3>Anuladas (no suman)</h3>
+            <p id="compras_cantidad_anulada">0</p>
+        </article>
+    </section>
+
+    <div class="table-responsive purchase-history-table">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th scope="col">Documento</th>
+                    <th scope="col">Proveedor</th>
+                    <th scope="col">Emisión</th>
+                    <th scope="col">Recepción</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Importe vigente</th>
+                    <th scope="col">Registró</th>
+                    <th scope="col"><span class="visually-hidden">Acciones</span></th>
+                </tr>
+            </thead>
+            <tbody id="tabla_compras">
+                <tr>
+                    <td colspan="8" class="table-empty">No hay compras para mostrar.</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="purchase-table-footer">
+            <div class="purchase-table-info">
+                <span id="compras_mostrando">Mostrando 0 compras</span>
+                <strong id="compras_total_pagina">Total de esta página (válidas): S/ 0.00</strong>
+            </div>
+            <nav id="paginacion_compras" class="pag-btns" aria-label="Paginación del historial de compras">
+                <button type="button" class="pag-btn" aria-label="Página anterior" disabled>Anterior</button>
+                <button type="button" class="pag-btn pag-active" aria-current="page" disabled>1</button>
+                <button type="button" class="pag-btn" aria-label="Página siguiente" disabled>Siguiente</button>
+            </nav>
+        </div>
+    </div>
+</section>
+
+<?php require_once "Views/Footer.php"; ?>

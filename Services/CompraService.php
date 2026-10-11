@@ -128,14 +128,21 @@ class CompraService {
         }
     }
 
-    public function obtenerComprasPaginado($busqueda, $pagina, $limite) {
-        return $this->compraModel->obtenerComprasPaginadas($busqueda, $pagina, $limite);
+    public function obtenerComprasPaginado($busqueda, $pagina, $limite, array $filtros = []) {
+        return $this->compraModel->obtenerComprasPaginadas($busqueda, $pagina, $limite, $filtros);
     }
 
     public function obtenerCompra($id_compra) {
         $compra = $this->compraModel->obtenerCompraPorId($id_compra);
         if ($compra) {
             $compra['detalles'] = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra);
+            $idsProducto = array_column($compra['detalles'], 'id_producto');
+            $stocks = $this->productoModel->obtenerStocksPorIds($idsProducto);
+            foreach ($compra['detalles'] as &$detalle) {
+                $idProducto = (int)$detalle['id_producto'];
+                $detalle['stock_actual'] = $stocks[$idProducto] ?? null;
+            }
+            unset($detalle);
             $compra['historial'] = $this->compraModel->obtenerHistorialPorCompra($id_compra);
         }
         return $compra;
@@ -381,4 +388,3 @@ class CompraService {
         }
     }
 }
-
