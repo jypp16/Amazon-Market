@@ -120,16 +120,32 @@ Lista todas las compras de forma paginada para la vista de historial.
 
 ## 3. Anular Compra (RC02 - Fase 3)
 
-Anula una compra registrada. Esta acción resta el stock sumado originalmente e invalida el movimiento. El sistema validará que al anular no queden productos con stock negativo.
+Anula una compra registrada. Esta acción resta el stock sumado originalmente e invalida el movimiento. El sistema validará que al anular no queden productos con stock negativo y exige obligatoriamente un motivo de anulación para auditoría.
 
 - **URL:** `/api/compras/{id}`
 - **Método:** `DELETE`
+- **Content-Type:** `application/json`
+
+### Body (JSON)
+```json
+{
+  "motivo": "Comprobante duplicado por error del proveedor"
+}
+```
 
 **Éxito (200 OK):**
 ```json
 {
   "status": true,
-  "message": "Compra anulada exitosamente."
+  "message": "Compra anulada correctamente."
+}
+```
+
+**Error por motivo faltante (400 Bad Request):**
+```json
+{
+  "status": false,
+  "message": "El motivo de anulación es obligatorio."
 }
 ```
 
@@ -137,26 +153,58 @@ Anula una compra registrada. Esta acción resta el stock sumado originalmente e 
 ```json
 {
   "status": false,
-  "message": "No se puede revertir el detalle porque el producto XYZ quedaría con stock negativo."
+  "message": "No se puede anular la compra. El producto 'Leche Gloria' quedaría con stock negativo."
 }
 ```
 
 ## 4. Corregir / Editar Compra (RC01 - Fase 3)
 
-Edita una compra existente (cambiar detalles, cantidades, etc.). Revertirá internamente los ingresos previos y registrará los nuevos movimientos. Valida estrictamente para evitar stocks negativos.
+Edita una compra existente (cambiar detalles, cantidades, etc.). Revertirá internamente los ingresos previos y registrará los nuevos movimientos. Valida estrictamente para evitar stocks negativos y exige obligatoriamente un motivo de corrección.
 
 - **URL:** `/api/compras/{id}`
 - **Método:** `PUT`
 - **Content-Type:** `application/json`
 
 ### Body (JSON)
-*La estructura es la misma que al Crear Compra.*
+*La estructura es la misma que al Crear Compra, incluyendo obligatoriamente el campo `"motivo"` en la cabecera.*
+
+```json
+{
+  "motivo": "Corrección de cantidad y presentación por error de digitación",
+  "id_proveedor": 1,
+  "id_tipo_comprobante": 1,
+  "serie": "F001",
+  "numero": "00001234",
+  "fecha_emision": "2026-10-09",
+  "fecha_recepcion": "2026-10-09",
+  "total_documento": 1200.00,
+  "detalles": [
+    {
+      "id_producto": 15,
+      "id_presentacion": 2,
+      "cantidad_presentaciones": 8,
+      "equivalencia_aplicada": 12,
+      "importe_final_linea": 400.00,
+      "numero_lote": "LOTE-2026A",
+      "fecha_vencimiento": "2027-12-31"
+    }
+  ]
+}
+```
 
 **Éxito (200 OK):**
 ```json
 {
   "status": true,
-  "message": "Compra corregida exitosamente."
+  "message": "Compra corregida correctamente."
+}
+```
+
+**Error por motivo faltante (400 Bad Request):**
+```json
+{
+  "status": false,
+  "message": "El motivo de corrección es obligatorio."
 }
 ```
 

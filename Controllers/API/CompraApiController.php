@@ -124,6 +124,11 @@ class CompraApiController extends ApiController {
                 $this->sendJsonResponse(['status' => false, 'message' => 'Datos inválidos para la corrección.'], 400);
             }
 
+            $motivo = trim($input['motivo'] ?? '');
+            if (empty($motivo)) {
+                $this->sendJsonResponse(['status' => false, 'message' => 'El motivo de corrección es obligatorio.'], 400);
+            }
+
             // Validaciones básicas de detalles para PUT
             foreach ($input['detalles'] as $index => $detalle) {
                 if (isset($detalle['cantidad_presentaciones']) && $detalle['cantidad_presentaciones'] <= 0) {
@@ -143,7 +148,7 @@ class CompraApiController extends ApiController {
             unset($input['detalles']);
             $cabecera = $input;
 
-            $resultado = $this->compraService->corregirCompra((int)$id, $cabecera, $detalles, $id_usuario);
+            $resultado = $this->compraService->corregirCompra((int)$id, $cabecera, $detalles, $id_usuario, $motivo);
 
             if ($resultado['status']) {
                 $this->sendJsonResponse($resultado, 200);
@@ -165,8 +170,14 @@ class CompraApiController extends ApiController {
                 throw new \Exception("ID de la compra es requerido para anular.");
             }
 
+            $input = $this->getInput();
+            $motivo = trim($input['motivo'] ?? '');
+            if (empty($motivo)) {
+                $this->sendJsonResponse(['status' => false, 'message' => 'El motivo de anulación es obligatorio.'], 400);
+            }
+
             $id_usuario = $this->authenticatedUserId ?? 1;
-            $resultado = $this->compraService->anularCompra((int)$id, $id_usuario);
+            $resultado = $this->compraService->anularCompra((int)$id, $id_usuario, $motivo);
 
             if ($resultado['status']) {
                 $this->sendJsonResponse($resultado, 200);

@@ -136,6 +136,7 @@ class CompraService {
         $compra = $this->compraModel->obtenerCompraPorId($id_compra);
         if ($compra) {
             $compra['detalles'] = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra);
+            $compra['historial'] = $this->compraModel->obtenerHistorialPorCompra($id_compra);
         }
         return $compra;
     }
@@ -143,7 +144,12 @@ class CompraService {
     /**
      * Anula una compra, restando el stock ingresado y registrando el movimiento de anulación.
      */
-    public function anularCompra($id_compra, $id_usuario) {
+    public function anularCompra($id_compra, $id_usuario, $motivo = '') {
+        $motivo = trim($motivo ?? '');
+        if (empty($motivo)) {
+            throw new Exception("El motivo de anulación es obligatorio.");
+        }
+
         $pdo = $this->compraModel->conect();
         
         try {
@@ -196,10 +202,16 @@ class CompraService {
                 }
             }
 
-            // Cambiar estado a Anulada
-            if (!$this->compraModel->actualizarEstado($id_compra, 'Anulada')) {
+            // Cambiar estado a Anulada guardando motivo y fecha
+            if (!$this->compraModel->anularCompraConMotivo($id_compra, $motivo)) {
                 throw new Exception("Error al cambiar el estado de la compra.");
             }
+
+            // Registrar en historial de auditoría
+            $this->compraModel->registrarHistorial($id_compra, $id_usuario, 'Anulacion', $motivo, [
+                'estado_anterior' => $compra['estado'],
+                'detalles' => $detalles
+            ]);
 
             $pdo->commit();
             return ['status' => true, 'message' => 'Compra anulada correctamente.'];
@@ -213,7 +225,12 @@ class CompraService {
     /**
      * Corrige una compra existente. Internamente anula los detalles anteriores y registra los nuevos.
      */
-    public function corregirCompra($id_compra, array $cabecera, array $nuevosDetalles, $id_usuario) {
+    public function corregirCompra($id_compra, array $cabecera, array $nuevosDetalles, $id_usuario, $motivo = '') {
+        $motivo = trim($motivo ?? '');
+        if (empty($motivo)) {
+            throw new Exception("El motivo de corrección es obligatorio.");
+        }
+
         $pdo = $this->compraModel->conect();
         
         try {
@@ -229,6 +246,20 @@ class CompraService {
 
             // 1. Revertir el stock de los detalles antiguos (Anulación parcial lógica)
             $detallesAntiguos = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra);
+
+            $datosAnteriores = [
+                'cabecera' => [
+                    'id_proveedor' => $compra['id_proveedor'],
+                    'id_tipo_comprobante' => $compra['id_tipo_comprobante'],
+                    'serie' => $compra['serie'],
+                    'numero' => $compra['numero'],
+                    'fecha_emision' => $compra['fecha_emision'],
+                    'fecha_recepcion' => $compra['fecha_recepcion'],
+                    'total_documento' => $compra['total_documento'],
+                    'estado' => $compra['estado']
+                ],
+                'detalles' => $detallesAntiguos
+            ];
             
             foreach ($detallesAntiguos as $detalle) {
                 $producto = $this->productoModel->find($detalle['id_producto']);
@@ -276,7 +307,9 @@ class CompraService {
                 'numero' => $cabecera['numero'],
                 'fecha_emision' => $cabecera['fecha_emision'],
                 'fecha_recepcion' => $cabecera['fecha_recepcion'] ?? $compra['fecha_recepcion'],
-                'total_documento' => $cabecera['total_documento']
+                'total_documento' => $cabecera['total_documento'],
+                'motivo_correccion' => $motivo,
+                'fecha_correccion' => date('Y-m-d H:i:s')
             ];
 
             if (!$this->compraModel->update($id_compra, $datosCabeceraUpdate)) {
@@ -335,6 +368,9 @@ class CompraService {
                     throw new Exception("Error al registrar el nuevo ingreso en Kardex.");
                 }
             }
+
+            // 4. Registrar en historial de auditoría
+            $this->compraModel->registrarHistorial($id_compra, $id_usuario, 'Correccion', $motivo, $datosAnteriores);
 
             $pdo->commit();
             return ['status' => true, 'message' => 'Compra corregida correctamente.'];
