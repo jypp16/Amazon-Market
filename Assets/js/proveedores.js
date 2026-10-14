@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     cargarProveedores();
 
+    document.querySelector('.providers-export-pdf')?.addEventListener('click', imprimirProveedores);
+
     const inputBusqueda = document.getElementById('busqueda_proveedor');
     if (inputBusqueda) {
         const debounceFn = (typeof debounce === 'function') 
@@ -374,6 +376,145 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+async function imprimirProveedores() {
+    const ventanaImpresion = window.open('', '_blank');
+    if (!ventanaImpresion) {
+        await Modal.error('No se pudo abrir la impresión', 'Permite las ventanas emergentes para imprimir el reporte.');
+        return;
+    }
+
+    ventanaImpresion.document.write('<!doctype html><html lang="es"><title>Preparando reporte...</title><body style="font:16px Arial,sans-serif;padding:32px">Preparando reporte de proveedores...</body></html>');
+    ventanaImpresion.document.close();
+
+    try {
+        const busqueda = document.getElementById('busqueda_proveedor')?.value.trim() || '';
+        const porPaginaReporte = 100;
+        const proveedores = [];
+        let paginas = 1;
+
+        for (let pagina = 1; pagina <= paginas; pagina++) {
+            const params = new URLSearchParams({
+                search: busqueda,
+                page: String(pagina),
+                limit: String(porPaginaReporte)
+            });
+            const respuesta = await fetch(BASE_URL + '/api/proveedores?' + params.toString(), {
+                headers: { 'Accept': 'application/json' }
+            });
+            const resultado = await respuesta.json();
+
+            if (!respuesta.ok || !resultado.status) {
+                throw new Error(resultado.message || 'No se pudieron cargar los proveedores.');
+            }
+
+            proveedores.push(...(Array.isArray(resultado.data) ? resultado.data : []));
+            paginas = Math.max(1, Number(resultado.paginas) || 1);
+        }
+
+        const html = crearReporteProveedores(proveedores, busqueda);
+        let impresionIniciada = false;
+        const abrirDialogoImpresion = () => {
+            if (impresionIniciada || ventanaImpresion.closed) return;
+            impresionIniciada = true;
+            ventanaImpresion.focus();
+            ventanaImpresion.print();
+        };
+        ventanaImpresion.addEventListener('load', abrirDialogoImpresion, { once: true });
+        ventanaImpresion.document.open();
+        ventanaImpresion.document.write(html);
+        ventanaImpresion.document.close();
+        window.setTimeout(abrirDialogoImpresion, 500);
+    } catch (error) {
+        ventanaImpresion.close();
+        await Modal.error('Error al preparar el reporte', error.message);
+    }
+}
+
+function crearReporteProveedores(proveedores, busqueda) {
+    const escapar = value => String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    })[character]);
+    const fechaEmision = new Intl.DateTimeFormat('es-PE', {
+        dateStyle: 'long',
+        timeZone: 'America/Lima'
+    }).format(new Date());
+    const paginas = [];
+    const grupos = [];
+
+    for (let indice = 0; indice < proveedores.length; indice += 10) {
+        grupos.push(proveedores.slice(indice, indice + 10));
+    }
+    if (!grupos.length) grupos.push([]);
+
+    grupos.forEach((grupo, indicePagina) => {
+        const filas = grupo.length
+            ? grupo.map(proveedor => `
+                <tr>
+                    <td>${escapar(proveedor.nombre_tipo_documento)}</td>
+                    <td>${escapar(proveedor.numero_documento)}</td>
+                    <td>${escapar(proveedor.razon_social)}</td>
+                    <td>${escapar(proveedor.telefono)}</td>
+                    <td>${Number(proveedor.estado) === 1 ? 'Activo' : 'Inactivo'}</td>
+                </tr>`).join('')
+            : '<tr><td colspan="5" class="empty">No se encontraron proveedores para esta búsqueda.</td></tr>';
+
+        paginas.push(`
+            <section class="report-page">
+                <header>
+                    <h1>Listado de proveedores</h1>
+                    <p>Fecha de emisión: ${escapar(fechaEmision)}</p>
+                    ${busqueda ? `<p>Filtro aplicado: ${escapar(busqueda)}</p>` : ''}
+                </header>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tipo de documento</th>
+                            <th>Número de documento</th>
+                            <th>Nombre o razón social</th>
+                            <th>Teléfono</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>${filas}</tbody>
+                </table>
+                <footer>Página ${indicePagina + 1} de ${grupos.length}</footer>
+            </section>`);
+    });
+
+    return `<!doctype html>
+        <html lang="es">
+        <head>
+            <meta charset="utf-8">
+            <title>Listado de proveedores</title>
+            <style>
+                @page { size: A4 portrait; margin: 16mm; }
+                * { box-sizing: border-box; }
+                body { margin: 0; color: #172033; font: 12px Arial, sans-serif; }
+                .report-page { position: relative; min-height: 265mm; padding-bottom: 14mm; break-after: page; page-break-after: always; }
+                .report-page:last-child { break-after: auto; page-break-after: auto; }
+                header { margin-bottom: 22px; border-bottom: 2px solid #d4af37; padding-bottom: 10px; }
+                h1 { margin: 0 0 8px; color: #12304a; font-size: 20px; }
+                header p { margin: 3px 0; color: #526174; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                th, td { border: 1px solid #cbd5e1; padding: 9px 8px; text-align: left; overflow-wrap: anywhere; }
+                th { background: #eef2f6; color: #26364a; }
+                tr { break-inside: avoid; page-break-inside: avoid; }
+                .empty { padding: 18px; color: #64748b; text-align: center; }
+                footer { position: absolute; right: 0; bottom: 0; left: 0; padding-top: 8px; border-top: 1px solid #cbd5e1; color: #64748b; text-align: right; }
+                @media screen {
+                    body { background: #e8edf2; padding: 24px; }
+                    .report-page { width: 210mm; min-height: 297mm; margin: 0 auto 20px; padding: 16mm; background: #fff; box-shadow: 0 2px 10px #0002; }
+                }
+            </style>
+        </head>
+        <body>${paginas.join('')}</body>
+        </html>`;
+}
+
 let paginaActual = 1;
 let busquedaActual = '';
 const porPagina = 10;
@@ -454,78 +595,75 @@ async function cargarProveedores(pagina = paginaActual, busqueda = busquedaActua
 }
 
 function renderizarPaginacion(info) {
-    const pagInfoSpan = document.querySelector('.pag-info');
-    const pagBtnsDiv = document.querySelector('.pag-btns');
+    const paginacion = document.getElementById('paginacion_proveedores');
+    if (!paginacion) return;
 
-    if (!pagBtnsDiv) return;
-
+    paginacion.textContent = '';
     const { page, total_pages, total, per_page } = info;
+    paginacion.hidden = false;
 
-    if (pagInfoSpan) {
-        if (total === 0) {
-            pagInfoSpan.textContent = 'Mostrando 0 proveedores';
-        } else {
-            const inicio = (page - 1) * per_page + 1;
-            const fin = Math.min(page * per_page, total);
+    const pagInfo = document.createElement('span');
+    pagInfo.className = 'pag-info';
+    const inicio = total === 0 ? 0 : (page - 1) * per_page + 1;
+    const fin = Math.min(page * per_page, total);
+    pagInfo.textContent = `Mostrando ${inicio}-${fin} de ${total} proveedores`;
+    paginacion.appendChild(pagInfo);
 
-            pagInfoSpan.textContent =
-                `Mostrando ${inicio}-${fin} de ${total} proveedores`;
-        }
-    }
+    const pagBtns = document.createElement('div');
+    pagBtns.className = 'pag-btns';
 
-    pagBtnsDiv.innerHTML = '';
-
-    // Botón Anterior
     const btnPrev = document.createElement('button');
     btnPrev.type = 'button';
     btnPrev.className = 'pag-btn';
     btnPrev.setAttribute('aria-label', 'Página anterior');
     btnPrev.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
     btnPrev.disabled = page <= 1;
+    btnPrev.addEventListener('click', () => cargarProveedores(page - 1, busquedaActual));
+    pagBtns.appendChild(btnPrev);
 
-    btnPrev.addEventListener('click', () => {
-        if (page > 1) {
-            cargarProveedores(page - 1, busquedaActual);
+    calcularRangoPaginacion(page, total_pages).forEach(pagina => {
+        if (pagina === '...') {
+            const puntos = document.createElement('span');
+            puntos.className = 'pag-dots';
+            puntos.textContent = '...';
+            pagBtns.appendChild(puntos);
+            return;
         }
+
+        const btnPagina = document.createElement('button');
+        btnPagina.type = 'button';
+        btnPagina.className = 'pag-btn' + (pagina === page ? ' pag-active' : '');
+        btnPagina.textContent = pagina;
+        if (pagina === page) {
+            btnPagina.setAttribute('aria-current', 'page');
+        } else {
+            btnPagina.addEventListener('click', () => cargarProveedores(pagina, busquedaActual));
+        }
+        pagBtns.appendChild(btnPagina);
     });
 
-    pagBtnsDiv.appendChild(btnPrev);
-
-    // Botones numéricos
-    for (let p = 1; p <= total_pages; p++) {
-        const btnPage = document.createElement('button');
-
-        btnPage.type = 'button';
-        btnPage.className =
-            'pag-btn' + (p === page ? ' pag-active' : '');
-        btnPage.textContent = p;
-
-        if (p === page) {
-            btnPage.setAttribute('aria-current', 'page');
-        } else {
-            btnPage.addEventListener('click', () => {
-                cargarProveedores(p, busquedaActual);
-            });
-        }
-
-        pagBtnsDiv.appendChild(btnPage);
-    }
-
-    // Botón Siguiente
     const btnNext = document.createElement('button');
     btnNext.type = 'button';
     btnNext.className = 'pag-btn';
     btnNext.setAttribute('aria-label', 'Página siguiente');
     btnNext.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
     btnNext.disabled = page >= total_pages;
+    btnNext.addEventListener('click', () => cargarProveedores(page + 1, busquedaActual));
+    pagBtns.appendChild(btnNext);
+    paginacion.appendChild(pagBtns);
+}
 
-    btnNext.addEventListener('click', () => {
-        if (page < total_pages) {
-            cargarProveedores(page + 1, busquedaActual);
-        }
-    });
+function calcularRangoPaginacion(actual, total) {
+    if (total <= 7) return Array.from({ length: total }, (_, indice) => indice + 1);
 
-    pagBtnsDiv.appendChild(btnNext);
+    const rango = [1];
+    if (actual > 3) rango.push('...');
+    for (let pagina = Math.max(2, actual - 1); pagina <= Math.min(total - 1, actual + 1); pagina++) {
+        rango.push(pagina);
+    }
+    if (actual < total - 2) rango.push('...');
+    rango.push(total);
+    return rango;
 }
 
 async function eliminarProveedor(id) {
