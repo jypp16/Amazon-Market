@@ -7,25 +7,41 @@
             <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
             <span aria-current="page">Historial de compras</span>
         </nav>
-        <?php if (can('compras.crear')): ?>
-        <a href="<?= BASE_URL ?>/Compra/registrar" class="btn btn-gold">
-            <i class="fa-solid fa-cart-plus"></i> Registrar compra
-        </a>
-        <?php endif; ?>
+        <div class="purchase-history-actions">
+            <?php if (can('compras.crear')): ?>
+            <a href="<?= BASE_URL ?>/Compra/registrar" class="btn btn-gold">
+                <i class="fa-solid fa-cart-plus"></i> Registrar compra
+            </a>
+            <?php endif; ?>
+            <button type="button" class="providers-export-btn providers-export-pdf" aria-label="Exportar historial de compras a PDF" aria-pressed="false" title="Exportar a PDF">
+                <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                <span>Exportar PDF</span>
+            </button>
+            <button type="button" class="providers-export-btn providers-export-excel" aria-label="Exportar historial de compras a Excel" aria-pressed="false" title="Exportar a Excel">
+                <i class="fa-solid fa-file-excel" aria-hidden="true"></i>
+                <span>Exportar Excel</span>
+            </button>
+        </div>
     </header>
 
     <form class="purchase-filters" method="get" action="<?= BASE_URL ?>/Compra">
         <input type="hidden" name="url" value="Compra">
         <div class="purchase-filter-field purchase-filter-provider">
-            <label for="filtro_proveedor_compra">Proveedor</label>
-            <select id="filtro_proveedor_compra" name="proveedor">
+            <label for="busqueda_proveedor_compra">Proveedor</label>
+            <div class="purchase-provider-combobox">
+                <input type="search" id="busqueda_proveedor_compra" placeholder="Buscar proveedor..."
+                    role="combobox" aria-autocomplete="list" aria-expanded="false"
+                    aria-controls="opciones_proveedor_compra" autocomplete="off">
+                <div id="opciones_proveedor_compra" class="purchase-provider-options" role="listbox" hidden></div>
+                <select id="filtro_proveedor_compra" name="proveedor" class="visually-hidden" tabindex="-1" aria-hidden="true">
                 <option value="">Todos los proveedores</option>
                 <?php foreach ($data['proveedores'] as $proveedor): ?>
                 <option value="<?= (int)$proveedor['id_proveedor'] ?>">
                     <?= e($proveedor['razon_social']) ?>
                 </option>
                 <?php endforeach; ?>
-            </select>
+                </select>
+            </div>
         </div>
         <div class="purchase-filter-field">
             <label for="fecha_desde_compra">Desde (recepción)</label>

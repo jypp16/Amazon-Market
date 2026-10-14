@@ -143,15 +143,15 @@
                 <p><?= $esCorreccion
                     ? 'Al confirmar se actualiza la compra y se registra el efecto de inventario y la auditoría. Si algo falla, no se aplica ningún cambio.'
                     : 'Al confirmar se guardan juntos la compra, el aumento de stock y el registro en el Kardex. Si algo falla, no se guarda nada y puedes corregirlo.' ?></p>
-                <div class="purchase-confirm-actions">
-                    <button type="submit" id="compra_confirmar" class="btn btn-gold" disabled>
-                        <i class="fa-solid fa-circle-check"></i> <?= $esCorreccion ? 'Guardar corrección' : 'Confirmar compra' ?>
-                    </button>
-                    <a href="<?= $esCorreccion
-                        ? BASE_URL . '/Compra/detalle/' . (int)$data['id_compra_correccion']
-                        : BASE_URL . '/Compra' ?>" class="btn btn-secondary">Cancelar</a>
-                </div>
             </section>
+        </div>
+        <div class="purchase-confirm-actions">
+            <button type="submit" id="compra_confirmar" class="btn btn-gold" disabled>
+                <i class="fa-solid fa-circle-check"></i> <?= $esCorreccion ? 'Guardar corrección' : 'Confirmar compra' ?>
+            </button>
+            <a href="<?= $esCorreccion
+                ? BASE_URL . '/Compra/detalle/' . (int)$data['id_compra_correccion']
+                : BASE_URL . '/Compra' ?>" class="btn btn-secondary">Cancelar</a>
         </div>
     </form>
 </section>

@@ -38,6 +38,175 @@ document.addEventListener('DOMContentLoaded', () => {
         return nodo;
     }
 
+    let activeSearchableSelect = null;
+    let searchableSelectCount = 0;
+
+    function cerrarSelectBuscable(control, restaurarSeleccion = false) {
+        control.options.hidden = true;
+        control.input.setAttribute('aria-expanded', 'false');
+        control.input.removeAttribute('aria-activedescendant');
+        if (restaurarSeleccion) {
+            const selected = control.select.selectedOptions[0];
+            control.input.value = control.select.value && selected ? selected.textContent.trim() : '';
+        }
+        if (activeSearchableSelect === control) activeSearchableSelect = null;
+    }
+
+    function posicionarOpciones(control) {
+        const rect = control.input.getBoundingClientRect();
+        const espacioAbajo = window.innerHeight - rect.bottom - 8;
+        const espacioArriba = rect.top - 8;
+        const mostrarArriba = espacioAbajo < 180 && espacioArriba > espacioAbajo;
+        const espacioDisponible = Math.max(120, mostrarArriba ? espacioArriba : espacioAbajo);
+        control.options.style.left = rect.left + 'px';
+        control.options.style.width = rect.width + 'px';
+        control.options.style.maxHeight = Math.min(240, espacioDisponible) + 'px';
+        control.options.style.top = (mostrarArriba
+            ? rect.top - Math.min(control.options.offsetHeight, 240, espacioDisponible) - 4
+            : rect.bottom + 4) + 'px';
+    }
+
+    document.addEventListener('pointerdown', event => {
+        const control = activeSearchableSelect;
+        if (control && !control.wrapper.contains(event.target) && !control.options.contains(event.target)) {
+            cerrarSelectBuscable(control, true);
+        }
+    });
+    window.addEventListener('scroll', () => {
+        if (activeSearchableSelect) posicionarOpciones(activeSearchableSelect);
+    }, true);
+    window.addEventListener('resize', () => {
+        if (activeSearchableSelect) posicionarOpciones(activeSearchableSelect);
+    });
+
+    function hacerSelectBuscable(select, placeholder) {
+        const wrapper = elemento('div', 'purchase-select-search');
+        const input = elemento('input');
+        const options = elemento('div', 'purchase-select-options');
+        const selectId = select.id || 'compra_selector_' + (++searchableSelectCount);
+        const inputId = selectId + '_busqueda';
+        const optionId = selectId + '_opcion_';
+        const label = Array.from(document.querySelectorAll('label[for]'))
+            .find(item => item.htmlFor === select.id);
+        const ariaLabel = select.getAttribute('aria-label') || (label ? label.textContent.trim() : placeholder);
+        let indiceActivo = -1;
+
+        input.type = 'search';
+        input.id = inputId;
+        input.placeholder = placeholder;
+        input.setAttribute('aria-label', ariaLabel);
+        input.setAttribute('role', 'combobox');
+        input.setAttribute('aria-autocomplete', 'list');
+        input.setAttribute('aria-expanded', 'false');
+        input.setAttribute('aria-controls', optionId + 'lista');
+        input.autocomplete = 'off';
+        options.id = optionId + 'lista';
+        options.setAttribute('role', 'listbox');
+        options.hidden = true;
+        select.classList.add('visually-hidden');
+        select.tabIndex = -1;
+        select.setAttribute('aria-hidden', 'true');
+
+        select.parentNode.insertBefore(wrapper, select);
+        wrapper.append(input, select);
+        document.body.appendChild(options);
+        if (label) label.htmlFor = inputId;
+
+        const control = { select, wrapper, input, options };
+
+        function renderizarOpciones(query = '') {
+            options.textContent = '';
+            indiceActivo = -1;
+            const normalizar = value => value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const termino = normalizar(query.trim());
+            const resultados = Array.from(select.options)
+                .filter(option => option.value !== '' && normalizar(option.textContent).includes(termino))
+                .slice(0, 10);
+
+            resultados.forEach(option => {
+                const button = elemento('button', 'purchase-select-option', option.textContent.trim());
+                button.type = 'button';
+                button.id = optionId + options.children.length;
+                button.dataset.value = option.value;
+                button.setAttribute('role', 'option');
+                button.setAttribute('aria-selected', option.value === select.value ? 'true' : 'false');
+                button.addEventListener('click', () => {
+                    select.value = button.dataset.value;
+                    input.value = option.textContent.trim();
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    cerrarSelectBuscable(control);
+                });
+                options.appendChild(button);
+            });
+
+            if (!resultados.length) {
+                options.appendChild(elemento('div', 'purchase-select-empty', 'No se encontraron opciones.'));
+            }
+            options.hidden = false;
+            input.setAttribute('aria-expanded', 'true');
+            activeSearchableSelect = control;
+            posicionarOpciones(control);
+        }
+
+        function activarOpcion(index) {
+            const results = Array.from(options.querySelectorAll('[role="option"]'));
+            if (!results.length) return;
+            indiceActivo = (index + results.length) % results.length;
+            results.forEach((option, optionIndex) => {
+                option.classList.toggle('is-active', optionIndex === indiceActivo);
+            });
+            input.setAttribute('aria-activedescendant', results[indiceActivo].id);
+        }
+
+        input.addEventListener('focus', () => {
+            if (activeSearchableSelect && activeSearchableSelect !== control) {
+                cerrarSelectBuscable(activeSearchableSelect, true);
+            }
+            input.value = '';
+            renderizarOpciones();
+        });
+        input.addEventListener('input', () => {
+            if (select.value) {
+                select.value = '';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            renderizarOpciones(input.value);
+        });
+        input.addEventListener('keydown', event => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (options.hidden) renderizarOpciones(input.value);
+                const total = options.querySelectorAll('[role="option"]').length;
+                const siguienteIndice = indiceActivo < 0
+                    ? (event.key === 'ArrowDown' ? 0 : total - 1)
+                    : indiceActivo + (event.key === 'ArrowDown' ? 1 : -1);
+                activarOpcion(siguienteIndice);
+            } else if (event.key === 'Enter' && !options.hidden) {
+                event.preventDefault();
+                const results = options.querySelectorAll('[role="option"]');
+                if (results.length) results[indiceActivo < 0 ? 0 : indiceActivo].click();
+            } else if (event.key === 'Escape' && !options.hidden) {
+                event.preventDefault();
+                cerrarSelectBuscable(control, true);
+            }
+        });
+        input.addEventListener('blur', () => {
+            window.setTimeout(() => {
+                if (activeSearchableSelect === control && !options.matches(':hover')) {
+                    cerrarSelectBuscable(control, true);
+                }
+            }, 0);
+        });
+        options.addEventListener('mousedown', event => event.preventDefault());
+        select.addEventListener('change', () => {
+            if (select.value) {
+                input.value = select.selectedOptions[0].textContent.trim();
+            } else if (document.activeElement !== input) {
+                input.value = '';
+            }
+        });
+    }
+
     function crearSelector(ariaLabel, items, idKey, labelFn, placeholder) {
         const select = elemento('select');
         select.setAttribute('aria-label', ariaLabel);
@@ -46,6 +215,11 @@ document.addEventListener('DOMContentLoaded', () => {
         items.forEach(item => select.add(new Option(labelFn(item), item[idKey])));
         return select;
     }
+
+    hacerSelectBuscable(
+        document.getElementById('compra_proveedor'),
+        'Selecciona o busca proveedor...'
+    );
 
     function crearEntrada(type, ariaLabel, attributes = {}) {
         const input = elemento('input');
@@ -90,6 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         productSelect.dataset.field = 'producto';
         productCell.appendChild(productSelect);
+        hacerSelectBuscable(productSelect, 'Busca producto...');
         row.appendChild(productCell);
 
         const presentationCell = elemento('td');
@@ -312,6 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 compra.id_proveedor,
                 [compra.razon_social, compra.numero_documento].filter(Boolean).join(' — ')
             );
+            document.getElementById('compra_proveedor').dispatchEvent(new Event('change', { bubbles: true }));
             asegurarOpcion(document.getElementById('compra_tipo_comprobante'),
                 compra.id_tipo_comprobante, compra.tipo_comprobante);
             document.getElementById('compra_serie').value = compra.serie || '';
@@ -413,9 +589,134 @@ function inicializarHistorialCompras() {
     if (!formulario || !tbody) return;
 
     const paginacion = document.getElementById('paginacion_compras');
+    const proveedorSelect = document.getElementById('filtro_proveedor_compra');
+    const proveedorBusqueda = document.getElementById('busqueda_proveedor_compra');
+    const proveedorOpciones = document.getElementById('opciones_proveedor_compra');
     const limit = 10;
     let pagina = 1;
     let paginas = 1;
+
+    if (proveedorSelect && proveedorBusqueda && proveedorOpciones) {
+        const proveedorWrapper = proveedorBusqueda.parentElement;
+        let indiceActivo = -1;
+
+        function normalizarBusqueda(value) {
+            return value.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        }
+
+        function cerrarOpciones(restaurarSeleccion = false) {
+            proveedorOpciones.hidden = true;
+            proveedorBusqueda.setAttribute('aria-expanded', 'false');
+            proveedorBusqueda.removeAttribute('aria-activedescendant');
+            indiceActivo = -1;
+            if (restaurarSeleccion) {
+                proveedorBusqueda.value = proveedorSelect.selectedOptions[0]?.textContent.trim() || 'Todos los proveedores';
+            }
+        }
+
+        function seleccionarProveedor(option) {
+            proveedorSelect.value = option.dataset.value;
+            proveedorBusqueda.value = option.textContent;
+            proveedorSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            cerrarOpciones();
+        }
+
+        function renderizarOpciones(query = '') {
+            proveedorOpciones.textContent = '';
+            indiceActivo = -1;
+            const busqueda = normalizarBusqueda(query.trim());
+            const opcionesProveedor = Array.from(proveedorSelect.options).filter(option => option.value !== '');
+            const coincidencias = opcionesProveedor
+                .filter(option => normalizarBusqueda(option.textContent).includes(busqueda))
+                .slice(0, 10);
+
+            if (!busqueda) {
+                const todos = document.createElement('button');
+                todos.type = 'button';
+                todos.className = 'purchase-provider-option';
+                todos.setAttribute('role', 'option');
+                todos.setAttribute('aria-selected', proveedorSelect.value === '' ? 'true' : 'false');
+                todos.dataset.value = '';
+                todos.textContent = 'Todos los proveedores';
+                todos.addEventListener('click', () => seleccionarProveedor(todos));
+                proveedorOpciones.appendChild(todos);
+            }
+
+            coincidencias.forEach(option => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'purchase-provider-option';
+                button.setAttribute('role', 'option');
+                button.setAttribute('aria-selected', option.value === proveedorSelect.value ? 'true' : 'false');
+                button.dataset.value = option.value;
+                button.textContent = option.textContent.trim();
+                button.addEventListener('click', () => seleccionarProveedor(button));
+                proveedorOpciones.appendChild(button);
+            });
+
+            if (!coincidencias.length && busqueda) {
+                const empty = document.createElement('div');
+                empty.className = 'purchase-provider-empty';
+                empty.textContent = 'No se encontraron proveedores.';
+                proveedorOpciones.appendChild(empty);
+            }
+
+            proveedorOpciones.hidden = false;
+            proveedorBusqueda.setAttribute('aria-expanded', 'true');
+        }
+
+        function activarOpcion(index) {
+            const opciones = Array.from(proveedorOpciones.querySelectorAll('[role="option"]'));
+            if (!opciones.length) return;
+            indiceActivo = (index + opciones.length) % opciones.length;
+            opciones.forEach((option, optionIndex) => {
+                option.classList.toggle('is-active', optionIndex === indiceActivo);
+            });
+            proveedorBusqueda.setAttribute('aria-activedescendant', 'opcion_proveedor_compra_' + indiceActivo);
+            opciones[indiceActivo].id = 'opcion_proveedor_compra_' + indiceActivo;
+        }
+
+        proveedorBusqueda.value = 'Todos los proveedores';
+        proveedorBusqueda.addEventListener('focus', () => {
+            proveedorBusqueda.value = '';
+            renderizarOpciones();
+        });
+        proveedorBusqueda.addEventListener('input', () => {
+            proveedorSelect.value = '';
+            renderizarOpciones(proveedorBusqueda.value);
+        });
+        proveedorBusqueda.addEventListener('keydown', event => {
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                if (proveedorOpciones.hidden) renderizarOpciones(proveedorBusqueda.value);
+                activarOpcion(indiceActivo + 1);
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (proveedorOpciones.hidden) renderizarOpciones(proveedorBusqueda.value);
+                activarOpcion(indiceActivo <= 0
+                    ? proveedorOpciones.querySelectorAll('[role="option"]').length - 1
+                    : indiceActivo - 1);
+            } else if (event.key === 'Enter' && !proveedorOpciones.hidden) {
+                event.preventDefault();
+                const opciones = proveedorOpciones.querySelectorAll('[role="option"]');
+                if (opciones.length) seleccionarProveedor(opciones[indiceActivo < 0 ? 0 : indiceActivo]);
+            } else if (event.key === 'Escape' && !proveedorOpciones.hidden) {
+                event.preventDefault();
+                cerrarOpciones(true);
+            }
+        });
+        proveedorBusqueda.addEventListener('blur', () => {
+            window.setTimeout(() => {
+                if (!proveedorWrapper.contains(document.activeElement)) {
+                    cerrarOpciones(true);
+                }
+            }, 0);
+        });
+        proveedorOpciones.addEventListener('mousedown', event => event.preventDefault());
+        document.addEventListener('click', event => {
+            if (!proveedorWrapper.contains(event.target)) cerrarOpciones(true);
+        });
+    }
 
     function formatoFecha(value) {
         if (!value) return '—';
