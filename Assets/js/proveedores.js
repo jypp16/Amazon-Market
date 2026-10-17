@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (document.getElementById('tabla_proveedores')) {
         document.querySelector('.providers-export-pdf')?.addEventListener('click', imprimirProveedores);
+        inicializarExportacionProveedores();
     }
 
     const inputBusqueda = document.getElementById('busqueda_proveedor');
@@ -19,9 +20,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         inputBusqueda.addEventListener('input', debounceFn((e) => {
             const query = e.target.value.trim();
-            cargarProveedores(1, query);
+            cargarProveedores(1, query, document.getElementById('estado_proveedor')?.value || 'todos');
         }, 350));
     }
+
+    document.getElementById('estado_proveedor')?.addEventListener('change', event => {
+        cargarProveedores(1, inputBusqueda?.value.trim() || '', event.target.value);
+    });
 
     const botonCrear = document.getElementById('btn_crear_proveedor');
 
@@ -378,6 +383,93 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+function inicializarExportacionProveedores() {
+    const boton = document.getElementById('proveedores_exportar_excel');
+    const modal = document.getElementById('proveedores_generando_excel');
+    const tabla = document.getElementById('tabla_proveedores');
+    if (!boton || !modal || !tabla) return;
+    let generando = false;
+    let cancelar = null;
+    modal.addEventListener('cancel', evento => { evento.preventDefault(); cancelar?.(); });
+    document.getElementById('proveedores_cancelar_excel')?.addEventListener('click', () => cancelar?.());
+    boton.addEventListener('click', async () => {
+        if (generando) return;
+        const aplicados = tabla.dataset.filtrosAplicados ? JSON.parse(tabla.dataset.filtrosAplicados) : null;
+        if (!aplicados || tabla.getAttribute('aria-busy') === 'true'
+            || aplicados.search !== document.getElementById('busqueda_proveedor').value.trim()
+            || aplicados.estado !== document.getElementById('estado_proveedor').value) {
+            Modal.error('No se pudo generar el reporte', 'Espera a que termine de cargar el listado con los filtros seleccionados antes de exportar.');
+            return;
+        }
+        const parametros = new URLSearchParams(aplicados);
+        parametros.set('tipo', 'proveedores');
+        generando = true;
+        const controles = Array.from(document.querySelectorAll('.providers-actions button, #busqueda_proveedor, #estado_proveedor, #paginacion_proveedores button'));
+        const deshabilitados = controles.map(control => control.disabled);
+        controles.forEach(control => { control.disabled = true; });
+        boton.setAttribute('aria-busy', 'true');
+        const peticion = new AbortController();
+        let cancelado = false;
+        let agotado = false;
+        let archivoUrl = null;
+        let mensajeError = null;
+        cancelar = () => { cancelado = true; peticion.abort(); };
+        const espera = window.setTimeout(() => { agotado = true; peticion.abort(); }, 120000);
+        try {
+            modal.showModal();
+            const base = typeof API_URL !== 'undefined' ? API_URL : BASE_URL + '/api';
+            const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            const respuesta = await fetch(base + '/reportes/exportar-excel?' + parametros.toString(), {
+                method: 'GET', credentials: 'same-origin', headers: { Accept: mime }, signal: peticion.signal
+            });
+            const tipo = (respuesta.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+            if (!respuesta.ok || tipo !== mime || respuesta.redirected) {
+                let mensaje = respuesta.status === 401 || respuesta.redirected || tipo === 'text/html'
+                    ? 'La sesión puede haber vencido. Actualiza la página e inicia sesión nuevamente.'
+                    : 'No se pudo generar el reporte. Reduce la búsqueda con los filtros e intenta nuevamente.';
+                if (tipo === 'application/json') {
+                    const error = await respuesta.json().catch(() => null);
+                    if (typeof error?.message === 'string') mensaje = error.message;
+                }
+                throw new Error(mensaje);
+            }
+            const archivo = await respuesta.blob();
+            const firma = new Uint8Array(await archivo.slice(0, 4).arrayBuffer());
+            const directorio = await archivo.slice(-65557).text();
+            if (firma.toString() !== '80,75,3,4' || !directorio.includes('[Content_Types].xml') || !directorio.includes('xl/workbook.xml')) {
+                throw new Error('El servidor no devolvió un archivo Excel válido. Intenta nuevamente.');
+            }
+            if (peticion.signal.aborted) throw new DOMException('Solicitud cancelada', 'AbortError');
+            archivoUrl = URL.createObjectURL(archivo);
+            const recurso = archivoUrl;
+            const enlace = document.createElement('a');
+            enlace.href = archivoUrl;
+            enlace.download = (respuesta.headers.get('content-disposition') || '').match(/filename="(Reporte_proveedores_[\d_-]+\.xlsx)"/)?.[1] || 'Reporte_proveedores.xlsx';
+            document.body.appendChild(enlace);
+            try { enlace.click(); } finally { enlace.remove(); }
+            // El navegador necesita el Blob hasta iniciar el guardado.
+            window.setTimeout(() => URL.revokeObjectURL(recurso), 60000);
+            archivoUrl = null;
+        } catch (error) {
+            if (archivoUrl) URL.revokeObjectURL(archivoUrl);
+            if (!cancelado) mensajeError = agotado
+                ? 'La generación superó el tiempo de espera. Reduce la búsqueda con los filtros e intenta nuevamente.'
+                : error instanceof TypeError
+                    ? 'No se pudo conectar con el servidor. Revisa tu conexión y vuelve a intentarlo.'
+                    : error.message;
+        } finally {
+            window.clearTimeout(espera);
+            if (modal.open) modal.close();
+            controles.forEach((control, indice) => { control.disabled = deshabilitados[indice]; });
+            boton.setAttribute('aria-busy', 'false');
+            generando = false;
+            cancelar = null;
+            boton.focus();
+        }
+        if (mensajeError) Modal.error('No se pudo generar el reporte', mensajeError);
+    });
+}
+
 async function imprimirProveedores() {
     const ventanaImpresion = window.open('', '_blank');
     if (!ventanaImpresion) {
@@ -519,80 +611,94 @@ function crearReporteProveedores(proveedores, busqueda) {
 
 let paginaActual = 1;
 let busquedaActual = '';
+let estadoActual = 'todos';
+let solicitudProveedores = 0;
+let cargaProveedores = null;
 const porPagina = 10;
 
-async function cargarProveedores(pagina = paginaActual, busqueda = busquedaActual) {
-    paginaActual = pagina;
-    busquedaActual = busqueda;
-
+async function cargarProveedores(pagina = paginaActual, busqueda = busquedaActual, estado = estadoActual) {
     const tbody = document.getElementById('tabla_proveedores');
     if (!tbody) return;
 
-    try {
-        const params = new URLSearchParams({
-            search: busquedaActual,
-            page: paginaActual,
-            limit: porPagina
-        });
+    const solicitud = ++solicitudProveedores;
+    cargaProveedores?.abort();
+    const controlador = new AbortController();
+    cargaProveedores = controlador;
+    delete tbody.dataset.filtrosAplicados;
+    tbody.setAttribute('aria-busy', 'true');
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Cargando proveedores…</td></tr>';
+    const paginacion = document.getElementById('paginacion_proveedores');
+    if (paginacion) { paginacion.textContent = ''; paginacion.hidden = true; }
 
+    try {
+        const params = new URLSearchParams({ search: busqueda, estado, page: pagina, limit: porPagina });
         const respuesta = await fetch(BASE_URL + '/api/proveedores?' + params.toString(), {
-            headers: { 'Accept': 'application/json' }
+            headers: { 'Accept': 'application/json' },
+            signal: controlador.signal
         });
         const json = await respuesta.json();
-        
-        if (!json.status) throw new Error(json.message);
+        if (solicitud !== solicitudProveedores) return;
+        if (!respuesta.ok || !json.status) throw new Error(json.message || 'No se pudieron cargar los proveedores.');
 
+        paginaActual = json.pagina_actual || 1;
+        busquedaActual = json.filtros.search;
+        estadoActual = json.filtros.estado;
         const proveedores = json.data || [];
+        tbody.textContent = '';
         if (proveedores.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Aún no hay proveedores para mostrar.</td></tr>';
-            renderizarPaginacion({
-                page: 1,
-                total_pages: 1,
-                total: 0,
-                per_page: porPagina
-            });
-            return;
+            tbody.innerHTML = '<tr><td colspan="6" class="table-empty"></td></tr>';
+            tbody.querySelector('td').textContent = busquedaActual || estadoActual !== 'todos'
+                ? 'No se encontraron proveedores con la búsqueda o el estado seleccionado.'
+                : 'Aún no hay proveedores para mostrar.';
         }
-
-        tbody.innerHTML = '';
         proveedores.forEach(prov => {
             const tr = document.createElement('tr');
             tr.dataset.proveedorId = prov.id_proveedor;
             const proveedorActivo = Number(prov.estado) === 1;
-            const estadoBadge = proveedorActivo
-                ? '<span class="proveedor-estado-badge proveedor-estado-activo">Activo</span>'
-                : '<span class="proveedor-estado-badge proveedor-estado-inactivo">Inactivo</span>';
-            tr.innerHTML = `
-                <td>${prov.nombre_tipo_documento}</td>
-                <td>${prov.numero_documento}</td>
-                <td>${prov.razon_social}</td>
-                <td>${prov.telefono}</td>
-                <td>${estadoBadge}</td>
-                <td>
-                    <div class="actions-group">
-                        <button type="button" class="btn btn-edit" title="Editar"><i class="fa-solid fa-pen-to-square"></i></button>
-                        <button type="button" class="btn btn-delete" title="${proveedorActivo ? 'Eliminar' : 'Proveedor inactivo'}" aria-label="${proveedorActivo ? 'Eliminar proveedor' : 'Proveedor inactivo; eliminación deshabilitada'}" ${proveedorActivo ? '' : 'disabled'}>
-                            <i class="fa-solid fa-trash-can"></i>
-                        </button>
-                    </div>
-                </td>
-            `;
-            const btnEliminar = tr.querySelector('.btn-delete');
-            if (btnEliminar) {
-                btnEliminar.addEventListener('click', () => eliminarProveedor(prov.id_proveedor));
-            }
+            // Los campos del proveedor se insertan como texto, nunca como HTML.
+            [prov.nombre_tipo_documento, prov.numero_documento, prov.razon_social, prov.telefono].forEach(valor => {
+                const celda = document.createElement('td');
+                celda.textContent = valor ?? '';
+                tr.appendChild(celda);
+            });
+            const estadoCelda = document.createElement('td');
+            const estadoBadge = document.createElement('span');
+            estadoBadge.className = 'proveedor-estado-badge ' + (proveedorActivo ? 'proveedor-estado-activo' : 'proveedor-estado-inactivo');
+            estadoBadge.textContent = proveedorActivo ? 'Activo' : 'Inactivo';
+            estadoCelda.appendChild(estadoBadge);
+            tr.appendChild(estadoCelda);
+            const acciones = document.createElement('td');
+            acciones.innerHTML = `
+                <div class="actions-group">
+                    <button type="button" class="btn btn-edit" title="Editar"><i class="fa-solid fa-pen-to-square"></i></button>
+                    <button type="button" class="btn btn-delete" title="${proveedorActivo ? 'Eliminar' : 'Proveedor inactivo'}" aria-label="${proveedorActivo ? 'Eliminar proveedor' : 'Proveedor inactivo; eliminación deshabilitada'}" ${proveedorActivo ? '' : 'disabled'}>
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>`;
+            acciones.querySelector('.btn-delete').addEventListener('click', () => eliminarProveedor(prov.id_proveedor));
+            tr.appendChild(acciones);
             tbody.appendChild(tr);
         });
-        
         renderizarPaginacion({
-            page: json.pagina_actual || 1,
+            page: paginaActual,
             total_pages: json.paginas || 1,
             total: json.total || 0,
             per_page: json.por_pagina || porPagina
         });
+        tbody.dataset.filtrosAplicados = JSON.stringify(json.filtros);
     } catch (error) {
+        if (solicitud !== solicitudProveedores || error.name === 'AbortError') return;
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#dc3545; padding:20px;">Error al cargar proveedores: ${error.message}</td></tr>`;
+        tbody.innerHTML = '<tr><td colspan="6" class="table-empty"></td></tr>';
+        const mensaje = error instanceof SyntaxError
+            ? 'El servidor no devolvió una respuesta válida. Actualiza la página e intenta nuevamente.'
+            : error instanceof TypeError ? 'No se pudo conectar con el servidor. Intenta nuevamente.' : error.message;
+        tbody.querySelector('td').textContent = 'Error al cargar proveedores: ' + mensaje;
+    } finally {
+        if (solicitud === solicitudProveedores) {
+            tbody.setAttribute('aria-busy', 'false');
+            cargaProveedores = null;
+        }
     }
 }
 
@@ -620,7 +726,7 @@ function renderizarPaginacion(info) {
     btnPrev.setAttribute('aria-label', 'Página anterior');
     btnPrev.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
     btnPrev.disabled = page <= 1;
-    btnPrev.addEventListener('click', () => cargarProveedores(page - 1, busquedaActual));
+    btnPrev.addEventListener('click', () => cargarProveedores(page - 1, busquedaActual, estadoActual));
     pagBtns.appendChild(btnPrev);
 
     calcularRangoPaginacion(page, total_pages).forEach(pagina => {
@@ -639,7 +745,7 @@ function renderizarPaginacion(info) {
         if (pagina === page) {
             btnPagina.setAttribute('aria-current', 'page');
         } else {
-            btnPagina.addEventListener('click', () => cargarProveedores(pagina, busquedaActual));
+            btnPagina.addEventListener('click', () => cargarProveedores(pagina, busquedaActual, estadoActual));
         }
         pagBtns.appendChild(btnPagina);
     });
@@ -650,7 +756,7 @@ function renderizarPaginacion(info) {
     btnNext.setAttribute('aria-label', 'Página siguiente');
     btnNext.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
     btnNext.disabled = page >= total_pages;
-    btnNext.addEventListener('click', () => cargarProveedores(page + 1, busquedaActual));
+    btnNext.addEventListener('click', () => cargarProveedores(page + 1, busquedaActual, estadoActual));
     pagBtns.appendChild(btnNext);
     paginacion.appendChild(pagBtns);
 }

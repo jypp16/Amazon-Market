@@ -252,6 +252,10 @@ class ReporteApiController extends ApiController {
             $this->exportarExcelCompras($input);
             return;
         }
+        if ($tipo === 'proveedores') {
+            $this->exportarExcelProveedores($input);
+            return;
+        }
         $excelService = new \Services\ExcelService();
 
         switch ($tipo) {
@@ -308,6 +312,31 @@ class ReporteApiController extends ApiController {
         header('Cache-Control: no-cache, must-revalidate');
         readfile($file);
         unlink($file);
+        exit;
+    }
+
+    private function exportarExcelProveedores(array $input): void {
+        $this->requirePermission('proveedores.listar');
+        try {
+            $datos = (new \Services\ProveedorService())->obtenerReporteProveedores($input, (int)$this->authenticatedUserId);
+            $contenido = (new \Services\ExcelService())->generarProveedores($datos);
+        } catch (\InvalidArgumentException $error) {
+            $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 400);
+        } catch (\DomainException $error) {
+            $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
+        } catch (\Throwable $error) {
+            error_log('Excel de proveedores: ' . $error->getMessage());
+            $this->sendJsonResponse(['status' => false, 'message' => 'No se pudo generar el reporte. Reduce la búsqueda con los filtros e intenta nuevamente.'], 500);
+        }
+        $this->responderExcelProveedores($contenido, 'Reporte_proveedores_' . date('Y-m-d_His') . '.xlsx');
+    }
+
+    protected function responderExcelProveedores(string $contenido, string $nombre): void {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store');
+        header('Content-Length: ' . strlen($contenido));
+        echo $contenido;
         exit;
     }
 

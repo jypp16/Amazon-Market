@@ -108,6 +108,83 @@ class ExcelService {
         }
     }
 
+    /** Devuelve el XLSX y limpia sus temporales antes de entregar la respuesta. */
+    public function generarProveedores(array $reporte): string {
+        if (empty($reporte['proveedores'])) throw new \DomainException('No existen proveedores para imprimir');
+        $carpeta = sys_get_temp_dir() . '/proveedores_excel_' . bin2hex(random_bytes(12));
+        if (!mkdir($carpeta, 0700)) throw new \RuntimeException('No se pudo preparar el archivo temporal de proveedores.');
+        $writer = null;
+        $limpiar = static function () use (&$writer, $carpeta): void {
+            try { $writer?->close(); }
+            catch (\Throwable $error) { error_log('Cierre temporal de Excel de proveedores: ' . $error->getMessage()); }
+            finally {
+                $writer = null;
+                if (is_dir($carpeta)) {
+                    (new \OpenSpout\Common\Helper\FileSystemHelper(sys_get_temp_dir()))->deleteFolderRecursively($carpeta);
+                }
+            }
+        };
+        register_shutdown_function($limpiar);
+        try {
+            $opciones = new XLSXOptions();
+            $opciones->setTempFolder($carpeta);
+            $opciones->setPageSetup(new \OpenSpout\Writer\XLSX\Options\PageSetup(\OpenSpout\Writer\XLSX\Options\PageOrientation::LANDSCAPE, \OpenSpout\Writer\XLSX\Options\PaperSize::A4, 0, 1));
+            $anchos = [24, 25, 64, 20, 16];
+            foreach ($anchos as $indice => $ancho) $opciones->setColumnWidth($ancho, $indice + 1);
+            $opciones->DEFAULT_ROW_STYLE = (new Style())->setFontSize(10)->setShouldWrapText()->setCellVerticalAlignment('top');
+            // Clonar antes de abrir evita copiar el identificador de un estilo ya registrado.
+            $normal = clone $opciones->DEFAULT_ROW_STYLE;
+            $documento = (clone $normal)->setFormat('@');
+            $inactivo = (clone $normal)->setBackgroundColor('F1F5F9')->setFontColor('64748B');
+            $documentoInactivo = (clone $inactivo)->setFormat('@');
+            $numero = (clone $normal)->setFormat('#,##0')->setFontBold()->setCellAlignment('right')->setBackgroundColor('F3F4F6');
+            $encabezado = (clone $this->headerStyle)->setShouldWrapText()->setCellVerticalAlignment('top');
+            $writer = new XLSXWriter($opciones);
+            $writer->openToFile($carpeta . '/proveedores.xlsx');
+            $writer->getCurrentSheet()->setName('Proveedores')->setSheetView((new \OpenSpout\Writer\XLSX\Entity\SheetView())->setShowGridLines(false)->setFreezeRow(9));
+            $texto = static fn($valor, ?Style $estilo = null) => new StringCell((string)$valor, $estilo ?? $normal);
+            $fila = static function (array $celdas, array $uniones = []) use ($writer, $opciones, $anchos): void {
+                $hoja = $writer->getCurrentSheet();
+                $anchosFila = $anchos;
+                foreach ($uniones as [$desde, $hasta]) {
+                    $opciones->mergeCells($desde, $hoja->getWrittenRowCount() + 1, $hasta, $hoja->getWrittenRowCount() + 1, $hoja->getIndex());
+                    $anchosFila[$desde] = array_sum(array_slice($anchos, $desde, $hasta - $desde + 1));
+                }
+                $lineas = 1;
+                foreach ($celdas as $indice => $celda) {
+                    $valor = $celda->getValue();
+                    if (!is_string($valor)) continue;
+                    foreach (explode("\n", $valor) as $parrafo) $lineas = max($lineas, (int)ceil(mb_strwidth($parrafo) / ($anchosFila[$indice] * .85)));
+                }
+                $writer->addRow((new Row($celdas))->setHeight(max(24, $lineas * 15 + 8)));
+            };
+            $titulo = static function (string $valor, Style $estilo) use ($fila, $texto): void {
+                $fila([$texto($valor, $estilo), $texto(''), $texto(''), $texto(''), $texto('')], [[0, 4]]);
+            };
+            $meta = $reporte['metadatos'];
+            $titulo($meta['negocio'], (clone $encabezado)->setFontSize(16));
+            $titulo($meta['titulo'], (clone $normal)->setFontBold()->setFontSize(14));
+            foreach (['Búsqueda:' => $meta['busqueda'] === '' ? 'Sin búsqueda' : $meta['busqueda'], 'Estado:' => $meta['estado'], 'Generado por:' => $meta['usuario']] as $etiqueta => $valor) {
+                $fila([$texto($etiqueta, (clone $normal)->setFontBold()), $texto($valor), $texto(''), $texto(''), $texto('')], [[1, 4]]);
+            }
+            $fila([$texto('Fecha de emisión:', (clone $normal)->setFontBold()), Cell::fromValue(new \DateTimeImmutable($meta['fecha_emision'], new \DateTimeZone('America/Lima')), (clone $normal)->setFormat('dd/mm/yyyy hh:mm:ss')), $texto(''), $texto(''), $texto('')], [[1, 4]]);
+            $fila(array_fill(0, 5, $texto('')));
+            $fila(array_map(fn($valor) => $texto($valor, $encabezado), ['Tipo de documento', 'Número de documento', 'Nombre o razón social', 'Teléfono', 'Estado']));
+            foreach ($reporte['proveedores'] as $proveedor) {
+                $activo = (int)$proveedor['estado'] === 1;
+                $estilo = $activo ? $normal : $inactivo;
+                $estiloDocumento = $activo ? $documento : $documentoInactivo;
+                $fila([$texto($proveedor['nombre_tipo_documento'], $estilo), $texto($proveedor['numero_documento'], $estiloDocumento), $texto($proveedor['razon_social'], $estilo), $texto($proveedor['telefono'], $estiloDocumento), $texto($activo ? 'Activo' : 'Inactivo', $estilo)]);
+            }
+            $fila(array_fill(0, 5, $texto('')));
+            $fila([$texto('Total de proveedores:', (clone $normal)->setFontBold()->setBackgroundColor('F3F4F6')), $texto(''), $texto(''), $texto(''), Cell::fromValue(count($reporte['proveedores']), $numero)], [[0, 3]]);
+            $writer->close(); $writer = null;
+            $contenido = file_get_contents($carpeta . '/proveedores.xlsx');
+            if ($contenido === false) throw new \RuntimeException('No se pudo leer el reporte Excel de proveedores.');
+            return $contenido;
+        } finally { $limpiar(); }
+    }
+
     /** Devuelve el XLSX en memoria y elimina su carpeta temporal, también ante errores. */
     public function generarCompras(array $reporte): string {
         if (empty($reporte['compras'])) throw new \DomainException('No hay compras registradas en el periodo o filtro seleccionado para imprimir');

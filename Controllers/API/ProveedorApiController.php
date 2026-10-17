@@ -24,11 +24,12 @@ class ProveedorApiController extends ApiController {
                 $proveedor = $this->proveedorService->obtenerProveedor((int)$id);
                 $this->sendJsonResponse(['status' => true, 'message' => 'Proveedor encontrado', 'data' => $proveedor], 200);
             } else {
-                $busqueda = trim($_GET['search'] ?? '');
+                $busqueda = $_GET['search'] ?? '';
+                $estado = $_GET['estado'] ?? 'todos';
                 $pagina = max(1, (int)($_GET['page'] ?? 1));
                 $porPagina = max(1, (int)($_GET['limit'] ?? 10));
 
-                $resultado = $this->proveedorService->obtenerProveedoresPaginado($busqueda, $pagina, $porPagina);
+                $resultado = $this->proveedorService->obtenerProveedoresPaginado($busqueda, $pagina, $porPagina, $estado);
                 $this->sendJsonResponse([
                     'status' => true,
                     'message' => 'Lista de proveedores',
@@ -36,7 +37,8 @@ class ProveedorApiController extends ApiController {
                     'total' => $resultado['total'],
                     'paginas' => $resultado['paginas'],
                     'pagina_actual' => $resultado['pagina_actual'],
-                    'por_pagina' => $resultado['por_pagina']
+                    'por_pagina' => $resultado['por_pagina'],
+                    'filtros' => $resultado['filtros']
                 ], 200);
             }
         } catch (\Exception $e) {

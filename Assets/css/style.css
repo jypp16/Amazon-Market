@@ -342,12 +342,19 @@ button, select, input, textarea { font-family: inherit; }
 }
 .table-container-header h3 { font-size: 18px; font-weight: 700; color: var(--primary-color); display: flex; align-items: center; gap: 8px; }
 .table-container-header h3 i { color: var(--accent-gold); }
+.main-content:has(.providers-header) { min-width: 0; }
 .providers-header { gap: 16px; }
+#paginacion_proveedores[hidden] { display: none; }
 .providers-heading-group,
 .providers-actions { display: flex; align-items: center; }
 .providers-heading-group { flex: 1 1 auto; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 8px; }
 .providers-actions { flex: 0 0 auto; gap: 8px; }
 .providers-heading-group .search-input { width: min(260px, 30vw); }
+.providers-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.providers-state-filter { display: flex; align-items: center; gap: 8px; }
+.providers-state-filter label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.providers-state-filter .filter-select { min-height: 38px; padding-left: 12px; }
+.providers-state-filter .filter-select:focus-visible { outline: 3px solid var(--accent-gold-light); outline-offset: 2px; }
 .providers-export-btn {
     min-height: 38px; padding: 7px 10px;
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -356,6 +363,7 @@ button, select, input, textarea { font-family: inherit; }
     font: inherit; font-size: 11px; font-weight: 600;
     cursor: pointer; transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
+.providers-actions .providers-export-btn:disabled { opacity: .55; cursor: wait; }
 .providers-export-btn i { font-size: 14px; }
 .providers-export-pdf i { color: #dc5b5b; }
 .providers-export-excel i { color: #25855a; }
@@ -1566,6 +1574,8 @@ body.pos-mode .app-footer { padding: 6px 10px; font-size: 11px; }
     .providers-header { align-items: stretch; flex-direction: column; }
     .providers-heading-group { align-items: stretch; flex-direction: column; gap: 10px; }
     .providers-heading-group .search-input { width: 100%; }
+    .providers-filters .search-wrapper { flex: 1 1 220px; }
+    .providers-filters { align-items: stretch; }
     .providers-actions { flex-wrap: wrap; }
     .providers-actions #btn_crear_proveedor { margin-right: auto; }
     .purchase-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
