@@ -1,7 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     cargarProveedores();
 
-    document.querySelector('.providers-export-pdf')?.addEventListener('click', imprimirProveedores);
+    if (document.getElementById('tabla_proveedores')) {
+        document.querySelector('.providers-export-pdf')?.addEventListener('click', imprimirProveedores);
+    }
 
     const inputBusqueda = document.getElementById('busqueda_proveedor');
     if (inputBusqueda) {

@@ -89,15 +89,10 @@ class CompraApiController extends ApiController {
                 }
                 $this->sendJsonResponse(['status' => true, 'message' => 'Detalle de compra', 'data' => $compra], 200);
             } else {
-                $busqueda = trim($this->getParam('search', ''));
+                $busqueda = $this->getParam('search', '');
                 $pagina = max(1, (int)$this->getParam('page', 1));
                 $porPagina = max(1, (int)$this->getParam('limit', 10));
-                $filtros = [
-                    'proveedor' => $this->getParam('proveedor', ''),
-                    'fecha_desde' => $this->getParam('fecha_desde', ''),
-                    'fecha_hasta' => $this->getParam('fecha_hasta', ''),
-                    'estado' => $this->getParam('estado', '')
-                ];
+                $filtros = array_intersect_key($_GET, array_flip(['proveedor', 'fecha_desde', 'fecha_hasta', 'estados', 'estado']));
 
                 $resultado = $this->compraService->obtenerComprasPaginado($busqueda, $pagina, $porPagina, $filtros);
                 $this->sendJsonResponse([
@@ -105,6 +100,7 @@ class CompraApiController extends ApiController {
                     'message' => 'Lista de compras',
                     'data' => $resultado['data'],
                     'resumen' => $resultado['resumen'],
+                    'filtros' => $resultado['filtros'],
                     'total' => $resultado['total'],
                     'paginas' => $resultado['paginas'],
                     'pagina_actual' => $resultado['pagina_actual'],

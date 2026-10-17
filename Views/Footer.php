@@ -18,7 +18,7 @@
     <script src="<?= BASE_URL ?>/Assets/js/proveedores.js?v=<?= time() ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/venta.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/reportes.js"></script>
-    <script src="<?= BASE_URL ?>/Assets/js/compras.js"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/compras.js?v=<?= filemtime(__DIR__ . "/../Assets/js/compras.js") ?>"></script>
 
     <!-- Auto-ocultar alertas flash después de 4 segundos -->
     <script>

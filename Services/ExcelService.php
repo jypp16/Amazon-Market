@@ -4,6 +4,7 @@ namespace Services;
 
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Common\Entity\Cell;
+use OpenSpout\Common\Entity\Cell\StringCell;
 use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
 use OpenSpout\Writer\XLSX\Options as XLSXOptions;
@@ -104,6 +105,128 @@ class ExcelService {
         if ($this->writer) {
             $this->writer->close();
             $this->writer = null;
+        }
+    }
+
+    /** Devuelve el XLSX en memoria y elimina su carpeta temporal, también ante errores. */
+    public function generarCompras(array $reporte): string {
+        if (empty($reporte['compras'])) throw new \DomainException('No hay compras registradas en el periodo o filtro seleccionado para imprimir');
+        $carpeta = sys_get_temp_dir() . '/compras_excel_' . bin2hex(random_bytes(12));
+        if (!mkdir($carpeta, 0700)) throw new \RuntimeException('No se pudo preparar el archivo temporal de compras.');
+        $writer = null;
+        $limpiar = static function () use (&$writer, $carpeta): void {
+            try { $writer?->close(); }
+            catch (\Throwable $error) { error_log('Cierre temporal de Excel de compras: ' . $error->getMessage()); }
+            finally {
+                $writer = null;
+                if (is_dir($carpeta)) {
+                    (new \OpenSpout\Common\Helper\FileSystemHelper(sys_get_temp_dir()))->deleteFolderRecursively($carpeta);
+                }
+            }
+        };
+        register_shutdown_function($limpiar);
+        $precisionAnterior = (string)ini_get('precision');
+        try {
+            ini_set('precision', '17');
+            $opciones = new XLSXOptions();
+            $opciones->setTempFolder($carpeta);
+            $opciones->setPageSetup(new \OpenSpout\Writer\XLSX\Options\PageSetup(\OpenSpout\Writer\XLSX\Options\PageOrientation::LANDSCAPE, \OpenSpout\Writer\XLSX\Options\PaperSize::A4, 0, 1));
+            $anchos = [44, 22, 14, 21, 40, 22];
+            foreach ($anchos as $indice => $ancho) $opciones->setColumnWidth($ancho, $indice + 1);
+            $opciones->DEFAULT_ROW_STYLE = (new Style())->setFontSize(10)->setShouldWrapText()->setCellVerticalAlignment('top');
+            $normal = clone $opciones->DEFAULT_ROW_STYLE;
+            $writer = new XLSXWriter($opciones);
+            $writer->openToFile($carpeta . '/compras.xlsx');
+            $writer->getCurrentSheet()->setName('Compras')->setSheetView((new \OpenSpout\Writer\XLSX\Entity\SheetView())->setShowGridLines(false));
+            $encabezado = (clone $this->headerStyle)->setShouldWrapText()->setCellVerticalAlignment('top');
+            $texto = static fn($valor, ?Style $estilo = null) => new StringCell((string)$valor, $estilo ?? $normal);
+            $numero = (clone $normal)->setFormat('#,##0')->setCellAlignment('right');
+            $moneda = (clone $normal)->setFormat('"S/ "#,##0.00')->setCellAlignment('right');
+            $costo = (clone $moneda)->setFormat('"S/ "#,##0.00######');
+            $fecha = (clone $normal)->setFormat('dd/mm/yyyy');
+            $anulada = (clone $normal)->setBackgroundColor('FDEDED')->setFontColor('64748B');
+            $total = (clone $moneda)->setFontBold()->setBackgroundColor('F3F4F6');
+            $fila = static function (array $celdas, array $uniones = []) use (&$writer, $opciones, $anchos): void {
+                $hoja = $writer->getCurrentSheet();
+                if ($hoja->getWrittenRowCount() === 1048576) $hoja = $writer->addNewSheetAndMakeItCurrent();
+                $anchosFila = $anchos;
+                foreach ($uniones as [$desde, $hasta]) {
+                    $opciones->mergeCells($desde, $hoja->getWrittenRowCount() + 1, $hasta, $hoja->getWrittenRowCount() + 1, $hoja->getIndex());
+                    $anchosFila[$desde] = array_sum(array_slice($anchos, $desde, $hasta - $desde + 1));
+                }
+                $lineas = 1;
+                foreach ($celdas as $indice => $celda) {
+                    $valor = $celda->getValue();
+                    if (!is_string($valor)) continue;
+                    foreach (explode("\n", $valor) as $parrafo) $lineas = max($lineas, (int)ceil(mb_strwidth($parrafo) / ($anchosFila[$indice] * .85)));
+                }
+                $writer->addRow((new Row($celdas))->setHeight(max(22, $lineas * 15 + 6)));
+            };
+            $titulo = static function (string $valor, Style $estilo) use ($fila, $texto): void {
+                $celdas = array_fill(0, 6, $texto('', $estilo)); $celdas[0] = $texto($valor, $estilo);
+                $fila($celdas, [[0,5]]);
+            };
+            $dato = static function (string $etiqueta, $valor, Style $estilo) use ($fila, $texto): void {
+                $celdas = array_fill(0, 6, $texto('', $estilo));
+                $celdas[0] = $texto($etiqueta, (clone $estilo)->setFontBold());
+                $celdas[5] = Cell::fromValue($valor, $estilo);
+                $fila($celdas, [[0,4]]);
+            };
+            $meta = $reporte['metadatos']; $resumen = $reporte['resumen'];
+            $titulo($meta['negocio'], (clone $encabezado)->setFontSize(16));
+            $titulo($meta['titulo'], (clone $normal)->setFontBold()->setFontSize(14));
+            $formatearFecha = static fn(?string $valor) => $valor ? (new \DateTimeImmutable($valor))->format('d/m/Y') : null;
+            $periodo = $meta['fecha_desde'] && $meta['fecha_hasta'] ? $formatearFecha($meta['fecha_desde']) . ' al ' . $formatearFecha($meta['fecha_hasta'])
+                : ($meta['fecha_desde'] ? 'Desde ' . $formatearFecha($meta['fecha_desde']) : ($meta['fecha_hasta'] ? 'Hasta ' . $formatearFecha($meta['fecha_hasta']) : 'Todas las fechas de recepción'));
+            foreach (['Periodo:'=>$periodo,'Proveedor:'=>$meta['proveedor'],'Estados:'=>implode(', ', $meta['estados']),'Generado por:'=>$meta['usuario'],'Fecha de emisión:'=>(new \DateTimeImmutable($meta['fecha_emision']))->format('d/m/Y H:i:s')] as $etiqueta=>$valor) {
+                $fila([$texto($etiqueta, (clone $normal)->setFontBold()),$texto($valor),$texto(''),$texto(''),$texto(''),$texto('')], [[1,5]]);
+            }
+            $titulo('RESUMEN', $encabezado);
+            $dato('Compras vigentes:', (int)$resumen['compras_validas'], $numero);
+            $dato('Compras anuladas:', (int)$resumen['compras_anuladas'], $numero);
+            $dato('Importe total comprado (solo vigentes):', (float)$resumen['total_validas'], $moneda);
+            $dato('Importe de compras anuladas (no suma):', (float)$resumen['total_anuladas'], $moneda);
+            $titulo('PRODUCTO MÁS COMPRADO (solo compras vigentes)', $encabezado);
+            $fila([$texto('Producto',$encabezado),$texto('',$encabezado),$texto('',$encabezado),$texto('',$encabezado),$texto('',$encabezado),$texto('Cantidad base',$encabezado)], [[0,4]]);
+            foreach ($resumen['productos_mas_comprados'] ?: [['producto'=>'No aplica','cantidad_base'=>0]] as $producto) {
+                $celdas = [$texto($producto['producto']),$texto(''),$texto(''),$texto(''),$texto(''),Cell::fromValue((int)$producto['cantidad_base'], $numero)];
+                $fila($celdas, [[0,4]]);
+            }
+            $titulo('Cantidad acumulada expresada en unidades base de inventario.', (clone $normal)->setFontItalic()->setFontColor('64748B'));
+            $titulo('LISTADO DE COMPRAS CON DETALLE', $encabezado);
+            foreach ($reporte['compras'] as $compra) {
+                $esAnulada = $compra['estado'] === 'Anulada';
+                $estiloCompra = $esAnulada ? $anulada : (clone $normal)->setBackgroundColor('EEF3F6');
+                $fila(array_map(fn($v)=>$texto($v,$encabezado), ['Comprobante','Serie','Número','Recepción','Proveedor','Estado']));
+                $fila([$texto($compra['tipo_comprobante'],$estiloCompra),$texto($compra['serie'],(clone $estiloCompra)->setFormat('@')),$texto($compra['numero'],(clone $estiloCompra)->setFormat('@')),
+                    Cell::fromValue(new \DateTimeImmutable($compra['fecha_recepcion']), (clone $estiloCompra)->setFormat('dd/mm/yyyy')),$texto($compra['razon_social'],$estiloCompra),$texto($esAnulada?'Anulada':'Vigente',$estiloCompra)]);
+                $fila(array_map(fn($v)=>$texto($v,$encabezado), ['Producto','Presentación','Cantidad','Vencimiento','Costo por presentación','Importe final de línea']));
+                foreach ($compra['detalles'] as $detalle) {
+                    $presentacion = $detalle['presentacion'] ?? 'Sin presentación'; $equivalencia = (int)$detalle['equivalencia_aplicada'];
+                    if ($equivalencia > 1 && !preg_match('/x\s*'.$equivalencia.'\b/i',$presentacion)) $presentacion .= ' x'.$equivalencia;
+                    $estiloMoneda = clone $moneda; $estiloCosto = clone $costo;
+                    if ($esAnulada) {
+                        foreach ([$estiloMoneda,$estiloCosto] as $estilo) $estilo->setBackgroundColor('FDEDED')->setFontColor('64748B')->setFontStrikethrough();
+                    }
+                    $fila([$texto($detalle['producto'],$esAnulada?$anulada:$normal),$texto($presentacion,$esAnulada?$anulada:$normal),Cell::fromValue((int)$detalle['cantidad_presentaciones'], $esAnulada?(clone $numero)->setBackgroundColor('FDEDED'):$numero),
+                        $detalle['fecha_vencimiento'] ? Cell::fromValue(new \DateTimeImmutable($detalle['fecha_vencimiento']),$esAnulada?(clone $fecha)->setBackgroundColor('FDEDED'):$fecha) : $texto('No aplica',$esAnulada?$anulada:$normal),
+                        Cell::fromValue((float)$detalle['costo_por_presentacion'],$estiloCosto),Cell::fromValue((float)$detalle['importe_final_linea'],$estiloMoneda)]);
+                }
+                $estiloTotal = clone $total;
+                if ($esAnulada) $estiloTotal->setBackgroundColor('FDEDED')->setFontColor('64748B')->setFontStrikethrough();
+                $dato('Importe total de la compra:', (float)$compra['total_documento'], $estiloTotal);
+                $fila(array_fill(0,6,$texto('')));
+            }
+            $titulo('TOTALES FINALES', $encabezado);
+            $dato('Total registros:', (int)$resumen['total_registros'], (clone $numero)->setFontBold());
+            $dato('Importe total comprado:', (float)$resumen['total_validas'], $total);
+            $dato('Importe de compras anuladas:', (float)$resumen['total_anuladas'], $total);
+            $writer->close(); $writer = null;
+            $contenido = file_get_contents($carpeta . '/compras.xlsx');
+            if ($contenido === false) throw new \RuntimeException('No se pudo leer el reporte Excel de compras.');
+            return $contenido;
+        } finally {
+            try { $limpiar(); } finally { ini_set('precision', $precisionAnterior); }
         }
     }
 
