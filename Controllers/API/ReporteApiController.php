@@ -115,6 +115,10 @@ class ReporteApiController extends ApiController {
 
     private function exportarPdf(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'compras') {
+            $this->exportarPdfCompras($input);
+            return;
+        }
         $filename = 'Reporte_' . $tipo . '_' . date('Y-m-d_His') . '.pdf';
 
         $pdf = new \ReportPDF();
@@ -161,6 +165,35 @@ class ReporteApiController extends ApiController {
         }
 
         $pdf->Output('D', $filename);
+        exit;
+    }
+
+    private function exportarPdfCompras(array $input): void {
+        $this->requirePermission('compras.listar');
+        try {
+            $datos = (new \Services\CompraService())->obtenerReporteCompras($input, (int)$this->authenticatedUserId);
+            require_once __DIR__ . '/../../Libraries/PDF/ReporteComprasPDF.php';
+            $contenido = (new \ReporteComprasPDF())->generar($datos);
+        } catch (\InvalidArgumentException $error) {
+            $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 400);
+            return;
+        } catch (\DomainException $error) {
+            $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
+            return;
+        } catch (\Throwable $error) {
+            error_log('Error al generar PDF de compras: ' . $error->getMessage());
+            $this->sendJsonResponse(['status' => false, 'message' => 'No se pudo generar el reporte. Reduce el rango de fechas e intenta nuevamente.'], 500);
+            return;
+        }
+        $this->responderPdfCompras($contenido, 'Reporte_compras_' . date('Y-m-d_His') . '.pdf');
+    }
+
+    protected function responderPdfCompras(string $contenido, string $nombre): void {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store');
+        header('Content-Length: ' . strlen($contenido));
+        echo $contenido;
         exit;
     }
 
@@ -215,6 +248,14 @@ class ReporteApiController extends ApiController {
 
     private function exportarExcel(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'compras') {
+            $this->exportarExcelCompras($input);
+            return;
+        }
+        if ($tipo === 'proveedores') {
+            $this->exportarExcelProveedores($input);
+            return;
+        }
         $excelService = new \Services\ExcelService();
 
         switch ($tipo) {
@@ -271,6 +312,56 @@ class ReporteApiController extends ApiController {
         header('Cache-Control: no-cache, must-revalidate');
         readfile($file);
         unlink($file);
+        exit;
+    }
+
+    private function exportarExcelProveedores(array $input): void {
+        $this->requirePermission('proveedores.listar');
+        try {
+            $datos = (new \Services\ProveedorService())->obtenerReporteProveedores($input, (int)$this->authenticatedUserId);
+            $contenido = (new \Services\ExcelService())->generarProveedores($datos);
+        } catch (\InvalidArgumentException $error) {
+            $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 400);
+        } catch (\DomainException $error) {
+            $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
+        } catch (\Throwable $error) {
+            error_log('Excel de proveedores: ' . $error->getMessage());
+            $this->sendJsonResponse(['status' => false, 'message' => 'No se pudo generar el reporte. Reduce la búsqueda con los filtros e intenta nuevamente.'], 500);
+        }
+        $this->responderExcelProveedores($contenido, 'Reporte_proveedores_' . date('Y-m-d_His') . '.xlsx');
+    }
+
+    protected function responderExcelProveedores(string $contenido, string $nombre): void {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store');
+        header('Content-Length: ' . strlen($contenido));
+        echo $contenido;
+        exit;
+    }
+
+    private function exportarExcelCompras(array $input): void {
+        $this->requirePermission('compras.listar');
+        try {
+            $datos = (new \Services\CompraService())->obtenerReporteCompras($input, (int)$this->authenticatedUserId);
+            $contenido = (new \Services\ExcelService())->generarCompras($datos);
+        } catch (\InvalidArgumentException $error) {
+            $this->sendJsonResponse(['status'=>false,'message'=>$error->getMessage()], 400);
+        } catch (\DomainException $error) {
+            $this->sendJsonResponse(['status'=>false,'message'=>$error->getMessage()], 422);
+        } catch (\Throwable $error) {
+            error_log('Excel de compras: ' . $error->getMessage());
+            $this->sendJsonResponse(['status'=>false,'message'=>'No se pudo generar el reporte. Reduce el rango de fechas e intenta nuevamente.'], 500);
+        }
+        $this->responderExcelCompras($contenido, 'Reporte_compras_' . date('Y-m-d_His') . '.xlsx');
+    }
+
+    protected function responderExcelCompras(string $contenido, string $nombre): void {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store');
+        header('Content-Length: ' . strlen($contenido));
+        echo $contenido;
         exit;
     }
 

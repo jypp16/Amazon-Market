@@ -11,12 +11,54 @@ class ProveedorService {
         $this->model = new ProveedorModel();
     }
 
-    public function obtenerProveedores(string $busqueda = '') {
-        return $this->model->selectProveedores($busqueda);
+    public function normalizarFiltros($busqueda = '', $estado = 'todos'): array {
+        if (!is_string($busqueda)) {
+            throw new \InvalidArgumentException('La búsqueda de proveedores debe ser un texto.');
+        }
+        if (!is_string($estado) || !in_array($estado, ['todos', 'activos', 'inactivos'], true)) {
+            throw new \InvalidArgumentException('Selecciona un estado válido: Todos, Activos o Inactivos.');
+        }
+        return ['search' => trim($busqueda), 'estado' => $estado];
     }
 
-    public function obtenerProveedoresPaginado(string $busqueda = '', int $pagina = 1, int $porPagina = 10) {
-        return $this->model->selectProveedoresPaginado($busqueda, $pagina, $porPagina);
+    public function obtenerProveedores($busqueda = '', $estado = 'todos') {
+        $filtros = $this->normalizarFiltros($busqueda, $estado);
+        $valorEstado = $filtros['estado'] === 'todos' ? null : (int)($filtros['estado'] === 'activos');
+        return $this->model->selectProveedores($filtros['search'], $valorEstado);
+    }
+
+    public function obtenerProveedoresPaginado($busqueda = '', int $pagina = 1, int $porPagina = 10, $estado = 'todos') {
+        $filtros = $this->normalizarFiltros($busqueda, $estado);
+        $valorEstado = $filtros['estado'] === 'todos' ? null : (int)($filtros['estado'] === 'activos');
+        $resultado = $this->model->selectProveedoresPaginado($filtros['search'], $pagina, $porPagina, $valorEstado);
+        $resultado['filtros'] = $filtros;
+        return $resultado;
+    }
+
+    public function obtenerReporteProveedores(array $entrada, int $id_usuario): array {
+        $filtros = $this->normalizarFiltros($entrada['search'] ?? '', $entrada['estado'] ?? 'todos');
+        $proveedores = $this->obtenerProveedores($filtros['search'], $filtros['estado']);
+        if (!$proveedores) {
+            $mensaje = $filtros['search'] !== '' || $filtros['estado'] !== 'todos'
+                ? 'No hay resultados que coincidan con la búsqueda para generar el reporte'
+                : 'No existen proveedores para imprimir';
+            throw new \DomainException($mensaje);
+        }
+        $usuario = (new \Models\UsuarioModel())->find($id_usuario);
+        if (!$usuario) throw new \InvalidArgumentException('No se encontró el usuario que genera el reporte.');
+        return [
+            'metadatos' => [
+                'negocio' => 'AMAZON MARKET',
+                'titulo' => 'LISTADO DE PROVEEDORES',
+                'busqueda' => $filtros['search'],
+                'estado' => ['todos' => 'Todos', 'activos' => 'Activos', 'inactivos' => 'Inactivos'][$filtros['estado']],
+                'usuario' => $usuario['nombre'],
+                'fecha_emision' => (new \DateTimeImmutable('now', new \DateTimeZone('America/Lima')))->format('Y-m-d H:i:s')
+            ],
+            'filtros' => $filtros,
+            'proveedores' => $proveedores,
+            'total_registros' => count($proveedores)
+        ];
     }
 
     public function obtenerProveedor(int $id) {

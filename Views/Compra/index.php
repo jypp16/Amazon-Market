@@ -13,11 +13,11 @@
                 <i class="fa-solid fa-cart-plus"></i> Registrar compra
             </a>
             <?php endif; ?>
-            <button type="button" class="providers-export-btn providers-export-pdf" aria-label="Exportar historial de compras a PDF" aria-pressed="false" title="Exportar a PDF">
+            <button type="button" id="compra_exportar_pdf" class="providers-export-btn providers-export-pdf" aria-label="Exportar historial de compras a PDF" aria-pressed="false" title="Exportar a PDF">
                 <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
                 <span>Exportar PDF</span>
             </button>
-            <button type="button" class="providers-export-btn providers-export-excel" aria-label="Exportar historial de compras a Excel" aria-pressed="false" title="Exportar a Excel">
+            <button type="button" id="compra_exportar_excel" class="providers-export-btn providers-export-excel" aria-label="Exportar historial de compras a Excel" aria-pressed="false" title="Exportar a Excel">
                 <i class="fa-solid fa-file-excel" aria-hidden="true"></i>
                 <span>Exportar Excel</span>
             </button>
@@ -51,15 +51,15 @@
             <label for="fecha_hasta_compra">Hasta (recepción)</label>
             <input type="date" id="fecha_hasta_compra" name="fecha_hasta" value="<?= e($data['fecha_hasta']) ?>">
         </div>
-        <div class="purchase-filter-field">
-            <label for="estado_compra">Estado</label>
-            <select id="estado_compra" name="estado">
-                <option value="">Todos</option>
-                <option value="Confirmada">Confirmada</option>
-                <option value="Corregida">Corregida</option>
-                <option value="Anulada">Anulada</option>
-            </select>
-        </div>
+        <fieldset class="purchase-filter-states" aria-describedby="compras_error_estados">
+            <legend>Estados</legend>
+            <div class="purchase-state-options">
+                <label for="estado_compra_confirmada"><input type="checkbox" id="estado_compra_confirmada" name="estados[]" value="Confirmada" checked> Confirmada</label>
+                <label for="estado_compra_corregida"><input type="checkbox" id="estado_compra_corregida" name="estados[]" value="Corregida" checked> Corregida</label>
+                <label for="estado_compra_anulada"><input type="checkbox" id="estado_compra_anulada" name="estados[]" value="Anulada"> Anulada</label>
+            </div>
+            <p id="compras_error_estados" class="purchase-filter-error" role="alert"></p>
+        </fieldset>
         <div class="purchase-filter-actions">
             <button type="submit" class="btn btn-gold"><i class="fa-solid fa-filter"></i> Filtrar</button>
             <a href="<?= BASE_URL ?>/Compra" class="btn btn-secondary">Limpiar</a>
@@ -78,8 +78,11 @@
         <article class="purchase-summary-card">
             <h3>Anuladas (no suman)</h3>
             <p id="compras_cantidad_anulada">0</p>
+            <small id="compras_importe_anulado">Importe: S/ 0.00</small>
         </article>
     </section>
+
+    <p id="compras_aviso_integridad" class="purchase-filter-error" role="status" hidden></p>
 
     <div class="table-responsive purchase-history-table">
         <table class="table">
@@ -114,5 +117,15 @@
         </div>
     </div>
 </section>
+
+<dialog id="compras_generando_pdf" class="purchase-action-dialog purchase-report-loading" aria-labelledby="compras_generando_titulo" aria-describedby="compras_generando_descripcion">
+    <form method="dialog">
+        <h3 id="compras_generando_titulo"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Generando reporte…</h3>
+        <p id="compras_generando_descripcion" role="status">Espera un momento. El PDF se abrirá en la pestaña reservada cuando esté listo.</p>
+        <div class="purchase-action-dialog-buttons">
+            <button type="button" id="compras_cancelar_pdf" class="btn btn-secondary" autofocus>Cancelar</button>
+        </div>
+    </form>
+</dialog>
 
 <?php require_once "Views/Footer.php"; ?>

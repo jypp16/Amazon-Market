@@ -595,6 +595,157 @@ function inicializarHistorialCompras() {
     const limit = 10;
     let pagina = 1;
     let paginas = 1;
+    let filtrosAplicados = null;
+    let solicitudActual = 0;
+    const estados = Array.from(formulario.querySelectorAll('input[name="estados[]"]'));
+    const errorEstados = document.getElementById('compras_error_estados');
+    const avisoIntegridad = document.getElementById('compras_aviso_integridad');
+
+    function validarEstados() {
+        const validos = estados.some(estado => estado.checked);
+        errorEstados.textContent = validos ? '' : 'Selecciona al menos un estado.';
+        formulario.querySelector('.purchase-filter-states').setAttribute('aria-invalid', String(!validos));
+        return validos;
+    }
+    estados.forEach(estado => estado.addEventListener('change', validarEstados));
+    document.querySelectorAll('.purchase-history-actions .providers-export-btn').forEach(boton => {
+        boton.addEventListener('click', evento => {
+            if (validarEstados()) return;
+            evento.preventDefault();
+            evento.stopImmediatePropagation();
+            estados[0].focus();
+        }, { capture: true });
+    });
+
+    const botonPdf = document.getElementById('compra_exportar_pdf');
+    const botonExcel = document.getElementById('compra_exportar_excel');
+    const modalReporte = document.getElementById('compras_generando_pdf');
+    let generandoReporte = false;
+    let cancelarReporte = null;
+    modalReporte?.addEventListener('cancel', evento => {
+        evento.preventDefault();
+        cancelarReporte?.();
+    });
+    document.getElementById('compras_cancelar_pdf')?.addEventListener('click', () => cancelarReporte?.());
+    botonPdf?.addEventListener('click', () => exportarReporte('pdf'));
+    botonExcel?.addEventListener('click', () => exportarReporte('excel'));
+
+    async function exportarReporte(formato) {
+        if (generandoReporte || !validarEstados()) return;
+        if (!formulario.dataset.filtrosAplicados) {
+            Modal.error('No se pudo generar el reporte', 'Aplica los filtros y espera a que termine de cargar el listado antes de exportar.');
+            return;
+        }
+        const esPdf = formato === 'pdf';
+        const boton = esPdf ? botonPdf : botonExcel;
+        const parametros = new URLSearchParams(formulario.dataset.filtrosAplicados);
+        parametros.set('tipo', 'compras');
+        const pestana = esPdf ? window.open('about:blank', '_blank') : null;
+        if (esPdf && !pestana) {
+            Modal.error('No se pudo abrir el PDF', 'Permite las ventanas emergentes para este sitio e intenta nuevamente.');
+            return;
+        }
+        generandoReporte = true;
+        const controles = Array.from(document.querySelectorAll('.purchase-history-actions .providers-export-btn, .purchase-filters button[type="submit"]'));
+        const deshabilitados = controles.map(control => control.disabled);
+        controles.forEach(control => { control.disabled = true; });
+        const peticion = new AbortController();
+        let cancelado = false;
+        let agotado = false;
+        let archivoUrl = null;
+        let mensajeError = null;
+        cancelarReporte = () => { cancelado = true; peticion.abort(); };
+        const espera = window.setTimeout(() => { agotado = true; peticion.abort(); }, 120000);
+        try {
+            if (pestana) {
+                pestana.document.title = 'Generando reporte de compras…';
+                pestana.document.body.textContent = 'Generando reporte… Vuelve a la pestaña de compras para cancelar.';
+            }
+            document.getElementById('compras_generando_descripcion').textContent = esPdf
+                ? 'Espera un momento. El PDF se abrirá en la pestaña reservada cuando esté listo.'
+                : 'Espera un momento. El archivo Excel se descargará cuando esté listo.';
+            modalReporte.showModal();
+            window.focus();
+            const base = typeof API_URL !== 'undefined' ? API_URL : '/api';
+            const mime = esPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            const respuesta = await fetch(base + '/reportes/exportar-' + formato + '?' + parametros.toString(), {
+                method: 'GET', credentials: 'same-origin', headers: { Accept: mime }, signal: peticion.signal
+            });
+            const tipo = (respuesta.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+            if (!respuesta.ok || tipo !== mime || respuesta.redirected) {
+                let mensaje = respuesta.status === 401 || respuesta.redirected || tipo === 'text/html'
+                    ? 'La sesión puede haber vencido. Actualiza la página e inicia sesión nuevamente.'
+                    : 'No se pudo generar el reporte. Reduce el periodo seleccionado e intenta nuevamente.';
+                if (tipo === 'application/json') {
+                    const error = await respuesta.json().catch(() => null);
+                    if (typeof error?.message === 'string') mensaje = error.message;
+                }
+                throw new Error(mensaje);
+            }
+            const archivo = await respuesta.blob();
+            if (esPdf) {
+                if (await archivo.slice(0, 5).text() !== '%PDF-') throw new Error('El servidor no devolvió un PDF válido. Intenta nuevamente.');
+            } else {
+                const firma = new Uint8Array(await archivo.slice(0, 4).arrayBuffer());
+                const directorio = await archivo.slice(-65557).text();
+                if (firma.toString() !== '80,75,3,4' || !directorio.includes('[Content_Types].xml') || !directorio.includes('xl/workbook.xml')) {
+                    throw new Error('El servidor no devolvió un archivo Excel válido. Intenta nuevamente.');
+                }
+            }
+            if (peticion.signal.aborted) throw new DOMException('Solicitud cancelada', 'AbortError');
+            if (esPdf && pestana.closed) throw new Error('Se cerró la pestaña del PDF. Vuelve a exportar para abrir el reporte.');
+            archivoUrl = URL.createObjectURL(archivo);
+            const recurso = archivoUrl;
+            if (esPdf) {
+                pestana.opener = null;
+                pestana.location.replace(archivoUrl);
+                pestana.focus();
+                // El visor necesita el archivo mientras permite imprimir o guardar.
+                const limpieza = window.setInterval(() => {
+                    if (pestana.closed) {
+                        URL.revokeObjectURL(recurso);
+                        window.clearInterval(limpieza);
+                    }
+                }, 1000);
+            } else {
+                const enlace = document.createElement('a');
+                enlace.href = archivoUrl;
+                enlace.download = (respuesta.headers.get('content-disposition') || '').match(/filename="(Reporte_compras_[\d_-]+\.xlsx)"/)?.[1] || 'Reporte_compras.xlsx';
+                document.body.appendChild(enlace);
+                try { enlace.click(); } finally { enlace.remove(); }
+                // Da tiempo al navegador para iniciar el guardado antes de revocar el Blob.
+                window.setTimeout(() => URL.revokeObjectURL(recurso), 60000);
+            }
+            archivoUrl = null;
+        } catch (error) {
+            if (archivoUrl) URL.revokeObjectURL(archivoUrl);
+            if (pestana && !pestana.closed) pestana.close();
+            if (!cancelado) mensajeError = agotado
+                ? 'La generación superó el tiempo de espera. Reduce el periodo seleccionado e intenta nuevamente.'
+                : error instanceof TypeError
+                    ? 'No se pudo conectar con el servidor. Revisa tu conexión, reduce el periodo e intenta nuevamente.'
+                    : error.message;
+        } finally {
+            window.clearTimeout(espera);
+            if (modalReporte.open) modalReporte.close();
+            controles.forEach((control, indice) => { control.disabled = deshabilitados[indice]; });
+            generandoReporte = false;
+            cancelarReporte = null;
+            boton.focus();
+        }
+        if (mensajeError) Modal.error('No se pudo generar el reporte', mensajeError);
+    }
+
+    function obtenerFiltrosFormulario() {
+        const datos = new FormData(formulario);
+        const parametros = new URLSearchParams();
+        ['proveedor', 'fecha_desde', 'fecha_hasta'].forEach(clave => {
+            const valor = datos.get(clave);
+            if (valor) parametros.set(clave, valor);
+        });
+        datos.getAll('estados[]').forEach(estado => parametros.append('estados[]', estado));
+        return parametros;
+    }
 
     if (proveedorSelect && proveedorBusqueda && proveedorOpciones) {
         const proveedorWrapper = proveedorBusqueda.parentElement;
@@ -755,6 +906,12 @@ function inicializarHistorialCompras() {
         cell.className = 'table-empty';
         cell.textContent = 'No se pudo cargar el historial: ' + message;
         paginacion.textContent = '';
+        ['compras_total_valido', 'compras_cantidad_valida', 'compras_cantidad_anulada', 'compras_importe_anulado'].forEach(id => {
+            document.getElementById(id).textContent = 'No disponible';
+        });
+        document.getElementById('compras_mostrando').textContent = 'No se pudo consultar el historial';
+        document.getElementById('compras_total_pagina').textContent = '';
+        avisoIntegridad.hidden = true;
     }
 
     function renderizarFilas(compras) {
@@ -870,26 +1027,29 @@ function inicializarHistorialCompras() {
         paginacion.appendChild(crearBoton('Siguiente', pagina >= paginas, () => cargar(pagina + 1)));
     }
 
-    async function cargar(page = 1) {
-        pagina = page;
+    async function cargar(page = 1, aplicarFiltros = false) {
+        if (!validarEstados()) {
+            estados[0].focus();
+            return;
+        }
+        const filtros = aplicarFiltros || !filtrosAplicados ? obtenerFiltrosFormulario() : filtrosAplicados;
+        const params = new URLSearchParams(filtros);
+        params.set('page', String(page));
+        params.set('limit', String(limit));
+        const solicitud = ++solicitudActual;
+        delete formulario.dataset.filtrosAplicados;
         mostrarCarga();
-        const formData = new FormData(formulario);
-        const params = new URLSearchParams({
-            page: String(pagina),
-            limit: String(limit)
-        });
-        ['proveedor', 'fecha_desde', 'fecha_hasta', 'estado'].forEach(key => {
-            const value = formData.get(key);
-            if (value) params.set(key, value);
-        });
 
         try {
             const response = await Api.get('compras?' + params.toString());
+            if (solicitud !== solicitudActual) return;
             const result = response && response.data;
             if (!response || !response.ok || !result || !result.status) {
                 throw new Error(result ? result.message : 'Respuesta inválida del servidor.');
             }
 
+            filtrosAplicados = new URLSearchParams(filtros);
+            formulario.dataset.filtrosAplicados = filtrosAplicados.toString();
             const purchases = Array.isArray(result.data) ? result.data : [];
             const summary = result.resumen || {};
             pagina = Number(result.pagina_actual) || 1;
@@ -899,6 +1059,11 @@ function inicializarHistorialCompras() {
             document.getElementById('compras_total_valido').textContent = 'S/ ' + Number(summary.total_validas || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             document.getElementById('compras_cantidad_valida').textContent = String(summary.compras_validas || 0);
             document.getElementById('compras_cantidad_anulada').textContent = String(summary.compras_anuladas || 0);
+            document.getElementById('compras_importe_anulado').textContent = 'Importe: S/ ' + Number(summary.total_anuladas || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            avisoIntegridad.hidden = !summary.compras_con_diferencias;
+            avisoIntegridad.textContent = summary.compras_con_diferencias
+                ? 'Hay ' + summary.compras_con_diferencias + ' compra(s) cuyo total no coincide con sus detalles o sin detalle. Revísalas antes de generar reportes.'
+                : '';
 
             const totalValidPage = purchases.reduce((sum, purchase) => {
                 return sum + (purchase.estado === 'Anulada' ? 0 : Number(purchase.total_documento || 0));
@@ -909,13 +1074,15 @@ function inicializarHistorialCompras() {
             document.getElementById('compras_total_pagina').textContent = 'Total de esta página (válidas): S/ ' + totalValidPage.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             renderizarPaginacion();
         } catch (exception) {
+            if (solicitud !== solicitudActual) return;
+            delete formulario.dataset.filtrosAplicados;
             mostrarError(exception.message);
         }
     }
 
     formulario.addEventListener('submit', event => {
         event.preventDefault();
-        cargar(1);
+        cargar(1, true);
     });
     cargar();
 }

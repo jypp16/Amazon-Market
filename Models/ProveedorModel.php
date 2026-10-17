@@ -11,35 +11,33 @@ class ProveedorModel extends Model {
         $this->primaryKey = 'id_proveedor';
     }
 
-    public function selectProveedores(string $busqueda = '') {
+    private function consultaProveedores(string $busqueda, ?int $estado): self {
         $query = $this->select(['proveedor.*', 'tipo_documento.nombre as nombre_tipo_documento'])
             ->join('tipo_documento', 'proveedor.id_tipo_documento = tipo_documento.id_tipo_documento', 'INNER');
 
-        if (!empty($busqueda)) {
-            $query->whereRaw("proveedor.razon_social LIKE :where_busqueda1 OR proveedor.numero_documento LIKE :where_busqueda2", [
-                'busqueda1' => "%{$busqueda}%",
-                'busqueda2' => "%{$busqueda}%"
+        if ($busqueda !== '') {
+            $query->orLikeWhere([
+                'proveedor.razon_social' => $busqueda,
+                'proveedor.numero_documento' => $busqueda
             ]);
         }
-
-        return $query->orderBy('proveedor.id_proveedor', 'DESC')->get();
+        if ($estado !== null) {
+            $query->where(['proveedor.estado' => $estado]);
+        }
+        return $query;
     }
 
-    public function selectProveedoresPaginado(string $busqueda = '', int $pagina = 1, int $porPagina = 10) {
-        $query = $this->select(['proveedor.*', 'tipo_documento.nombre as nombre_tipo_documento'])
-            ->join('tipo_documento', 'proveedor.id_tipo_documento = tipo_documento.id_tipo_documento', 'INNER');
+    public function selectProveedores(string $busqueda = '', ?int $estado = null) {
+        return $this->consultaProveedores($busqueda, $estado)
+            ->orderBy('proveedor.id_proveedor', 'DESC')->get();
+    }
 
-        if (!empty($busqueda)) {
-            $query->whereRaw("proveedor.razon_social LIKE :where_busqueda1 OR proveedor.numero_documento LIKE :where_busqueda2", [
-                'busqueda1' => "%{$busqueda}%",
-                'busqueda2' => "%{$busqueda}%"
-            ]);
-        }
-
+    public function selectProveedoresPaginado(string $busqueda = '', int $pagina = 1, int $porPagina = 10, ?int $estado = null) {
+        $query = $this->consultaProveedores($busqueda, $estado);
         $total = (int) $query->countWithQuery();
-        $pagina = max(1, $pagina);
         $porPagina = $porPagina > 0 ? $porPagina : 10;
         $paginas = max(1, (int) ceil($total / $porPagina));
+        $pagina = min(max(1, $pagina), $paginas);
         $offset = ($pagina - 1) * $porPagina;
 
         $data = $query->orderBy('proveedor.id_proveedor', 'DESC')

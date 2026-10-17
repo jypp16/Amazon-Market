@@ -11,108 +11,134 @@ class CompraModel extends Model {
         $this->primaryKey = 'id_compra';
     }
 
-    public function existeComprobante($id_proveedor, $id_tipo_comprobante, $serie, $numero) {
-        $result = $this->select(['id_compra'])
-                       ->where([
-                           'id_proveedor' => $id_proveedor,
-                           'id_tipo_comprobante' => $id_tipo_comprobante,
-                           'serie' => $serie,
-                           'numero' => $numero,
-                           'estado' => 'Confirmada'
-                       ])
-                       ->first();
-        return !empty($result);
+    public function existeComprobante($id_proveedor, $id_tipo_comprobante, $serie, $numero, $id_compra_excluida = null) {
+        $consulta = $this->select(['id_compra'])
+                         ->where([
+                             'id_proveedor' => $id_proveedor,
+                             'id_tipo_comprobante' => $id_tipo_comprobante,
+                             'serie' => $serie,
+                             'numero' => $numero
+                         ])
+                         ->whereIn('estado', ['Confirmada', 'Corregida']);
+        if ($id_compra_excluida !== null) {
+            $consulta->whereNotIn('id_compra', [$id_compra_excluida]);
+        }
+        return !empty($consulta->first());
+    }
+
+    private function construirConsultaCompras(string $busqueda, array $filtros): array {
+        $condiciones = [];
+        $valores = [];
+        if ($busqueda !== '') {
+            $condiciones[] = '(compra.serie LIKE :busqueda_serie OR compra.numero LIKE :busqueda_numero OR proveedor.razon_social LIKE :busqueda_proveedor OR proveedor.numero_documento LIKE :busqueda_documento)';
+            foreach (['serie', 'numero', 'proveedor', 'documento'] as $campo) {
+                $valores[':busqueda_' . $campo] = '%' . $busqueda . '%';
+            }
+        }
+        foreach (['proveedor' => 'compra.id_proveedor =', 'fecha_desde' => 'compra.fecha_recepcion >=', 'fecha_hasta' => 'compra.fecha_recepcion <='] as $filtro => $comparacion) {
+            if ($filtros[$filtro] !== null) {
+                $condiciones[] = $comparacion . ' :' . $filtro;
+                $valores[':' . $filtro] = $filtros[$filtro];
+            }
+        }
+        $parametrosEstados = [];
+        foreach ($filtros['estados'] as $indice => $estado) {
+            $parametro = ':estado_' . $indice;
+            $parametrosEstados[] = $parametro;
+            $valores[$parametro] = $estado;
+        }
+        $condiciones[] = 'compra.estado IN (' . implode(', ', $parametrosEstados) . ')';
+        $desde = ' FROM compra
+            INNER JOIN proveedor ON compra.id_proveedor = proveedor.id_proveedor
+            INNER JOIN tipo_documento ON proveedor.id_tipo_documento = tipo_documento.id_tipo_documento
+            INNER JOIN tipo_comprobante ON compra.id_tipo_comprobante = tipo_comprobante.id_tipo_comprobante
+            INNER JOIN usuario ON compra.id_usuario = usuario.id_usuario';
+        return [$desde, ' WHERE ' . implode(' AND ', $condiciones), $valores];
+    }
+
+    public function obtenerResumenCompras(string $busqueda, array $filtros): array {
+        [$desde, $donde, $valores] = $this->construirConsultaCompras($busqueda, $filtros);
+        $sql = "SELECT COUNT(*) AS total_registros,
+            COALESCE(SUM(CASE WHEN compra.estado <> 'Anulada' THEN 1 ELSE 0 END), 0) AS compras_validas,
+            COALESCE(SUM(CASE WHEN compra.estado = 'Anulada' THEN 1 ELSE 0 END), 0) AS compras_anuladas,
+            COALESCE(SUM(CASE WHEN compra.estado <> 'Anulada' THEN compra.total_documento ELSE 0 END), 0) AS total_validas,
+            COALESCE(SUM(CASE WHEN compra.estado = 'Anulada' THEN compra.total_documento ELSE 0 END), 0) AS total_anuladas,
+            COALESCE(SUM(CASE WHEN compra.estado <> 'Anulada' THEN resumen_detalle.unidades ELSE 0 END), 0) AS unidades_ingresadas,
+            COALESCE(SUM(CASE WHEN resumen_detalle.lineas IS NULL OR resumen_detalle.importe <> compra.total_documento THEN 1 ELSE 0 END), 0) AS compras_con_diferencias"
+            . $desde . ' LEFT JOIN (
+                SELECT id_compra, COUNT(*) AS lineas, SUM(importe_final_linea) AS importe, SUM(cantidad_base) AS unidades
+                FROM detalle_compra GROUP BY id_compra
+            ) resumen_detalle ON resumen_detalle.id_compra = compra.id_compra' . $donde;
+        $consulta = $this->conect()->prepare($sql);
+        $consulta->execute($valores);
+        $resumen = $consulta->fetch(\PDO::FETCH_ASSOC);
+        foreach (['total_registros', 'compras_validas', 'compras_anuladas', 'unidades_ingresadas', 'compras_con_diferencias'] as $campo) {
+            $resumen[$campo] = (int)$resumen[$campo];
+        }
+        $consulta = $this->conect()->prepare('SELECT detalle_compra.id_producto, producto.nombre AS producto,
+                SUM(detalle_compra.cantidad_base) AS cantidad_base' . $desde . '
+            INNER JOIN detalle_compra ON detalle_compra.id_compra = compra.id_compra
+            LEFT JOIN producto ON producto.id_producto = detalle_compra.id_producto'
+            . $donde . " AND compra.estado <> 'Anulada'
+            GROUP BY detalle_compra.id_producto, producto.nombre
+            HAVING SUM(detalle_compra.cantidad_base) > 0
+            ORDER BY cantidad_base DESC, detalle_compra.id_producto ASC");
+        $consulta->execute($valores);
+        $productos = [];
+        $maximo = 0;
+        while ($producto = $consulta->fetch(\PDO::FETCH_ASSOC)) {
+            $cantidad = (int)$producto['cantidad_base'];
+            if ($productos && $cantidad !== $maximo) break;
+            $maximo = $cantidad;
+            $productos[] = ['id_producto' => (int)$producto['id_producto'], 'producto' => $producto['producto'] ?? 'Producto #' . $producto['id_producto'], 'cantidad_base' => $cantidad];
+        }
+        $resumen['productos_mas_comprados'] = $productos;
+        $resumen['producto_mas_comprado'] = $productos ? implode(', ', array_column($productos, 'producto')) : 'No aplica';
+        $resumen['cantidad_mas_comprada'] = $maximo;
+        return $resumen;
+    }
+
+    public function obtenerComprasFiltradas(string $busqueda, array $filtros, ?int $limite = null, int $pagina = 1): array {
+        [$desde, $donde, $valores] = $this->construirConsultaCompras($busqueda, $filtros);
+        $sql = 'SELECT compra.*, proveedor.razon_social, proveedor.numero_documento,
+                tipo_documento.nombre AS nombre_tipo_documento,
+                tipo_comprobante.nombre AS tipo_comprobante, usuario.nombre AS nombre_usuario,
+                CAST(compra.total_documento * 100 AS SIGNED) AS total_centimos'
+            . $desde . $donde . ' ORDER BY compra.created_at DESC, compra.id_compra DESC';
+        if ($limite !== null) $sql .= ' LIMIT :limite OFFSET :offset';
+        $consulta = $this->conect()->prepare($sql);
+        foreach ($valores as $clave => $valor) $consulta->bindValue($clave, $valor);
+        if ($limite !== null) {
+            $consulta->bindValue(':limite', $limite, \PDO::PARAM_INT);
+            $consulta->bindValue(':offset', (max(1, $pagina) - 1) * $limite, \PDO::PARAM_INT);
+        }
+        $consulta->execute();
+        return $consulta->fetchAll(\PDO::FETCH_ASSOC);
+    }
+
+    public function obtenerDetallesFiltrados(array $filtros): array {
+        [$desde, $donde, $valores] = $this->construirConsultaCompras('', $filtros);
+        $consulta = $this->conect()->prepare('SELECT detalle_compra.*, producto.nombre AS producto,
+                presentacion.nombre AS presentacion,
+                CAST(detalle_compra.importe_final_linea * 100 AS SIGNED) AS importe_centimos,
+                CAST(detalle_compra.importe_final_linea / NULLIF(detalle_compra.cantidad_presentaciones, 0) AS DECIMAL(20,8)) AS costo_por_presentacion'
+            . $desde . '
+            INNER JOIN detalle_compra ON detalle_compra.id_compra = compra.id_compra
+            LEFT JOIN producto ON producto.id_producto = detalle_compra.id_producto
+            LEFT JOIN presentacion ON presentacion.id_presentacion = detalle_compra.id_presentacion'
+            . $donde . ' ORDER BY detalle_compra.id_compra, detalle_compra.id_detalle_compra');
+        $consulta->execute($valores);
+        return $consulta->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     public function obtenerComprasPaginadas(string $busqueda = '', int $pagina = 1, int $limite = 10, array $filtros = []): array {
         $pagina = max(1, $pagina);
         $limite = max(1, min(100, $limite));
-        $offset = ($pagina - 1) * $limite;
-        $condiciones = [];
-        $valores = [];
-
-        if ($busqueda !== '') {
-            $condiciones[] = '(compra.serie LIKE :busqueda_serie OR compra.numero LIKE :busqueda_numero OR proveedor.razon_social LIKE :busqueda_proveedor OR proveedor.numero_documento LIKE :busqueda_documento)';
-            $valorBusqueda = '%' . $busqueda . '%';
-            $valores[':busqueda_serie'] = $valorBusqueda;
-            $valores[':busqueda_numero'] = $valorBusqueda;
-            $valores[':busqueda_proveedor'] = $valorBusqueda;
-            $valores[':busqueda_documento'] = $valorBusqueda;
-        }
-        if (!empty($filtros['proveedor'])) {
-            $condiciones[] = 'compra.id_proveedor = :proveedor';
-            $valores[':proveedor'] = (int)$filtros['proveedor'];
-        }
-        if (!empty($filtros['fecha_desde'])) {
-            $condiciones[] = 'compra.fecha_recepcion >= :fecha_desde';
-            $valores[':fecha_desde'] = $filtros['fecha_desde'];
-        }
-        if (!empty($filtros['fecha_hasta'])) {
-            $condiciones[] = 'compra.fecha_recepcion <= :fecha_hasta';
-            $valores[':fecha_hasta'] = $filtros['fecha_hasta'];
-        }
-        if (!empty($filtros['estado'])) {
-            $condiciones[] = 'compra.estado = :estado';
-            $valores[':estado'] = $filtros['estado'];
-        }
-
-        $from = ' FROM compra
-            INNER JOIN proveedor ON compra.id_proveedor = proveedor.id_proveedor
-            INNER JOIN tipo_documento ON proveedor.id_tipo_documento = tipo_documento.id_tipo_documento
-            INNER JOIN tipo_comprobante ON compra.id_tipo_comprobante = tipo_comprobante.id_tipo_comprobante
-            INNER JOIN usuario ON compra.id_usuario = usuario.id_usuario';
-        $where = $condiciones ? ' WHERE ' . implode(' AND ', $condiciones) : '';
-        $pdo = $this->conect();
-
-        $countStatement = $pdo->prepare('SELECT COUNT(*)' . $from . $where);
-        foreach ($valores as $key => $value) {
-            $countStatement->bindValue($key, $value);
-        }
-        $countStatement->execute();
-        $total = (int)$countStatement->fetchColumn();
-
-        $summarySql = 'SELECT
-                COALESCE(SUM(CASE WHEN compra.estado <> \'Anulada\' THEN compra.total_documento ELSE 0 END), 0) AS total_validas,
-                COALESCE(SUM(CASE WHEN compra.estado <> \'Anulada\' THEN 1 ELSE 0 END), 0) AS compras_validas,
-                COALESCE(SUM(CASE WHEN compra.estado = \'Anulada\' THEN 1 ELSE 0 END), 0) AS compras_anuladas
-            ' . $from . $where;
-        $summaryStatement = $pdo->prepare($summarySql);
-        foreach ($valores as $key => $value) {
-            $summaryStatement->bindValue($key, $value);
-        }
-        $summaryStatement->execute();
-        $resumen = $summaryStatement->fetch(\PDO::FETCH_ASSOC);
-
-        $unitsSql = 'SELECT COALESCE(SUM(detalle_compra.cantidad_base), 0)
-            FROM detalle_compra
-            INNER JOIN compra ON compra.id_compra = detalle_compra.id_compra
-            INNER JOIN proveedor ON compra.id_proveedor = proveedor.id_proveedor
-            INNER JOIN tipo_comprobante ON compra.id_tipo_comprobante = tipo_comprobante.id_tipo_comprobante
-            INNER JOIN usuario ON compra.id_usuario = usuario.id_usuario' . $where;
-        $unitsStatement = $pdo->prepare($unitsSql);
-        foreach ($valores as $key => $value) {
-            $unitsStatement->bindValue($key, $value);
-        }
-        $unitsStatement->execute();
-        $resumen['unidades_ingresadas'] = (int)$unitsStatement->fetchColumn();
-
-        $dataSql = 'SELECT compra.*, proveedor.razon_social, proveedor.numero_documento,
-                tipo_documento.nombre AS nombre_tipo_documento,
-                tipo_comprobante.nombre AS tipo_comprobante, usuario.nombre AS nombre_usuario' .
-            $from . $where . ' ORDER BY compra.created_at DESC LIMIT :limite OFFSET :offset';
-        $dataStatement = $pdo->prepare($dataSql);
-        foreach ($valores as $key => $value) {
-            $dataStatement->bindValue($key, $value);
-        }
-        $dataStatement->bindValue(':limite', $limite, \PDO::PARAM_INT);
-        $dataStatement->bindValue(':offset', $offset, \PDO::PARAM_INT);
-        $dataStatement->execute();
-        $data = $dataStatement->fetchAll(\PDO::FETCH_ASSOC);
-
+        $resumen = $this->obtenerResumenCompras($busqueda, $filtros);
         return [
-            'data' => $data,
-            'total' => $total,
-            'paginas' => max(1, (int)ceil($total / $limite)),
+            'data' => $this->obtenerComprasFiltradas($busqueda, $filtros, $limite, $pagina),
+            'total' => $resumen['total_registros'],
+            'paginas' => max(1, (int)ceil($resumen['total_registros'] / $limite)),
             'pagina_actual' => $pagina,
             'por_pagina' => $limite,
             'resumen' => $resumen
