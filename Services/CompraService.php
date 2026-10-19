@@ -31,6 +31,7 @@ class CompraService {
         try {
             // Iniciar Transacción
             $pdo->beginTransaction();
+            $this->validarProductosYLotes($detalles);
 
             // 1. Verificar si ya existe el comprobante (Evitar duplicados)
             if ($this->compraModel->existeComprobante(
@@ -360,6 +361,7 @@ class CompraService {
         
         try {
             $pdo->beginTransaction();
+            $this->validarProductosYLotes($nuevosDetalles);
 
             $compra = $this->compraModel->find($id_compra);
             if (!$compra) {
@@ -513,6 +515,29 @@ class CompraService {
         } catch (Exception $e) {
             $pdo->rollBack();
             return ['status' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    private function validarProductosYLotes(array $detalles) {
+        $lineasPorProductoYLote = [];
+
+        foreach ($detalles as $indice => $detalle) {
+            $idProducto = filter_var($detalle['id_producto'] ?? null, FILTER_VALIDATE_INT);
+            $lote = trim((string)($detalle['numero_lote'] ?? ''));
+            if ($idProducto === false || $lote === '') {
+                continue;
+            }
+
+            $clave = $idProducto . ':' . strtolower($lote);
+            $numeroLinea = $indice + 1;
+            if (isset($lineasPorProductoYLote[$clave])) {
+                throw new Exception(
+                    "El producto ID {$idProducto} tiene el lote '{$lote}' repetido en las líneas "
+                    . "{$lineasPorProductoYLote[$clave]} y {$numeroLinea}."
+                );
+            }
+
+            $lineasPorProductoYLote[$clave] = $numeroLinea;
         }
     }
 }

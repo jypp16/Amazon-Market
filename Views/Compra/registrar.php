@@ -77,7 +77,7 @@
             <div class="purchase-products-heading">
                 <div>
                     <h3>2. Productos recibidos</h3>
-                    <p>Si un mismo producto llegó con otro lote o vencimiento, añade otra línea. Todas se suman al mismo saldo del producto.</p>
+                    <p>Si un mismo producto llegó con otro lote o vencimiento, añade otra línea. No repitas el mismo lote para el mismo producto. Todas las líneas se suman al mismo saldo del producto.</p>
                 </div>
             </div>
             <div class="purchase-lines-scroll">

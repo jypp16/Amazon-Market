@@ -370,6 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cantidad = Number(row.querySelector('[data-field="cantidad"]').value);
         const equivalencia = Number(opcionPresentacion && opcionPresentacion.dataset.equivalencia) || 0;
         const importe = Number(row.querySelector('[data-field="importe"]').value);
+        const lote = row.querySelector('[data-field="lote"]').value.trim();
         const vencimiento = row.querySelector('[data-field="vencimiento"]').value;
         const nombreProducto = producto.selectedOptions[0] ? producto.selectedOptions[0].textContent : 'Producto';
         const unidades = cantidad > 0 && equivalencia > 0 ? cantidad * equivalencia : 0;
@@ -389,7 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
             issues.push('Línea ' + row.dataset.line + ': el vencimiento debe ser posterior a la recepción.');
         }
 
-        return { cantidad, equivalencia, importe, unidades, vencimiento, nombreProducto, issues };
+        return { idProducto: producto.value, lote, cantidad, equivalencia, importe, unidades, vencimiento, nombreProducto, issues };
     }
 
     function actualizarResumen() {
@@ -398,6 +399,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const rows = obtenerFilas();
         const lineData = rows.map(datosLinea);
         const issues = [];
+        const lineasPorProductoYLote = new Map();
         const fechaEmision = document.getElementById('compra_fecha_emision').value;
         const receptionDate = fechaRecepcion.value;
         const documentTotal = Number(importeDocumento.value);
@@ -432,6 +434,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (esCorreccion && !motivoCorreccion.value.trim()) issues.push('Escribe el motivo de la corrección.');
         if (rows.length === 0) issues.push('Agrega al menos una línea de producto.');
         lineData.forEach(line => issues.push(...line.issues));
+        lineData.forEach((line, index) => {
+            if (!line.idProducto || !line.lote) return;
+
+            const clave = JSON.stringify([line.idProducto, line.lote.toLowerCase()]);
+            const primeraLinea = lineasPorProductoYLote.get(clave);
+            if (primeraLinea !== undefined) {
+                issues.push('Línea ' + (index + 1) + ': el producto "' + line.nombreProducto.trim()
+                    + '" ya tiene el lote "' + line.lote + '" en la línea ' + (primeraLinea + 1) + '.');
+                return;
+            }
+            lineasPorProductoYLote.set(clave, index);
+        });
         if (rows.length && Math.abs(difference) >= 0.005) issues.push('La suma del detalle no coincide con el total del documento.');
 
         validaciones.textContent = '';
