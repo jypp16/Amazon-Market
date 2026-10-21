@@ -6,6 +6,9 @@ use Libraries\Middleware\CSRFMiddleware;
 $rol = $_SESSION['rol'] ?? 0;
 $permisos = RBACMiddleware::getPermisosRol($rol);
 $slugs = array_column($permisos, 'slug');
+$esKardex = strpos($_GET['url'] ?? '', 'Reporte/kardex') === 0;
+$esReporteVariaciones = strpos($_GET['url'] ?? '', 'Reporte/variaciones') === 0;
+$esReporteInventario = $esKardex || $esReporteVariaciones;
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -55,9 +58,22 @@ $slugs = array_column($permisos, 'slug');
                 <?php endif; ?>
 
                 <?php if (in_array('productos.listar', $slugs)): ?>
-                <a href="<?= BASE_URL ?>/Producto" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Producto') !== false) ? 'active' : '' ?>">
-                    <i class="fa-solid fa-boxes-stacked"></i> <span>Productos</span>
-                </a>
+                <?php $enSeccionInventario = strpos($_GET['url'] ?? '', 'Producto') !== false || strpos($_GET['url'] ?? '', 'Inventario') !== false; ?>
+                <details class="menu-group" <?= $enSeccionInventario ? 'open' : '' ?>>
+                    <summary class="menu-link menu-group-toggle <?= $enSeccionInventario ? 'active' : '' ?>">
+                        <i class="fa-solid fa-house"></i>
+                        <span>Inventario</span>
+                        <i class="fa-solid fa-chevron-down menu-chevron"></i>
+                    </summary>
+                    <div class="menu-submenu">
+                        <a href="<?= BASE_URL ?>/Producto" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Producto') !== false) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-border-all"></i><span>Productos</span>
+                        </a>
+                        <a href="<?= BASE_URL ?>/Inventario/ajustes" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Inventario/ajustes') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-sliders"></i><span>Ajustes de inventario</span>
+                        </a>
+                    </div>
+                </details>
                 <?php endif; ?>
 
                 <?php if (in_array('proveedores.listar', $slugs)): ?>
@@ -126,9 +142,18 @@ $slugs = array_column($permisos, 'slug');
         <!-- Contenedor Principal (Workspace) -->
         <main class="main-content">
             <!-- Barra Superior del Workspace -->
-            <header class="topbar">
+            <header class="topbar <?= $esReporteInventario ? 'kardex-topbar' : '' ?>">
                 <div class="topbar-left">
+                    <?php if ($esReporteInventario): ?>
+                    <nav class="kardex-breadcrumb" aria-label="Ruta de navegación">
+                        <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
+                        <span>Reportes</span>
+                        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                        <strong><?= $esKardex ? 'Kardex de inventario' : 'Reporte de variaciones' ?></strong>
+                    </nav>
+                    <?php else: ?>
                     <h1 class="page-title"><i class="fa-solid fa-folder-open"></i> <?= e(str_replace(" - Amazon Market", "", $data['page_title'] ?? '')) ?></h1>
+                    <?php endif; ?>
                 </div>
                 <div class="topbar-right">
                     <span class="date-badge"><i class="fa-solid fa-calendar-day"></i> <?= date('d/m/Y') ?></span>

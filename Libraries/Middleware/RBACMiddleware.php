@@ -81,6 +81,9 @@ class RBACMiddleware extends Middleware {
                 'eliminar' => 'productos.eliminar',
                 'detalle'  => 'productos.listar',
             ],
+            'inventario' => [
+                'ajustes' => 'productos.listar',
+            ],
             'cliente' => [
                 'index'    => 'clientes.listar',
                 'crear'    => 'clientes.crear',
@@ -121,6 +124,8 @@ class RBACMiddleware extends Middleware {
                 'productosMasVendidos' => 'reportes.ver',
                 'productosMenosVendidos' => 'reportes.ver',
                 'inventario' => 'reportes.ver',
+                'kardex' => 'reportes.ver',
+                'variaciones' => 'reportes.ver',
                 'clientes' => 'reportes.ver',
                 'vendedores' => 'reportes.ver',
                 'categorias' => 'reportes.ver',

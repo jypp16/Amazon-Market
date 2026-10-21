@@ -41,8 +41,28 @@
         <div class="card-body">
             <div class="stat-icon"><i class="fa-solid fa-warehouse"></i></div>
             <div class="stat-details">
-                <h3>Inventario</h3>
-                <p>Valor y stock bajo</p>
+                <h3>Valor de inventario</h3>
+                <p>Stock bajo y reabastecer</p>
+            </div>
+        </div>
+    </a>
+
+    <a href="<?= BASE_URL ?>/Reporte/kardex" class="card report-card blue-card">
+        <div class="card-body">
+            <div class="stat-icon"><i class="fa-regular fa-rectangle-list"></i></div>
+            <div class="stat-details">
+                <h3>Kardex</h3>
+                <p>Entradas, salidas y saldo</p>
+            </div>
+        </div>
+    </a>
+
+    <a href="<?= BASE_URL ?>/Reporte/variaciones" class="card report-card orange-card">
+        <div class="card-body">
+            <div class="stat-icon"><i class="fa-solid fa-arrows-up-down"></i></div>
+            <div class="stat-details">
+                <h3>Variaciones</h3>
+                <p>Diferencias de stock y precio</p>
             </div>
         </div>
     </a>

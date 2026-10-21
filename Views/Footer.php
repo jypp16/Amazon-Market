@@ -19,6 +19,9 @@
     <script src="<?= BASE_URL ?>/Assets/js/venta.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/reportes.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/compras.js?v=<?= filemtime(__DIR__ . "/../Assets/js/compras.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/inventario.js?v=<?= filemtime(__DIR__ . "/../Assets/js/inventario.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/kardex.js?v=<?= filemtime(__DIR__ . "/../Assets/js/kardex.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/variaciones.js?v=<?= filemtime(__DIR__ . "/../Assets/js/variaciones.js") ?>"></script>
 
     <!-- Auto-ocultar alertas flash después de 4 segundos -->
     <script>

@@ -69,6 +69,16 @@ class ReporteController extends Controller {
         $this->views->render($this, "inventario", $data);
     }
 
+    public function kardex() {
+        $data = ['page_title' => 'Kardex de inventario - Amazon Market'];
+        $this->views->render($this, "kardex", $data);
+    }
+
+    public function variaciones() {
+        $data = ['page_title' => 'Reporte de variaciones - Amazon Market'];
+        $this->views->render($this, "variaciones", $data);
+    }
+
     public function clientes() {
         $filtros = $_GET;
         $resultado = $this->service->reporteClientes($filtros);
