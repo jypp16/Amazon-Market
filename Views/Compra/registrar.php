@@ -93,7 +93,7 @@
                             <th scope="col">Importe final (S/)</th>
                             <th scope="col">Costo x pres.</th>
                             <th scope="col">Lote</th>
-                            <th scope="col">Vencimiento</th>
+                            <th scope="col">Vencimiento *</th>
                             <th scope="col"><span class="visually-hidden">Quitar línea</span></th>
                         </tr>
                     </thead>
@@ -108,7 +108,7 @@
                 <button type="button" id="compra_agregar_linea" class="btn btn-secondary">
                     <i class="fa-solid fa-plus"></i> Añadir línea
                 </button>
-                <small>Lote: el código impreso en el empaque del fabricante, no el número de factura. Si el producto no vence, registra “No aplica”.</small>
+                <small>La fecha de vencimiento es obligatoria para cada producto. Lote: el código impreso en el empaque del fabricante, no el número de factura. Si no hay lote, registra “No aplica”.</small>
             </footer>
         </section>
 

@@ -314,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         row.appendChild(lotCell);
 
         const expirationCell = elemento('td');
-        const expiration = crearEntrada('date', 'Fecha de vencimiento');
+        const expiration = crearEntrada('date', 'Fecha de vencimiento (obligatoria)', { required: '' });
         expiration.dataset.field = 'vencimiento';
         expirationCell.appendChild(expiration);
         row.appendChild(expirationCell);
@@ -379,13 +379,14 @@ document.addEventListener('DOMContentLoaded', () => {
         row.querySelector('[data-field="equivalencia"]').textContent = equivalencia || '—';
         row.querySelector('[data-field="unidades"]').textContent = unidades || '—';
         row.querySelector('[data-field="costo"]').textContent = dinero(costo);
-        row.classList.toggle('purchase-line-invalid', Boolean(vencimiento && fechaRecepcion.value && vencimiento <= fechaRecepcion.value));
+        row.classList.toggle('purchase-line-invalid', !vencimiento || Boolean(fechaRecepcion.value && vencimiento <= fechaRecepcion.value));
 
         const issues = [];
         if (!producto.value) issues.push('Línea ' + row.dataset.line + ': selecciona un producto.');
         if (!presentacion.value) issues.push('Línea ' + row.dataset.line + ': selecciona una presentación.');
         if (!Number.isInteger(cantidad) || cantidad <= 0) issues.push('Línea ' + row.dataset.line + ': la cantidad debe ser un entero mayor a cero.');
         if (!Number.isFinite(importe) || importe <= 0) issues.push('Línea ' + row.dataset.line + ': ingresa un importe mayor a cero.');
+        if (!vencimiento) issues.push('Línea ' + row.dataset.line + ': ingresa la fecha de vencimiento.');
         if (vencimiento && fechaRecepcion.value && vencimiento <= fechaRecepcion.value) {
             issues.push('Línea ' + row.dataset.line + ': el vencimiento debe ser posterior a la recepción.');
         }
