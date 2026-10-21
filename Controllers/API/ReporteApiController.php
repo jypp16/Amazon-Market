@@ -36,6 +36,13 @@ class ReporteApiController extends ApiController {
             case 'inventario':
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteInventario()]);
                 break;
+            case 'kardex':
+                try {
+                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteKardex($input)]);
+                } catch (\InvalidArgumentException $error) {
+                    $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
+                }
+                break;
             case 'clientes':
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteClientes($input)]);
                 break;

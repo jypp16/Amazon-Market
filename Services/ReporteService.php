@@ -6,6 +6,7 @@ use Models\ReporteModel;
 use Models\CategoriaModel;
 use Models\UsuarioModel;
 use Models\ClienteModel;
+use Models\KardexModel;
 use Exception;
 
 class ReporteService {
@@ -126,6 +127,10 @@ class ReporteService {
             'productos' => $productos,
             'resumen' => $resumen,
         ];
+    }
+
+    public function reporteKardex(array $filtros): array {
+        return (new KardexModel())->obtenerMovimientos($filtros);
     }
 
     public function reporteClientes(array $input): array {
