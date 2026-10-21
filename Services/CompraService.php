@@ -522,6 +522,15 @@ class CompraService {
         $lineasPorProductoYLote = [];
 
         foreach ($detalles as $indice => $detalle) {
+            $fechaVencimiento = $detalle['fecha_vencimiento'] ?? null;
+            if (!is_string($fechaVencimiento) || $fechaVencimiento === '') {
+                throw new Exception('La fecha de vencimiento es obligatoria en la línea ' . ($indice + 1) . '.');
+            }
+            $fechaValidada = \DateTimeImmutable::createFromFormat('!Y-m-d', $fechaVencimiento);
+            if (!$fechaValidada || $fechaValidada->format('Y-m-d') !== $fechaVencimiento) {
+                throw new Exception('La fecha de vencimiento no es válida en la línea ' . ($indice + 1) . '.');
+            }
+
             $idProducto = filter_var($detalle['id_producto'] ?? null, FILTER_VALIDATE_INT);
             $lote = trim((string)($detalle['numero_lote'] ?? ''));
             if ($idProducto === false || $lote === '') {
