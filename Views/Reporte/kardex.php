@@ -88,7 +88,8 @@
                         <th>Producto</th>
                         <th>Categoría / subcategoría</th>
                         <th>Origen</th>
-                        <th>Sentido / cantidad</th>
+                        <th>Sentido</th>
+                        <th>Cantidad</th>
                         <th>Saldo anterior</th>
                         <th>Saldo resultante</th>
                         <th>Responsable</th>
@@ -97,7 +98,7 @@
                 </thead>
                 <tbody id="kardex-movements">
                     <tr class="kardex-empty-row">
-                        <td colspan="9">No hay movimientos para mostrar.</td>
+                        <td colspan="10">No hay movimientos para mostrar.</td>
                     </tr>
                 </tbody>
             </table>
