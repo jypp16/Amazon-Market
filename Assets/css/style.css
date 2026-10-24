@@ -1611,7 +1611,7 @@ button, select, input, textarea { font-family: inherit; }
 .kardex-guidance strong { display: block; margin-bottom: 3px; font-weight: 700; }
 .kardex-guidance p { color: #536985; line-height: 1.45; }
 .kardex-table-scroll { overflow-x: auto; }
-.kardex-table { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: fixed; }
+.kardex-table { width: 100%; min-width: 1000px; border-collapse: collapse; table-layout: fixed; }
 .kardex-table th {
     padding: 10px 8px;
     background: #f7f9fb;
@@ -1634,12 +1634,13 @@ button, select, input, textarea { font-family: inherit; }
 .kardex-table th:nth-child(1) { width: 9%; }
 .kardex-table th:nth-child(2) { width: 11%; }
 .kardex-table th:nth-child(3) { width: 15%; }
-.kardex-table th:nth-child(4) { width: 12%; }
-.kardex-table th:nth-child(5) { width: 12%; }
-.kardex-table th:nth-child(6),
-.kardex-table th:nth-child(7) { width: 10%; }
+.kardex-table th:nth-child(4) { width: 11%; }
+.kardex-table th:nth-child(5) { width: 8%; }
+.kardex-table th:nth-child(6) { width: 8%; }
+.kardex-table th:nth-child(7),
 .kardex-table th:nth-child(8) { width: 9%; }
-.kardex-table th:nth-child(9) { width: 12%; }
+.kardex-table th:nth-child(9) { width: 9%; }
+.kardex-table th:nth-child(10) { width: 11%; }
 .kardex-table td > strong { display: block; font-weight: 700; }
 .kardex-table td > small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
 .kardex-origin,
@@ -1652,9 +1653,8 @@ button, select, input, textarea { font-family: inherit; }
     font-weight: 600;
     line-height: 1.2;
 }
-.kardex-direction { flex-direction: column; gap: 4px; min-width: 62px; padding: 0; border-radius: 0; background: transparent; }
+.kardex-direction { min-width: 0; padding: 0; border-radius: 0; background: transparent; }
 .kardex-direction > span { padding: 3px 10px; border-radius: 20px; }
-.kardex-direction strong { font-size: 12px; font-weight: 700; }
 .kardex-origin-purchase { background: #f0f3f7; color: #516174; }
 .kardex-origin-sale { background: #e8efff; color: #3158a7; }
 .kardex-origin-adjustment { background: #dce8ff; color: #174ea6; }
@@ -1664,8 +1664,8 @@ button, select, input, textarea { font-family: inherit; }
 .kardex-direction-entry > span { background: #d8f3e7; }
 .kardex-direction-exit { color: #c73731; }
 .kardex-direction-exit > span { background: #ffe2e0; }
-.kardex-table .kardex-amount-entry { color: #16805a; }
-.kardex-table .kardex-amount-exit { color: #c73731; }
+.kardex-table .kardex-amount-entry { color: #16805a; font-weight: 700; }
+.kardex-table .kardex-amount-exit { color: #c73731; font-weight: 700; }
 .kardex-table-footer {
     display: flex;
     min-height: 42px;

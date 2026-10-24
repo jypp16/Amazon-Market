@@ -103,7 +103,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var emptyRow = document.createElement('tr');
             emptyRow.className = 'kardex-empty-row';
             var emptyCell = document.createElement('td');
-            emptyCell.colSpan = 9;
+            emptyCell.colSpan = 10;
             emptyCell.textContent = 'No hay movimientos para los filtros seleccionados.';
             emptyRow.appendChild(emptyCell);
             movementsBody.appendChild(emptyRow);
@@ -140,12 +140,14 @@ document.addEventListener('DOMContentLoaded', function() {
             directionBadge.className = 'kardex-direction ' + (isEntry ? 'kardex-direction-entry' : 'kardex-direction-exit');
             var directionLabel = document.createElement('span');
             directionLabel.textContent = isEntry ? 'Entrada' : 'Salida';
-            var directionAmount = document.createElement('strong');
-            directionAmount.textContent = (isEntry ? '+' : '−') + numberFormat.format(Number(movement.cantidad) || 0);
             directionBadge.appendChild(directionLabel);
-            directionBadge.appendChild(directionAmount);
             direction.appendChild(directionBadge);
             row.appendChild(direction);
+
+            var amount = document.createElement('td');
+            amount.className = isEntry ? 'kardex-amount-entry' : 'kardex-amount-exit';
+            amount.textContent = (isEntry ? '+' : '−') + numberFormat.format(Number(movement.cantidad) || 0);
+            row.appendChild(amount);
 
             [movement.saldo_anterior, movement.saldo_resultante].forEach(function(balance) {
                 var cell = document.createElement('td');
@@ -176,7 +178,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var loadingRow = document.createElement('tr');
         loadingRow.className = 'kardex-empty-row';
         var loadingCell = document.createElement('td');
-        loadingCell.colSpan = 9;
+        loadingCell.colSpan = 10;
         loadingCell.textContent = 'Cargando movimientos…';
         loadingRow.appendChild(loadingCell);
         movementsBody.appendChild(loadingRow);
@@ -210,7 +212,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var errorRow = document.createElement('tr');
             errorRow.className = 'kardex-empty-row';
             var errorCell = document.createElement('td');
-            errorCell.colSpan = 9;
+            errorCell.colSpan = 10;
             errorCell.textContent = 'No se pudieron cargar los movimientos.';
             errorRow.appendChild(errorCell);
             movementsBody.appendChild(errorRow);
