@@ -134,20 +134,15 @@ document.addEventListener('DOMContentLoaded', function() {
             origin.textContent = movement.origen || '—';
             row.appendChild(origin);
 
-            var direction = document.createElement('td');
-            var directionBadge = document.createElement('span');
-            var isEntry = movement.sentido === 'Entrada';
-            directionBadge.className = 'kardex-direction ' + (isEntry ? 'kardex-direction-entry' : 'kardex-direction-exit');
-            var directionLabel = document.createElement('span');
-            directionLabel.textContent = isEntry ? 'Entrada' : 'Salida';
-            directionBadge.appendChild(directionLabel);
-            direction.appendChild(directionBadge);
-            row.appendChild(direction);
-
-            var amount = document.createElement('td');
-            amount.className = isEntry ? 'kardex-amount-entry' : 'kardex-amount-exit';
-            amount.textContent = (isEntry ? '+' : '−') + numberFormat.format(Number(movement.cantidad) || 0);
-            row.appendChild(amount);
+            [
+                { value: movement.entradas, className: 'kardex-amount-entry' },
+                { value: movement.salidas, className: 'kardex-amount-exit' }
+            ].forEach(function(amount) {
+                var cell = document.createElement('td');
+                cell.className = amount.className;
+                cell.textContent = Number(amount.value) > 0 ? numberFormat.format(Number(amount.value)) : '—';
+                row.appendChild(cell);
+            });
 
             [movement.saldo_anterior, movement.saldo_resultante].forEach(function(balance) {
                 var cell = document.createElement('td');
