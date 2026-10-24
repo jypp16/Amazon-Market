@@ -36,7 +36,6 @@ document.addEventListener('DOMContentLoaded', function() {
     var startDate = document.getElementById('variation-start-date');
     var endDate = document.getElementById('variation-end-date');
     var typeSelect = document.getElementById('variation-type');
-    var directionSelect = document.getElementById('variation-direction');
     var status = document.getElementById('variation-filter-status');
     var pagination = document.getElementById('variation-pagination');
     var summaryToggle = document.getElementById('variation-summary-toggle');
@@ -81,8 +80,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var matchesStart = !startDate.value || date >= startDate.value;
             var matchesEnd = !endDate.value || date <= endDate.value;
             var matchesType = !typeSelect.value || row.type === typeSelect.value;
-            var matchesDirection = !directionSelect.value || row.direction === directionSelect.value;
-            return matchesProduct && matchesCategory && matchesSubcategory && matchesStart && matchesEnd && matchesType && matchesDirection;
+            return matchesProduct && matchesCategory && matchesSubcategory && matchesStart && matchesEnd && matchesType;
         });
     }
 
@@ -129,12 +127,17 @@ document.addEventListener('DOMContentLoaded', function() {
             typeCell.appendChild(typeBadge);
             tr.appendChild(typeCell);
 
-            var directionCell = document.createElement('td');
-            directionCell.className = row.direction === 'Incremento' ? 'variation-increase' : 'variation-decrease';
-            directionCell.textContent = row.direction;
-            tr.appendChild(directionCell);
+            [
+                { value: row.direction === 'Incremento' ? row.quantity : null, className: 'variation-increase' },
+                { value: row.direction === 'Disminución' ? row.quantity : null, className: 'variation-decrease' }
+            ].forEach(function(amount) {
+                var cell = document.createElement('td');
+                cell.className = amount.className;
+                cell.textContent = amount.value === null ? '—' : String(amount.value);
+                tr.appendChild(cell);
+            });
 
-            [row.quantity, row.reason, row.before + ' → ' + row.after].forEach(function(value) {
+            [row.reason, row.before + ' → ' + row.after].forEach(function(value) {
                 var cell = document.createElement('td');
                 cell.textContent = value;
                 tr.appendChild(cell);
@@ -275,7 +278,6 @@ document.addEventListener('DOMContentLoaded', function() {
         startDate.value = defaultStartDate;
         endDate.value = defaultEndDate;
         typeSelect.value = '';
-        directionSelect.value = '';
         status.textContent = '';
         status.classList.remove('is-error');
         currentPage = 1;

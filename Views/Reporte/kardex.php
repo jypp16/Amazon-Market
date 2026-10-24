@@ -88,8 +88,8 @@
                         <th>Producto</th>
                         <th>Categoría / subcategoría</th>
                         <th>Origen</th>
-                        <th>Sentido</th>
-                        <th>Cantidad</th>
+                        <th>Entradas</th>
+                        <th>Salidas</th>
                         <th>Saldo anterior</th>
                         <th>Saldo resultante</th>
                         <th>Responsable</th>
