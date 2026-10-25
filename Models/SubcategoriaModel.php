@@ -74,3 +74,4 @@ class SubcategoriaModel extends Model {
         return $val !== false ? (int)$val : null;
     }
 }
+
