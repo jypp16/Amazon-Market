@@ -782,3 +782,4 @@ echo PHP_EOL . "=== RESUMEN FASE 7: {$passed} PASS / {$failed} FAIL ===" . PHP_E
 if ($failed > 0) {
     exit(1);
 }
+
