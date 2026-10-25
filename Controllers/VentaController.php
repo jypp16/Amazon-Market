@@ -60,11 +60,10 @@ class VentaController extends Controller {
 
             // Vincular venta al inquilino autenticado (defensa BOLA/IDOR - Task 8)
             $input['id_usuario'] = intval($_SESSION['idUser'] ?? 0);
-            $refHeader = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
 
             header('Content-Type: application/json');
             try {
-                $resultado = $this->service->procesarVenta($input, $refHeader);
+                $resultado = $this->service->procesarVenta($input);
                 http_response_code($resultado['status'] ? 201 : 400);
                 echo json_encode($resultado);
             } catch (InventarioException $e) {
@@ -78,3 +77,4 @@ class VentaController extends Controller {
         }
     }
 }
+
