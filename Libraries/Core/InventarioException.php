@@ -149,4 +149,38 @@ class InventarioException extends \RuntimeException {
     ): self {
         return new self($message, 'FORBIDDEN_ADMIN_ONLY', 403);
     }
+
+    public static function referenciaConsultaExpirada(string $referenciaConsulta = ''): self {
+        return new self(
+            'La referencia de la consulta ha expirado. Pulse Consultar nuevamente para actualizar el reporte.',
+            'QUERY_REFERENCE_EXPIRED',
+            410,
+            [],
+            [
+                'referencia_consulta' => $referenciaConsulta,
+                'requiere_nueva_consulta' => true,
+            ]
+        );
+    }
+
+    public static function referenciaConsultaNoAutorizada(): self {
+        return new self(
+            'La referencia de consulta no pertenece al usuario actual.',
+            'QUERY_REFERENCE_FORBIDDEN',
+            403
+        );
+    }
+
+    public static function filtrosConsultaConflicto(string $referenciaConsulta): self {
+        return new self(
+            'Los filtros enviados no coinciden con la referencia de consulta activa. Ejecute una nueva consulta para aplicar los nuevos filtros.',
+            'QUERY_FILTERS_MISMATCH',
+            409,
+            [],
+            [
+                'referencia_consulta' => $referenciaConsulta,
+                'requiere_nueva_consulta' => true,
+            ]
+        );
+    }
 }

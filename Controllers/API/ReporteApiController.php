@@ -4,6 +4,7 @@ namespace Controllers\API;
 
 use Libraries\Core\ApiController;
 use Services\ReporteService;
+use Libraries\Core\InventarioException;
 use Services\MailService;
 
 require_once __DIR__ . '/../../Libraries/PDF/ReportPDF.php';
@@ -37,11 +38,13 @@ class ReporteApiController extends ApiController {
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteInventario()]);
                 break;
             case 'kardex':
-                $this->requireAdminActivo('reportes.kardex');
+                $admin = $this->requireAdminActivo('reportes.kardex');
                 try {
-                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteKardex($input)]);
+                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteKardex($input, (int)$admin['id_usuario'])]);
+                } catch (InventarioException $error) {
+                    $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
                 } catch (\InvalidArgumentException $error) {
-                    $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
+                    $this->sendJsonResponse(['status' => false, 'code' => 'VALIDATION_ERROR', 'message' => $error->getMessage()], 422);
                 }
                 break;
             case 'variaciones':

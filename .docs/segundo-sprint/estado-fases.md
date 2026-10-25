@@ -15,7 +15,7 @@
 | **Fase 3** | **Productos y Compras** | Productos nuevos con `stock_actual = 0`, bloqueo de edición de stock desde catálogo, validación entera de `stock_minimo`, conservación de presentaciones y equivalencias de Compras (ej. 2 cajas de 24 = 48 unidades individuales) y corrección/anulación sin movimientos ficticios en `kardex`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | **Completada** |
-| **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 7** | **Variaciones y nuevo selector de sentido** | Incorporación del nuevo selector independiente “Sentido del movimiento” (`Todas`, `Entradas`, `Salidas`) en `Views/Reporte/variaciones.php`, consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y por producto único, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 9** | **Excel** | Generación y descarga de Excel para Kardex (incluyendo producto específico sin movimientos) y Variaciones, conservando estilos, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta` y PDF. | `amazon_market_sprint2_test` | Pendiente |
@@ -227,11 +227,72 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 ---
 
-## 8. Dependencias para la Fase 6 (Kardex)
+## 8. Evidencias Reales de Cierre de la Fase 6
 
-- Implementar endpoint `GET /api/reportes/kardex` en `ReporteApiController` y servicio `ReporteService`.
-- Soportar paginación, filtros por producto, fechas, categoría y subcategoría histórica.
-- Calcular y exponer `resumen_producto` con 5 tarjetas (`Unidad`, `Saldo inicial`, `Entradas`, `Salidas`, `Saldo final`) cuando se consulte un producto específico.
-- En consulta general (sin producto específico), omitir `resumen_producto` y no sumar existencias de productos distintos.
-- Respaldar la consulta congelada mediante `referencia_consulta` en `reporte_consulta_snapshot` y `reporte_consulta_snapshot_item`.
-- Conectar interfaz `Views/Reporte/kardex.php` y `Assets/js/kardex.js`.
+1. **Modelo y Servicio canónico de Kardex**:
+   - [`Models/KardexModel.php`](../../Models/KardexModel.php):
+     - Eliminada completamente la reconstrucción inversa desde `stock_actual` y uniones sintéticas con compras/ventas sin registrar.
+     - `obtenerSaldoInicial`: Consulta estrictamente el `stock_resultante` del último movimiento registrado antes de `fecha_inicio 00:00:00`. Si no hay movimientos previos, devuelve `0`.
+     - `consultarKardexCanonico`: Consulta la tabla canónica `kardex` con rango inclusivo de fechas, producto, categoría histórica (`id_categoria_snapshot`), subcategoría histórica (`id_subcategoria_snapshot`) y texto `q`, ordenado por `fecha_movimiento ASC, id_kardex ASC`.
+     - `guardarSnapshotConsulta` y `obtenerItemsSnapshotPaginados`: Persisten y recuperan el conjunto de filas ordenadas en `reporte_consulta_snapshot` y `reporte_consulta_snapshot_item` para asegurar consistencia inmutable en paginación y exportaciones.
+   - [`Services/ReporteService.php`](../../Services/ReporteService.php):
+     - `reporteKardex`:
+       - Normalización de fechas con valores predeterminados canónicos (`fecha_inicio` primer día del mes actual, `fecha_fin` fecha actual). Validación de no inversión (`fecha_inicio <= fecha_fin`) y días completos (`00:00:00` a `23:59:59`).
+       - Cálculo de `resumen_producto` con 5 tarjetas (`unidad_inventario`, `saldo_inicial`, `total_entradas`, `total_salidas`, `saldo_final`) exclusivamente cuando se selecciona un producto específico. Si el producto no tuvo movimientos en el período, conserva `saldo_inicial` real, `entradas = 0`, `salidas = 0`, `saldo_final = saldo_inicial` y marca `exportable = true`.
+       - En consulta general (sin producto específico), omite `resumen_producto` (`resumen_producto.aplicable = false`) y no suma existencias de productos distintos. Si no hay movimientos en la consulta general, marca `exportable = false`.
+       - Administración de `referencia_consulta`: genera token único y hash SHA-256 de filtros canónicos. Si se envía una referencia, comprueba vigencia (renovando 30 minutos), valida pertenencia de usuario autenticado (`403 QUERY_REFERENCE_FORBIDDEN`) y detecta alteración de filtros (`409 QUERY_FILTERS_MISMATCH`). Ante referencia vencida responde `410 QUERY_REFERENCE_EXPIRED`.
+       - Devuelve estructura contractual con colecciones `items`, `pagination` y alias de compatibilidad `movimientos`, `paginacion`.
+   - [`Controllers/API/ReporteApiController.php`](../../Controllers/API/ReporteApiController.php):
+     - Endpoint `GET /api/reportes/kardex` protegido con `requireAdminActivo('reportes.kardex')`. Pasa el identificador de usuario autenticado al servicio y captura `InventarioException` respondiendo los códigos HTTP y formatos canónicos (403, 409, 410, 422).
+   - [`Controllers/ReporteController.php`](../../Controllers/ReporteController.php):
+     - Acción `kardex()` verifica sesión activa y rol Administrador activo (`id_rol = 1`).
+
+2. **Conexión de Frontend**:
+   - [`Views/Reporte/kardex.php`](../../Views/Reporte/kardex.php):
+     - Fecha inicial predeterminada al primer día del mes en curso (`Y-m-01`).
+     - Selector de subcategorías conectado con opción "Todas".
+   - [`Assets/js/kardex.js`](../../Assets/js/kardex.js):
+     - Carga dinámica de subcategorías dependiente de la categoría seleccionada usando `GET /api/categorias?modo=reporte`.
+     - Buscador de productos utilizando `GET /api/productos?modo=reporte` para incluir productos inactivos con historial.
+     - Poblado de las 5 tarjetas del resumen por producto (`#kardex-product-summary`).
+     - Conservación de `currentConsultaRef` a través de los botones de paginación anterior/siguiente.
+     - Limpieza de referencia al pulsar "Consultar", "Limpiar filtros" o modificar criterios de búsqueda para generar una nueva instantánea congelada.
+
+3. **Suite de pruebas automatizadas de la Fase 6**:
+   - [`tests/sprint2/fase6_kardex_test.php`](../../tests/sprint2/fase6_kardex_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **18 PASS / 0 FAIL**:
+     - `F6-SALDO-01`: Cálculo canónico de saldo_inicial previo (50), entradas (5), salidas (13) y saldo_final histórico (42). Movimientos posteriores al período no alteran el cierre histórico.
+     - `F6-PROD-ZERO-01`: Producto sin actividad en el período conserva saldo_inicial real (50), entradas=0, salidas=0, saldo_final=50 y `exportable = true`.
+     - `F6-PROD-ZERO-02`: Producto nuevo sin movimientos previos ni en rango: saldo_inicial=0, saldo_final=0 y `exportable = true`.
+     - `F6-INACT-01`: Producto inactivo con historial es consultable y expone `estado_producto = 'Inactivo'`.
+     - `F6-GEN-01`: Consulta general: `resumen_producto.aplicable = false` sin sumar saldos entre productos y `exportable = true`.
+     - `F6-GEN-ZERO-01`: Consulta general sin resultados: total=0 y `exportable = false`.
+     - `F6-ORDER-01`: Movimientos con fecha y hora idénticas mantienen orden determinístico estricto por `id_kardex` y continuidad de saldos.
+     - `F6-HIST-CAT-01`: Filtro por clasificación histórica respeta snapshot (Bebidas) aun si el catálogo actual del producto cambió a Abarrotes.
+     - `F6-PAGE-01`: Paginación consistente mediante `referencia_consulta`: página 1 y página 2 sin saltos ni duplicados.
+     - `F6-SNAP-IMMUN-01`: Instantánea congelada bajo `referencia_consulta` es inmune a transacciones concurrentes posteriores.
+     - `F6-REF-EXPIRE-01`: Referencia de consulta vencida responde `410 QUERY_REFERENCE_EXPIRED`.
+     - `F6-REF-FORBID-01`: Referencia de consulta ajena al usuario solicitante responde `403 QUERY_REFERENCE_FORBIDDEN`.
+     - `F6-REF-MISMATCH-01`: Alterar filtros manteniendo la referencia activa rechaza `409 QUERY_FILTERS_MISMATCH`.
+     - `F6-VAL-01`: Validación estricta: fechas invertidas, formatos no válidos y producto inexistente responden `422 VALIDATION_ERROR`.
+     - `F6-READONLY-01`: La consulta de Kardex es estrictamente de solo lectura: existencias y movimientos permanecen 100% inalterados.
+     - `F6-RBAC-01`: Seguridad RBAC: rol Administrador posee permiso `reportes.kardex`; rol Vendedor es rechazado.
+     - `F6-CLEAN-01`: Limpieza final en base de pruebas: registros temporales eliminados y stock en 0.
+     - `F6-ISO-01`: Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex).
+
+4. **Verificación de regresión cruzada acumulada**:
+   - Fase 2 (`fase2_infraestructura_test.php`): **24 PASS / 0 FAIL**.
+   - Fase 3 (`fase3_productos_compras_test.php`): **13 PASS / 0 FAIL**.
+   - Fase 4 (`fase4_ventas_kardex_test.php`): **14 PASS / 0 FAIL**.
+   - Fase 5 (`fase5_bajas_ajustes_test.php`): **14 PASS / 0 FAIL**.
+   - Fase 6 (`fase6_kardex_test.php`): **18 PASS / 0 FAIL**.
+   - **Total acumulado de pruebas: 83 PASS / 0 FAIL**.
+
+---
+
+## 9. Dependencias para la Fase 7 (Variaciones y nuevo selector de sentido)
+
+- Incorporar en `Views/Reporte/variaciones.php` el nuevo selector independiente **“Sentido del movimiento”** (`Todas`, `Entradas`, `Salidas`) sin sustituir al selector actual “Tipo de variación”.
+- Combinar todos los filtros mediante `AND` (`tipo_variacion` y `sentido`).
+- Implementar endpoint `GET /api/reportes/variaciones` en `ReporteApiController` y `ReporteService`, filtrando exclusivamente `BAJA_DANO`, `BAJA_VENCIMIENTO`, `AJUSTE_POSITIVO` y `AJUSTE_NEGATIVO`.
+- Proveer resúmenes para vista general (tabla desglosada por producto con incrementos y disminuciones) y vista de producto único.
+- Conectar persistencia de consulta congelada en `reporte_consulta_snapshot` para Variaciones.

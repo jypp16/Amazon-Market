@@ -27,11 +27,11 @@
             </div>
             <div class="kardex-filter-field">
                 <label for="kardex-subcategory">Subcategoría</label>
-                <select id="kardex-subcategory" disabled><option value="">Por implementar</option></select>
+                <select id="kardex-subcategory" disabled><option value="">Todas</option></select>
             </div>
             <div class="kardex-filter-field">
                 <label for="kardex-start-date">Desde</label>
-                <input id="kardex-start-date" type="date">
+                <input id="kardex-start-date" type="date" value="<?= date('Y-m-01') ?>">
             </div>
             <div class="kardex-filter-field">
                 <label for="kardex-end-date">Hasta (obligatorio)</label>

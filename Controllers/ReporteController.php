@@ -70,6 +70,17 @@ class ReporteController extends Controller {
     }
 
     public function kardex() {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (empty($_SESSION['login'])) {
+            header('Location: ' . BASE_URL . '/login');
+            exit;
+        }
+        if ((int)($_SESSION['userData']['id_rol'] ?? 0) !== 1) {
+            header('Location: ' . BASE_URL . '/dashboard');
+            exit;
+        }
         $data = ['page_title' => 'Kardex de inventario - Amazon Market'];
         $this->views->render($this, "kardex", $data);
     }

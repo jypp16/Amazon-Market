@@ -243,3 +243,32 @@
 | `F5-SEC-01` | Seguridad y RBAC: rol Vendedor rechazado `403 FORBIDDEN_ADMIN_ONLY`; usuario inexistente rechazado `401`. | **PASS** |
 | `F5-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0. | **PASS** |
 | `F5-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |
+
+---
+
+## 7. Resultados Ejecutados en Fase 6 (`tests/sprint2/fase6_kardex_test.php`)
+
+- **Comando ejecutado:** `C:\xampp\php\php.exe tests\sprint2\fase6_kardex_test.php`
+- **Base de datos utilizada:** `amazon_market_sprint2_test`
+- **Resultado global:** **18 PASS / 0 FAIL**
+
+| Código | Verificación Ejecutada | Resultado |
+|---|---|---|
+| `F6-SALDO-01` | Cálculo canónico de saldo_inicial previo (50), entradas (5), salidas (13) y saldo_final histórico (42). Movimientos posteriores al rango no alteran el cierre histórico. | **PASS** |
+| `F6-PROD-ZERO-01` | Producto sin actividad en el período: conserva saldo_inicial real (50), entradas=0, salidas=0, saldo_final=50 y `exportable = true`. | **PASS** |
+| `F6-PROD-ZERO-02` | Producto nuevo sin movimientos previos ni en rango: saldo_inicial=0, saldo_final=0 y `exportable = true`. | **PASS** |
+| `F6-INACT-01` | Producto inactivo con historial es consultable y expone `estado_producto = 'Inactivo'`. | **PASS** |
+| `F6-GEN-01` | Consulta general (sin producto específico): `resumen_producto.aplicable = false` sin sumar saldos entre productos y `exportable = true`. | **PASS** |
+| `F6-GEN-ZERO-01` | Consulta general sin resultados: total=0 y `exportable = false`. | **PASS** |
+| `F6-ORDER-01` | Movimientos simultáneos mantienen orden determinístico estricto por `id_kardex` y continuidad de saldos. | **PASS** |
+| `F6-HIST-CAT-01` | Filtro por clasificación histórica respeta snapshot (Bebidas) aun si el catálogo actual del producto cambió a Abarrotes. | **PASS** |
+| `F6-PAGE-01` | Paginación consistente mediante `referencia_consulta`: página 1 (2 ítems) y página 2 (1 ítem) sin saltos ni duplicados. | **PASS** |
+| `F6-SNAP-IMMUN-01` | Instantánea congelada bajo `referencia_consulta` es inmune a transacciones concurrentes posteriores. | **PASS** |
+| `F6-REF-EXPIRE-01` | Referencia de consulta vencida responde `410 QUERY_REFERENCE_EXPIRED` requiriendo nueva consulta. | **PASS** |
+| `F6-REF-FORBID-01` | Referencia de consulta ajena al usuario solicitante responde `403 QUERY_REFERENCE_FORBIDDEN`. | **PASS** |
+| `F6-REF-MISMATCH-01` | Alterar filtros manteniendo la referencia activa rechaza `409 QUERY_FILTERS_MISMATCH`. | **PASS** |
+| `F6-VAL-01` | Validación estricta: fechas invertidas, formatos no válidos y producto inexistente responden `422 VALIDATION_ERROR`. | **PASS** |
+| `F6-READONLY-01` | La consulta de Kardex es estrictamente de solo lectura: existencias y movimientos permanecen 100% inalterados. | **PASS** |
+| `F6-RBAC-01` | Seguridad RBAC: rol Administrador posee permiso `reportes.kardex`; rol Vendedor es rechazado. | **PASS** |
+| `F6-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0. | **PASS** |
+| `F6-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |

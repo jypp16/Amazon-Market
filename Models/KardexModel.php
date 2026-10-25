@@ -3,8 +3,10 @@
 namespace Models;
 
 use Libraries\Core\Model;
+use PDO;
 
 class KardexModel extends Model {
+
     public function __construct() {
         parent::__construct();
         $this->table = 'kardex';
@@ -13,198 +15,236 @@ class KardexModel extends Model {
 
     /**
      * Registra un movimiento en el kardex
-     * CA-02 de HU05
      */
     public function registrarMovimiento(array $datos) {
-        // Se asume que $datos trae las claves mapeadas con las columnas de la BD
         return $this->insert($datos);
     }
 
-    public function obtenerMovimientos(array $filtros): array {
-        $desde = $this->validarFecha($filtros['desde'] ?? '', 'desde');
-        $hasta = $this->validarFecha($filtros['hasta'] ?? date('Y-m-d'), 'hasta');
-        if ($desde !== null && $hasta !== null && $desde > $hasta) {
-            throw new \InvalidArgumentException('La fecha inicial no puede ser posterior a la fecha final.');
-        }
-
-        $productoIngresado = $filtros['id_producto'] ?? '';
-        $categoriaIngresada = $filtros['id_categoria'] ?? '';
-        $idProducto = $productoIngresado === '' ? null : filter_var($productoIngresado, FILTER_VALIDATE_INT);
-        $idCategoria = $categoriaIngresada === '' ? null : filter_var($categoriaIngresada, FILTER_VALIDATE_INT);
-        if (($productoIngresado !== '' && ($idProducto === false || $idProducto < 1))
-            || ($categoriaIngresada !== '' && ($idCategoria === false || $idCategoria < 1))) {
-            throw new \InvalidArgumentException('El producto o la categoría no son válidos.');
-        }
-
-        $pagina = filter_var($filtros['pagina'] ?? 1, FILTER_VALIDATE_INT);
-        if ($pagina === false || $pagina < 1) {
-            throw new \InvalidArgumentException('El número de página no es válido.');
-        }
-        $porPagina = 10;
-
-        $movimientosRegistrados = "
-            SELECT
-                CONCAT('kardex-', k.id_kardex) AS clave_movimiento,
-                k.id_producto,
-                k.id_usuario,
-                k.tipo_movimiento,
-                (k.stock_resultante - k.stock_anterior) AS cantidad_firmada,
-                COALESCE(k.fecha_movimiento, compra.fecha_recepcion) AS fecha_movimiento,
-                producto.codigo_barra,
-                producto.nombre AS producto,
-                categoria.nombre AS categoria,
-                usuario.nombre AS responsable,
-                detalle_compra.numero_lote AS lote,
-                CASE
-                    WHEN k.id_accion_compra IS NOT NULL AND k.tipo_movimiento = 'Ingreso' THEN 'Compra'
-                    WHEN k.id_accion_compra IS NOT NULL AND k.tipo_movimiento = 'Anulacion' THEN 'Anulación de compra'
-                    WHEN k.id_accion_compra IS NOT NULL THEN 'Corrección de compra'
-                    WHEN k.id_accion_venta IS NOT NULL THEN 'Venta'
-                    ELSE 'Ajuste de inventario'
-                END AS origen
-            FROM kardex k
-            INNER JOIN producto ON producto.id_producto = k.id_producto
-            LEFT JOIN categoria ON categoria.id_categoria = producto.id_categoria
-            LEFT JOIN usuario ON usuario.id_usuario = k.id_usuario
-            LEFT JOIN compra ON compra.id_compra = k.id_accion_compra
-            LEFT JOIN detalle_compra ON detalle_compra.id_detalle_compra = k.id_detalle_compra
-            WHERE
-                (k.id_accion_compra IS NOT NULL AND k.tipo_movimiento IN ('Ingreso', 'Correccion', 'Anulacion'))
-                OR k.id_accion_venta IS NOT NULL
-                OR (k.id_accion_compra IS NULL AND k.id_accion_venta IS NULL AND k.tipo_movimiento = 'Ajuste')
-        ";
-
-        $comprasSinKardex = "
-            SELECT
-                CONCAT('compra-', detalle_compra.id_detalle_compra) AS clave_movimiento,
-                detalle_compra.id_producto,
-                compra.id_usuario,
-                'Ingreso' AS tipo_movimiento,
-                detalle_compra.cantidad_base AS cantidad_firmada,
-                CONCAT(compra.fecha_recepcion, ' 00:00:00') AS fecha_movimiento,
-                producto.codigo_barra,
-                producto.nombre AS producto,
-                categoria.nombre AS categoria,
-                usuario.nombre AS responsable,
-                detalle_compra.numero_lote AS lote,
-                'Compra' AS origen
-            FROM detalle_compra
-            INNER JOIN compra ON compra.id_compra = detalle_compra.id_compra
-            INNER JOIN producto ON producto.id_producto = detalle_compra.id_producto
-            LEFT JOIN categoria ON categoria.id_categoria = producto.id_categoria
-            LEFT JOIN usuario ON usuario.id_usuario = compra.id_usuario
-            WHERE compra.estado <> 'Anulada'
-                AND NOT EXISTS (
-                    SELECT 1 FROM kardex
-                    WHERE kardex.id_detalle_compra = detalle_compra.id_detalle_compra
-                )
-        ";
-
-        $ventasSinKardex = "
-            SELECT
-                CONCAT('venta-', detalle_venta.id_detalle_venta) AS clave_movimiento,
-                detalle_venta.id_producto,
-                venta.id_usuario,
-                'Egreso' AS tipo_movimiento,
-                -detalle_venta.cantidad AS cantidad_firmada,
-                venta.fecha_venta AS fecha_movimiento,
-                producto.codigo_barra,
-                producto.nombre AS producto,
-                categoria.nombre AS categoria,
-                usuario.nombre AS responsable,
-                NULL AS lote,
-                'Venta' AS origen
-            FROM detalle_venta
-            INNER JOIN venta ON venta.id_venta = detalle_venta.id_venta
-            INNER JOIN producto ON producto.id_producto = detalle_venta.id_producto
-            LEFT JOIN categoria ON categoria.id_categoria = producto.id_categoria
-            LEFT JOIN usuario ON usuario.id_usuario = venta.id_usuario
-            WHERE venta.estado = 1
-                AND NOT EXISTS (
-                    SELECT 1 FROM kardex
-                    WHERE kardex.id_accion_venta = venta.id_venta
-                        AND kardex.id_producto = detalle_venta.id_producto
-                )
-        ";
-
-        $sql = "SELECT movimientos.*, producto.stock_actual
-            FROM (($movimientosRegistrados)
-                UNION ALL ($comprasSinKardex)
-                UNION ALL ($ventasSinKardex)
-            ) movimientos
-            INNER JOIN producto ON producto.id_producto = movimientos.id_producto
-            WHERE 1 = 1";
-        $valores = [];
-
-        if ($idProducto !== false && $idProducto !== null) {
-            $sql .= ' AND movimientos.id_producto = :id_producto';
-            $valores[':id_producto'] = $idProducto;
-        }
-        if ($idCategoria !== false && $idCategoria !== null) {
-            $sql .= ' AND producto.id_categoria = :id_categoria';
-            $valores[':id_categoria'] = $idCategoria;
-        }
-        $sql .= ' ORDER BY movimientos.fecha_movimiento DESC, movimientos.clave_movimiento DESC';
-
-        $consulta = $this->conect()->prepare($sql);
-        $consulta->execute($valores);
-        $filas = $consulta->fetchAll(\PDO::FETCH_ASSOC);
-
-        $saldosPorProducto = [];
-        $resultado = [];
-        foreach ($filas as $fila) {
-            $id = (int)$fila['id_producto'];
-            if (!array_key_exists($id, $saldosPorProducto)) {
-                $saldosPorProducto[$id] = (float)$fila['stock_actual'];
-            }
-            $saldoResultante = $saldosPorProducto[$id];
-            $cantidadFirmada = (float)$fila['cantidad_firmada'];
-            $saldoAnterior = $saldoResultante - $cantidadFirmada;
-            $saldosPorProducto[$id] = $saldoAnterior;
-
-            $fecha = substr((string)$fila['fecha_movimiento'], 0, 10);
-            if (($desde !== null && $fecha < $desde) || ($hasta !== null && $fecha > $hasta)) {
-                continue;
-            }
-
-            $resultado[] = [
-                'fecha_movimiento' => $fila['fecha_movimiento'],
-                'codigo_barra' => $fila['codigo_barra'],
-                'producto' => $fila['producto'],
-                'categoria' => $fila['categoria'] ?? 'Sin categoría',
-                'origen' => $fila['origen'],
-                'entradas' => max($cantidadFirmada, 0),
-                'salidas' => max(-$cantidadFirmada, 0),
-                'saldo_anterior' => $saldoAnterior,
-                'saldo_resultante' => $saldoResultante,
-                'responsable' => $fila['responsable'] ?? 'No disponible',
-                'lote' => $fila['lote'] ?? '',
-            ];
-        }
-
-        $total = count($resultado);
-        $totalPaginas = max(1, (int)ceil($total / $porPagina));
-        $pagina = min($pagina, $totalPaginas);
-
-        return [
-            'movimientos' => array_slice($resultado, ($pagina - 1) * $porPagina, $porPagina),
-            'paginacion' => [
-                'pagina' => $pagina,
-                'por_pagina' => $porPagina,
-                'total' => $total,
-                'total_paginas' => $totalPaginas,
-            ],
-        ];
+    /**
+     * Obtiene el saldo histórico inmediatamente anterior al inicio del período
+     * para un producto específico.
+     * Lee estrictamente el stock_resultante del último movimiento registrado antes de fecha_inicio_inicio.
+     */
+    public function obtenerSaldoInicial(int $idProducto, string $fechaInicioInicio): int {
+        $sql = "SELECT stock_resultante 
+                FROM kardex 
+                WHERE id_producto = :id_producto 
+                  AND fecha_movimiento < :fecha_inicio_inicio
+                ORDER BY fecha_movimiento DESC, id_kardex DESC 
+                LIMIT 1";
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute([
+            ':id_producto' => $idProducto,
+            ':fecha_inicio_inicio' => $fechaInicioInicio,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? (int)$row['stock_resultante'] : 0;
     }
 
-    private function validarFecha(string $fecha, string $campo): ?string {
-        if ($fecha === '') {
-            return null;
+    /**
+     * Obtiene información básica del producto para el encabezado del reporte
+     * (incluso si está inactivo).
+     */
+    public function obtenerProductoParaReporte(int $idProducto): ?array {
+        $sql = "SELECT p.id_producto, p.codigo_barra, p.nombre, p.estado,
+                       p.stock_actual, p.stock_minimo,
+                       c.nombre AS categoria, sc.nombre AS subcategoria,
+                       u.abreviatura AS unidad
+                FROM producto p
+                LEFT JOIN categoria c ON c.id_categoria = p.id_categoria
+                LEFT JOIN subcategoria sc ON sc.id_subcategoria = p.id_subcategoria
+                LEFT JOIN unidad_medida u ON u.id_unidad = p.id_unidad
+                WHERE p.id_producto = :id_producto
+                LIMIT 1";
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute([':id_producto' => $idProducto]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    /**
+     * Consulta canónica de movimientos en kardex aplicando filtros en el rango
+     * y orden cronológico determinístico: fecha_movimiento ASC, id_kardex ASC.
+     */
+    public function consultarKardexCanonico(array $filtros): array {
+        $sql = "SELECT k.*
+                FROM kardex k
+                WHERE k.fecha_movimiento BETWEEN :fecha_inicio AND :fecha_fin";
+        $params = [
+            ':fecha_inicio' => $filtros['fecha_inicio_inicio'],
+            ':fecha_fin' => $filtros['fecha_fin_fin'],
+        ];
+
+        if (!empty($filtros['id_producto'])) {
+            $sql .= " AND k.id_producto = :id_producto";
+            $params[':id_producto'] = (int)$filtros['id_producto'];
         }
-        $fechaValidada = \DateTimeImmutable::createFromFormat('!Y-m-d', $fecha);
-        if (!$fechaValidada || $fechaValidada->format('Y-m-d') !== $fecha) {
-            throw new \InvalidArgumentException("La fecha '$campo' no es válida.");
+
+        if (!empty($filtros['id_categoria'])) {
+            $sql .= " AND k.id_categoria_snapshot = :id_categoria";
+            $params[':id_categoria'] = (int)$filtros['id_categoria'];
         }
-        return $fecha;
+
+        if (!empty($filtros['id_subcategoria'])) {
+            $sql .= " AND k.id_subcategoria_snapshot = :id_subcategoria";
+            $params[':id_subcategoria'] = (int)$filtros['id_subcategoria'];
+        }
+
+        if (!empty($filtros['q'])) {
+            $sql .= " AND (k.producto_nombre_snapshot LIKE :q OR k.producto_codigo_snapshot LIKE :q)";
+            $params[':q'] = '%' . trim($filtros['q']) . '%';
+        }
+
+        $sql .= " ORDER BY k.fecha_movimiento ASC, k.id_kardex ASC";
+
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Guarda la instantánea de consulta congelada en reporte_consulta_snapshot
+     * y reporte_consulta_snapshot_item para consistencia de paginación y exportación.
+     */
+    public function guardarSnapshotConsulta(
+        string $referencia,
+        int $idUsuario,
+        string $tipoReporte,
+        string $hashFiltros,
+        array $filtros,
+        array $resumen,
+        int $totalRegistros,
+        bool $exportable,
+        array $kardexIds
+    ): array {
+        $db = $this->conect();
+        $inTransaction = $db->inTransaction();
+        if (!$inTransaction) {
+            $db->beginTransaction();
+        }
+
+        try {
+            // Limpieza preventiva de snapshots vencidos hace más de 1 día
+            $db->exec("DELETE FROM reporte_consulta_snapshot WHERE expira_en < DATE_SUB(NOW(), INTERVAL 1 DAY)");
+
+            $sqlSnapshot = "INSERT INTO reporte_consulta_snapshot 
+                            (referencia_consulta, id_usuario, tipo_reporte, hash_filtros, filtros_json, resumen_json, total_registros, exportable, creado_en, expira_en)
+                            VALUES (:ref, :usuario, :tipo, :hash, :filtros, :resumen, :total, :exportable, NOW(), DATE_ADD(NOW(), INTERVAL 30 MINUTE))";
+            $stmt = $db->prepare($sqlSnapshot);
+            $stmt->execute([
+                ':ref' => $referencia,
+                ':usuario' => $idUsuario,
+                ':tipo' => $tipoReporte,
+                ':hash' => $hashFiltros,
+                ':filtros' => json_encode($filtros, JSON_UNESCAPED_UNICODE),
+                ':resumen' => json_encode($resumen, JSON_UNESCAPED_UNICODE),
+                ':total' => $totalRegistros,
+                ':exportable' => $exportable ? 1 : 0,
+            ]);
+            $idSnapshot = (int)$db->lastInsertId();
+
+            if (!empty($kardexIds)) {
+                $chunkSize = 250;
+                $chunks = array_chunk($kardexIds, $chunkSize);
+                $orden = 1;
+                foreach ($chunks as $chunk) {
+                    $values = [];
+                    $placeholders = [];
+                    foreach ($chunk as $idKardex) {
+                        $placeholders[] = "(?, ?, ?)";
+                        $values[] = $idSnapshot;
+                        $values[] = $orden++;
+                        $values[] = (int)$idKardex;
+                    }
+                    $sqlItems = "INSERT INTO reporte_consulta_snapshot_item (id_snapshot, orden_posicion, id_kardex) VALUES " . implode(", ", $placeholders);
+                    $stmtItems = $db->prepare($sqlItems);
+                    $stmtItems->execute($values);
+                }
+            }
+
+            if (!$inTransaction) {
+                $db->commit();
+            }
+
+            $expiraEn = $db->query("SELECT expira_en FROM reporte_consulta_snapshot WHERE id_snapshot = {$idSnapshot}")->fetchColumn();
+
+            return [
+                'id_snapshot' => $idSnapshot,
+                'expira_en' => $expiraEn ?: '',
+            ];
+        } catch (\Throwable $e) {
+            if (!$inTransaction && $db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Obtiene la cabecera de la instantánea de consulta por su referencia y tipo.
+     */
+    public function obtenerSnapshotPorReferencia(string $referencia, string $tipoReporte = 'kardex'): ?array {
+        $sql = "SELECT *, (expira_en < NOW()) AS esta_expirado FROM reporte_consulta_snapshot 
+                WHERE referencia_consulta = :ref AND tipo_reporte = :tipo 
+                LIMIT 1";
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute([
+            ':ref' => $referencia,
+            ':tipo' => $tipoReporte,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    /**
+     * Renueva la expiración de la consulta activa.
+     */
+    public function renovarExpiracionSnapshot(int $idSnapshot, int $minutos = 30): void {
+        $sql = "UPDATE reporte_consulta_snapshot 
+                SET expira_en = DATE_ADD(NOW(), INTERVAL :minutos MINUTE) 
+                WHERE id_snapshot = :id";
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute([
+            ':id' => $idSnapshot,
+            ':minutos' => $minutos,
+        ]);
+    }
+
+    /**
+     * Obtiene los movimientos congelados en la instantánea para una página específica.
+     */
+    public function obtenerItemsSnapshotPaginados(int $idSnapshot, int $offset, int $limit): array {
+        $sql = "SELECT k.*, item.orden_posicion
+                FROM reporte_consulta_snapshot_item item
+                INNER JOIN kardex k ON k.id_kardex = item.id_kardex
+                WHERE item.id_snapshot = :id_snapshot
+                ORDER BY item.orden_posicion ASC
+                LIMIT :limit OFFSET :offset";
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->bindValue(':id_snapshot', $idSnapshot, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Compatibilidad con llamadas legacy a obtenerMovimientos
+     */
+    public function obtenerMovimientos(array $filtros): array {
+        $service = new \Services\ReporteService();
+        $resultado = $service->reporteKardex($filtros);
+        return [
+            'movimientos' => $resultado['items'] ?? $resultado['movimientos'] ?? [],
+            'paginacion' => $resultado['paginacion'] ?? [
+                'pagina' => $resultado['pagination']['page'] ?? 1,
+                'por_pagina' => $resultado['pagination']['limit'] ?? 10,
+                'total' => $resultado['pagination']['total'] ?? 0,
+                'total_paginas' => $resultado['pagination']['pages'] ?? 1,
+            ],
+            'resumen_producto' => $resultado['resumen_producto'] ?? null,
+            'exportable' => $resultado['exportable'] ?? false,
+            'referencia_consulta' => $resultado['referencia_consulta'] ?? null,
+        ];
     }
 }
