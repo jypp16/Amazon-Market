@@ -60,6 +60,7 @@ if ($isApiRoute) {
         'imagenes'      => 'ImagenApiController',
         'proveedores'   => 'ProveedorApiController',
         'compras'       => 'CompraApiController',
+        'inventario'    => 'InventarioApiController',
         'alertas'       => 'AlertaApiController',
     ];
 

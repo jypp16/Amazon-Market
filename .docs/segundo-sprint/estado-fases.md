@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Cierre de Fase 4)
+**Última actualización:** 2026-10-25 (Cierre de Fase 5)
 
 ---
 
@@ -14,7 +14,7 @@
 | **Fase 2** | **Datos, seguridad y base común de movimientos** | Migraciones de estructura (`subcategoria`, instantáneas históricas en `kardex`, control de idempotencia `referencia_solicitud`, almacenamiento de `referencia_consulta`), validación de Administrador activo, base común transaccional de movimientos y compatibilidad de catálogos con POS. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
 | **Fase 3** | **Productos y Compras** | Productos nuevos con `stock_actual = 0`, bloqueo de edición de stock desde catálogo, validación entera de `stock_minimo`, conservación de presentaciones y equivalencias de Compras (ej. 2 cajas de 24 = 48 unidades individuales) y corrección/anulación sin movimientos ficticios en `kardex`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | **Completada** |
-| **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 7** | **Variaciones y nuevo selector de sentido** | Incorporación del nuevo selector independiente “Sentido del movimiento” (`Todas`, `Entradas`, `Salidas`) en `Views/Reporte/variaciones.php`, consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y por producto único, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
@@ -181,10 +181,57 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 ---
 
-## 7. Dependencias para la Fase 5 (Bajas y ajustes)
+## 7. Evidencias Reales de Cierre de la Fase 5
 
-- Conectar `Views/Inventario/ajustes.php` y los endpoints `POST /api/inventario/bajas` y `POST /api/inventario/ajustes` a `MovimientoInventarioService` y `ControlSolicitudService`.
-- Implementar validación de `justificacion` obligatoria en ambas operaciones.
-- Implementar validación de `saldo_anterior_esperado` en ajustes positivos y negativos (`409 STOCK_CHANGED_CONFLICT`).
-- Conservar campo `lote` opcional en bajas ("Sin lote" si no se especifica).
-- Manejo estricto de cantidades enteras positivas en envases individuales.
+1. **Modelo y Servicio transaccional de Inventario**:
+   - [`Models/OperacionInventarioModel.php`](../../Models/OperacionInventarioModel.php): Modelo para la tabla `operacion_inventario`.
+   - [`Services/InventarioService.php`](../../Services/InventarioService.php):
+     - `registrarBaja`: Valida administrador activo en BD, producto activo, motivo ("Baja por daño" o "Baja por vencimiento"), cantidad entera $\ge 1$, justificación obligatoria ($\le 255$ caracteres) y lote opcional. Ejecuta transacción con bloqueo determinístico (`bloquearProductosOrdenados`), inserta en `operacion_inventario`, descuenta `producto.stock_actual`, registra en `kardex` con FK `id_operacion_inventario` y snapshots históricos completos, e implementa idempotencia mediante `ControlSolicitudService` (`SOLICITUD_BAJA`).
+     - `registrarAjuste`: Valida administrador activo en BD, producto activo, sentido/tipo ("Ajuste positivo" o "Ajuste negativo"), cantidad entera $\ge 1$, `saldo_anterior_esperado` obligatorio y justificación obligatoria. Comprueba bajo bloqueo `FOR UPDATE` que el saldo vigente en BD coincida exactamente con `saldo_anterior_esperado`; si cambió, rechaza con `409 Conflict` (`STOCK_CHANGED_CONFLICT`) devolviendo el saldo vigente sin aplicar diferencias obsoletas a ciegas. Inserta en `operacion_inventario`, actualiza stock, registra en `kardex` con snapshots e implementa idempotencia (`SOLICITUD_AJUSTE`).
+2. **Controladores y Enrutamiento**:
+   - [`Controllers/API/InventarioApiController.php`](../../Controllers/API/InventarioApiController.php): Endpoint RESTful `POST /api/inventario/bajas` y `POST /api/inventario/ajustes`. Requiere rol Administrador activo (`inventario.ajustes`), extrae `referencia_solicitud` y mapea `InventarioException` a códigos HTTP 409 y 422.
+   - [`Controllers/InventarioController.php`](../../Controllers/InventarioController.php): Mantiene la renderización de `Views/Inventario/ajustes.php` y provee endpoints de respaldo para peticiones web tradicionales.
+   - [`index.php`](../../index.php): Agregado `'inventario' => 'InventarioApiController'` al mapa de rutas de la API.
+3. **Conexión del Frontend**:
+   - [`Assets/js/inventario.js`](../../Assets/js/inventario.js):
+     - Muestra subcategorías reales del catálogo en el resumen del producto (`product.subcategoria || 'General'`).
+     - Conecta el modal de confirmación `#writeoff-confirmation` para ambas pestañas (Bajas y Ajustes).
+     - Genera `referencia_solicitud` única (`baja-...` y `ajuste-...`) para garantizar idempotencia.
+     - Gestiona retroalimentación visual desactivando el botón de envío durante el procesamiento.
+     - Muestra alerta detallada con producto, cantidad aplicada y nuevo saldo tras confirmar.
+     - Diferencia claramente un resultado confirmado nuevo, un resultado recuperado por repetición (`idempotent_replay: true`), un rechazo del servidor y un fallo de red.
+     - Ante error `STOCK_CHANGED_CONFLICT`, actualiza el saldo en pantalla con el valor devuelto por el backend sin limpiar el formulario, permitiendo revisar y confirmar el nuevo intento.
+4. **Suite de pruebas automatizadas de la Fase 5**:
+   - [`tests/sprint2/fase5_bajas_ajustes_test.php`](../../tests/sprint2/fase5_bajas_ajustes_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **14 PASS / 0 FAIL**:
+     - `F5-BAJA-01`: Baja con lote válido: registra `operacion_inventario`, descuenta stock y genera Kardex con snapshots y lote `CON_LOTE`.
+     - `F5-BAJA-02`: Baja sin lote: registra con `numero_lote = NULL` y condición `SIN_LOTE` sin bloquear la operación.
+     - `F5-BAJA-03`: Rechazo de Baja por motivo inválido, justificación vacía o >255 caracteres con `422 VALIDATION_ERROR` y stock intacto.
+     - `F5-BAJA-04`: Rechazo de Baja por cantidad > stock (`409 INSUFFICIENT_STOCK`), decimales o cero (`422 VALIDATION_ERROR`).
+     - `F5-AJUSTE-01`: Ajuste positivo por conteo físico: registra `operacion_inventario` (`INCREMENTO`), suma stock y genera Kardex.
+     - `F5-AJUSTE-02`: Ajuste negativo por conteo físico: registra `operacion_inventario` (`DISMINUCION`), resta stock y genera Kardex.
+     - `F5-AJUSTE-03`: Saldo cambiado durante preparación: rechaza con `409 STOCK_CHANGED_CONFLICT`, devuelve `stock_actual` vigente y `requiere_revision`.
+     - `F5-AJUSTE-04`: Rechazo de Ajuste negativo que produciría saldo negativo con `409 INSUFFICIENT_STOCK`.
+     - `F5-CONC-01`: Concurrencia entre salidas simultáneas (`FOR UPDATE`): primera descuenta y segunda es rechazada `409`.
+     - `F5-IDEM-01`: Idempotencia en Bajas y Ajustes: reintento devuelve respuesta confirmada sin duplicar decremento; payload alterado rechaza `409`.
+     - `F5-ATOM-01`: Atomicidad y Rollback completo: fallo inducido revierte operacion_inventario, kardex y stock sin efectos residuales.
+     - `F5-SEC-01`: Seguridad y RBAC: rol Vendedor rechazado `403 FORBIDDEN_ADMIN_ONLY`; usuario inexistente rechazado `401`.
+     - `F5-CLEAN-01`: Limpieza final en base de pruebas: registros temporales eliminados y stock en 0.
+     - `F5-ISO-01`: Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex).
+
+5. **Verificación de regresión cruzada acumulada**:
+   - Fase 2 (`fase2_infraestructura_test.php`): **24 PASS / 0 FAIL**.
+   - Fase 3 (`fase3_productos_compras_test.php`): **13 PASS / 0 FAIL**.
+   - Fase 4 (`fase4_ventas_kardex_test.php`): **14 PASS / 0 FAIL**.
+   - Fase 5 (`fase5_bajas_ajustes_test.php`): **14 PASS / 0 FAIL**.
+   - Total acumulado de pruebas: **65 PASS / 0 FAIL**.
+
+---
+
+## 8. Dependencias para la Fase 6 (Kardex)
+
+- Implementar endpoint `GET /api/reportes/kardex` en `ReporteApiController` y servicio `ReporteService`.
+- Soportar paginación, filtros por producto, fechas, categoría y subcategoría histórica.
+- Calcular y exponer `resumen_producto` con 5 tarjetas (`Unidad`, `Saldo inicial`, `Entradas`, `Salidas`, `Saldo final`) cuando se consulte un producto específico.
+- En consulta general (sin producto específico), omitir `resumen_producto` y no sumar existencias de productos distintos.
+- Respaldar la consulta congelada mediante `referencia_consulta` en `reporte_consulta_snapshot` y `reporte_consulta_snapshot_item`.
+- Conectar interfaz `Views/Reporte/kardex.php` y `Assets/js/kardex.js`.

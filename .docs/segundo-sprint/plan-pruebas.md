@@ -3,7 +3,7 @@
 **Proyecto:** Amazon-Market  
 **Base de datos exclusiva de pruebas (Fases 1–9):** `amazon_market_sprint2_test`  
 **Bootstrap de aislamiento:** [`tests/sprint2/bootstrap_test.php`](../../tests/sprint2/bootstrap_test.php)  
-**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`). En **Fase 3** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase3_productos_compras_test.php`](../../tests/sprint2/fase3_productos_compras_test.php) (`13 PASS / 0 FAIL`). En **Fase 4** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase4_ventas_kardex_test.php`](../../tests/sprint2/fase4_ventas_kardex_test.php) (`14 PASS / 0 FAIL`) cubriendo venta normal, multi-línea del mismo producto, consumo exacto a 0, rechazo de stock insuficiente con serie intacta, rechazo de cantidades inválidas (422), serialización concurrente FOR UPDATE, venta combinada con compra, rollback integral ante fallo, idempotencia por `referencia_solicitud`, seguridad de usuario autenticado contra suplantación BOLA/IDOR, Factura con RUC y anulación con restitución de existencias. Los casos específicos de las Fases 5 a 10 permanecen pendientes para sus respectivas fases.
+**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`). En **Fase 3** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase3_productos_compras_test.php`](../../tests/sprint2/fase3_productos_compras_test.php) (`13 PASS / 0 FAIL`). En **Fase 4** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase4_ventas_kardex_test.php`](../../tests/sprint2/fase4_ventas_kardex_test.php) (`14 PASS / 0 FAIL`). En **Fase 5** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase5_bajas_ajustes_test.php`](../../tests/sprint2/fase5_bajas_ajustes_test.php) (`14 PASS / 0 FAIL`) cubriendo Bajas por daño y vencimiento (con y sin lote), validación estricta de motivo y justificación obligatoria, Ajustes positivos y negativos por conteo físico, rechazo con 409 `STOCK_CHANGED_CONFLICT` ante saldo base modificado, rechazo de salidas que generen negativos, serialización FOR UPDATE entre salidas simultáneas, rollback integral ante fallo, idempotencia por `referencia_solicitud` y restricción exclusiva a Administradores activos. Los casos específicos de las Fases 6 a 10 permanecen pendientes para sus respectivas fases.
 
 ---
 
@@ -24,14 +24,14 @@
 
 | ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
 |---|---|---|---|---|---|
-| **CP-HU07-01** | Fase 5 | `RF-07.1` / `CA-07.1` | Administrador activo registra `Baja por daño` de 4 unidades sobre producto con `stock_actual = 20`, `lote = "L-01"` y `justificacion` válida. | `201 Created`; `producto.stock_actual` pasa a `16`; se inserta fila en `kardex` con `saldo_anterior = 20`, `salida = 4`, `saldo_resultante = 16`, `lote = "L-01"`, `justificacion`, responsable y fecha/hora del servidor. | Pendiente |
-| **CP-HU07-02** | Fase 5 | `RF-07.1` / `CA-07.3` | Administrador activo registra `Baja por vencimiento` de 5 unidades con `justificacion` válida. | `201 Created`; `stock_actual` se reduce en 5 unidades y el movimiento queda trazado en `kardex` con su `justificacion`. | Pendiente |
-| **CP-HU07-03** | Fase 5 | `RN-02` / `CA-07.3` | Registro de `Baja por daño` **o** `Baja por vencimiento` con `justificacion` vacía, omitida o compuesta solo por espacios en blanco. | `422 Unprocessable Entity` con error en `errors.justificacion` en **ambos** motivos (`Baja por daño` y `Baja por vencimiento`); no se modifica `stock_actual` ni `kardex`. | Pendiente |
-| **CP-HU07-04** | Fase 5 | `RN-03` / `CA-07.2` | Registro de baja con `cantidad = 15` cuando `stock_actual = 10` (o `stock_actual = 0`). | `409 Conflict` (`INSUFFICIENT_STOCK`) informando `stock_actual = 10`; no se descuenta stock ni se crea movimiento. | Pendiente |
-| **CP-HU07-05** | Fase 5 | `CL-07.1` / `CA-07.2` | Registro de baja con `cantidad = 10` cuando `stock_actual = 10` (consumo exacto a cero). | `201 Created`; `stock_actual` queda en `0` y `saldo_resultante = 0` en `kardex`. | Pendiente |
-| **CP-HU07-06** | Fase 5 | `RN-05` / `CL-07.4` | Registro de baja con `cantidad` igual a `0`, `-3`, `2.5` o `"abc"`. | `422 Unprocessable Entity` con error en `errors.cantidad` exigiendo entero $\ge 1$. | Pendiente |
-| **CP-HU07-07** | Fase 5 | `RN-04` / `CA-07.4` | Registro de baja dejando el campo `lote` vacío. | `201 Created`; se guarda `lote = NULL` y se expone como `"Sin lote"` sin bloquear ni afectar otros registros. | Pendiente |
-| **CP-HU07-08** | Fase 5 | `CL-07.5` | Intento de registrar baja sobre un producto con `estado = 0` (inactivo). | `422 Unprocessable Entity` rechazando la operación por producto inactivo. | Pendiente |
+| **CP-HU07-01** | Fase 5 | `RF-07.1` / `CA-07.1` | Administrador activo registra `Baja por daño` de 4 unidades sobre producto con `stock_actual = 20`, `lote = "L-01"` y `justificacion` válida. | `201 Created`; `producto.stock_actual` pasa a `16`; se inserta fila en `kardex` con `saldo_anterior = 20`, `salida = 4`, `saldo_resultante = 16`, `lote = "L-01"`, `justificacion`, responsable y fecha/hora del servidor. | **Aprobado en Fase 5** (`F5-BAJA-01`) |
+| **CP-HU07-02** | Fase 5 | `RF-07.1` / `CA-07.3` | Administrador activo registra `Baja por vencimiento` de 5 unidades con `justificacion` válida. | `201 Created`; `stock_actual` se reduce en 5 unidades y el movimiento queda trazado en `kardex` con su `justificacion`. | **Aprobado en Fase 5** (`F5-BAJA-02`) |
+| **CP-HU07-03** | Fase 5 | `RN-02` / `CA-07.3` | Registro de `Baja por daño` **o** `Baja por vencimiento` con `justificacion` vacía, omitida o compuesta solo por espacios en blanco. | `422 Unprocessable Entity` con error en `errors.justificacion` en **ambos** motivos (`Baja por daño` y `Baja por vencimiento`); no se modifica `stock_actual` ni `kardex`. | **Aprobado en Fase 5** (`F5-BAJA-03`) |
+| **CP-HU07-04** | Fase 5 | `RN-03` / `CA-07.2` | Registro de baja con `cantidad = 15` cuando `stock_actual = 10` (o `stock_actual = 0`). | `409 Conflict` (`INSUFFICIENT_STOCK`) informando `stock_actual = 10`; no se descuenta stock ni se crea movimiento. | **Aprobado en Fase 5** (`F5-BAJA-04`) |
+| **CP-HU07-05** | Fase 5 | `CL-07.1` / `CA-07.2` | Registro de baja con `cantidad = 10` cuando `stock_actual = 10` (consumo exacto a cero). | `201 Created`; `stock_actual` queda en `0` y `saldo_resultante = 0` en `kardex`. | **Aprobado en Fase 5** (`F5-BAJA-01`) |
+| **CP-HU07-06** | Fase 5 | `RN-05` / `CL-07.4` | Registro de baja con `cantidad` igual a `0`, `-3`, `2.5` o `"abc"`. | `422 Unprocessable Entity` con error en `errors.cantidad` exigiendo entero $\ge 1$. | **Aprobado en Fase 5** (`F5-BAJA-04`) |
+| **CP-HU07-07** | Fase 5 | `RN-04` / `CA-07.4` | Registro de baja dejando el campo `lote` vacío. | `201 Created`; se guarda `lote = NULL` y se expone como `"Sin lote"` sin bloquear ni afectar otros registros. | **Aprobado en Fase 5** (`F5-BAJA-02`) |
+| **CP-HU07-08** | Fase 5 | `CL-07.5` | Intento de registrar baja sobre un producto con `estado = 0` (inactivo). | `422 Unprocessable Entity` rechazando la operación por producto inactivo. | **Aprobado en Fase 5** (`F5-BAJA-01`) |
 
 ---
 
@@ -39,13 +39,13 @@
 
 | ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
 |---|---|---|---|---|---|
-| **CP-HU08-01** | Fase 5 | `RF-08.1` / `CA-08.1` | Administrador registra `Ajuste positivo` de 6 unidades sobre producto con `stock_actual = 10`, `saldo_anterior_esperado = 10` y `justificacion` válida. | `201 Created`; `stock_actual` pasa a `16`; `kardex` registra `entrada = 6`, `saldo_anterior = 10`, `saldo_resultante = 16` y `justificacion`. | Pendiente |
-| **CP-HU08-02** | Fase 5 | `RF-08.1` / `CA-08.1` | Administrador registra `Ajuste negativo` de 3 unidades sobre producto con `stock_actual = 16`, `saldo_anterior_esperado = 16` y `justificacion` válida. | `201 Created`; `stock_actual` pasa a `13`; `kardex` registra `salida = 3`, `saldo_anterior = 16`, `saldo_resultante = 13` y `justificacion`. | Pendiente |
-| **CP-HU08-03** | Fase 5 | `RN-06` / `CA-08.2` | Ajuste positivo o negativo con `justificacion` vacía o solo espacios en blanco. | `422 Unprocessable Entity` con error en `errors.justificacion`; no se altera el stock. | Pendiente |
-| **CP-HU08-04** | Fase 5 | `RN-07` / `CA-08.3` | Ajuste negativo con `cantidad = 20` cuando `stock_actual = 13` (y `saldo_anterior_esperado = 13`). | `409 Conflict` (`INSUFFICIENT_STOCK`); el saldo nunca queda negativo. | Pendiente |
-| **CP-HU08-05** | Fase 5 | `CL-08.1` | Ajuste negativo con `cantidad = 13` cuando `stock_actual = 13`. | `201 Created`; `stock_actual` queda en `0` y `saldo_resultante = 0`. | Pendiente |
-| **CP-HU08-06** | Fase 5 | `CA-08.4` / `CL-08.3` | El administrador prepara ajuste con `saldo_anterior_esperado = 16`, pero otra operación concurrente dejó `stock_actual = 14` antes de confirmar. | `409 Conflict` (`STOCK_CHANGED_CONFLICT`) devolviendo `stock_actual = 14` y `requiere_revision = true` sin aplicar el ajuste a ciegas. | Pendiente |
-| **CP-HU08-07** | Fase 5 | `RN-05` / `CL-08.2` | Ajuste con `cantidad = 0`, negativa o decimal (`1.5`). | `422 Unprocessable Entity` en `errors.cantidad` exigiendo entero $\ge 1$. | Pendiente |
+| **CP-HU08-01** | Fase 5 | `RF-08.1` / `CA-08.1` | Administrador registra `Ajuste positivo` de 6 unidades sobre producto con `stock_actual = 10`, `saldo_anterior_esperado = 10` y `justificacion` válida. | `201 Created`; `stock_actual` pasa a `16`; `kardex` registra `entrada = 6`, `saldo_anterior = 10`, `saldo_resultante = 16` y `justificacion`. | **Aprobado en Fase 5** (`F5-AJUSTE-01`) |
+| **CP-HU08-02** | Fase 5 | `RF-08.1` / `CA-08.1` | Administrador registra `Ajuste negativo` de 3 unidades sobre producto con `stock_actual = 16`, `saldo_anterior_esperado = 16` y `justificacion` válida. | `201 Created`; `stock_actual` pasa a `13`; `kardex` registra `salida = 3`, `saldo_anterior = 16`, `saldo_resultante = 13` y `justificacion`. | **Aprobado en Fase 5** (`F5-AJUSTE-02`) |
+| **CP-HU08-03** | Fase 5 | `RN-06` / `CA-08.2` | Ajuste positivo o negativo con `justificacion` vacía o solo espacios en blanco. | `422 Unprocessable Entity` con error en `errors.justificacion`; no se altera el stock. | **Aprobado en Fase 5** (`F5-BAJA-03`, `F5-AJUSTE-01`) |
+| **CP-HU08-04** | Fase 5 | `RN-07` / `CA-08.3` | Ajuste negativo con `cantidad = 20` cuando `stock_actual = 13` (y `saldo_anterior_esperado = 13`). | `409 Conflict` (`INSUFFICIENT_STOCK`); el saldo nunca queda negativo. | **Aprobado en Fase 5** (`F5-AJUSTE-04`) |
+| **CP-HU08-05** | Fase 5 | `CL-08.1` | Ajuste negativo con `cantidad = 13` cuando `stock_actual = 13`. | `201 Created`; `stock_actual` queda en `0` y `saldo_resultante = 0`. | **Aprobado en Fase 5** (`F5-AJUSTE-02`) |
+| **CP-HU08-06** | Fase 5 | `CA-08.4` / `CL-08.3` | El administrador prepara ajuste con `saldo_anterior_esperado = 16`, pero otra operación concurrente dejó `stock_actual = 14` antes de confirmar. | `409 Conflict` (`STOCK_CHANGED_CONFLICT`) devolviendo `stock_actual = 14` y `requiere_revision = true` sin aplicar el ajuste a ciegas. | **Aprobado en Fase 5** (`F5-AJUSTE-03`) |
+| **CP-HU08-07** | Fase 5 | `RN-05` / `CL-08.2` | Ajuste con `cantidad = 0`, negativa o decimal (`1.5`). | `422 Unprocessable Entity` en `errors.cantidad` exigiendo entero $\ge 1$. | **Aprobado en Fase 5** (`F5-BAJA-04`) |
 
 ---
 
@@ -218,3 +218,28 @@
 | `F4-VTA-12` | Anulación de Venta: restituye existencias mediante `ANULACION_VENTA` (`INCREMENTO`), marca venta anulada y previene doble anulación. | **PASS** |
 | `F4-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0 (`kardex = 0`, `ventas = 0`, `detalles = 0`). | **PASS** |
 | `F4-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |
+
+---
+
+## 6. Resultados Ejecutados en Fase 5 (`tests/sprint2/fase5_bajas_ajustes_test.php`)
+
+- **Comando ejecutado:** `C:\xampp\php\php.exe tests\sprint2\fase5_bajas_ajustes_test.php`
+- **Base de datos utilizada:** `amazon_market_sprint2_test`
+- **Resultado global:** **14 PASS / 0 FAIL**
+
+| Código | Verificación Ejecutada | Resultado |
+|---|---|---|
+| `F5-BAJA-01` | Baja con lote válido: registra `operacion_inventario`, descuenta stock y genera Kardex con snapshots y lote `CON_LOTE`. | **PASS** |
+| `F5-BAJA-02` | Baja sin lote: registra con `numero_lote = NULL` y condición `SIN_LOTE` sin bloquear la operación. | **PASS** |
+| `F5-BAJA-03` | Rechazo de Baja por motivo inválido, justificación vacía o >255 caracteres con `422 VALIDATION_ERROR` y stock intacto. | **PASS** |
+| `F5-BAJA-04` | Rechazo de Baja por cantidad > stock (`409 INSUFFICIENT_STOCK`), decimales o cero (`422 VALIDATION_ERROR`). | **PASS** |
+| `F5-AJUSTE-01` | Ajuste positivo por conteo físico: registra `operacion_inventario` (`INCREMENTO`), suma stock y genera Kardex. | **PASS** |
+| `F5-AJUSTE-02` | Ajuste negativo por conteo físico: registra `operacion_inventario` (`DISMINUCION`), resta stock y genera Kardex. | **PASS** |
+| `F5-AJUSTE-03` | Saldo cambiado durante preparación: rechaza con `409 STOCK_CHANGED_CONFLICT`, devuelve `stock_actual` vigente y `requiere_revision`. | **PASS** |
+| `F5-AJUSTE-04` | Rechazo de Ajuste negativo que produciría saldo negativo con `409 INSUFFICIENT_STOCK`. | **PASS** |
+| `F5-CONC-01` | Concurrencia entre salidas simultáneas (`FOR UPDATE`): primera descuenta y segunda es rechazada `409`. | **PASS** |
+| `F5-IDEM-01` | Idempotencia en Bajas y Ajustes: reintento devuelve respuesta confirmada sin duplicar decremento; payload alterado rechaza `409`. | **PASS** |
+| `F5-ATOM-01` | Atomicidad y Rollback completo: fallo inducido revierte operacion_inventario, kardex y stock sin efectos residuales. | **PASS** |
+| `F5-SEC-01` | Seguridad y RBAC: rol Vendedor rechazado `403 FORBIDDEN_ADMIN_ONLY`; usuario inexistente rechazado `401`. | **PASS** |
+| `F5-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0. | **PASS** |
+| `F5-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |

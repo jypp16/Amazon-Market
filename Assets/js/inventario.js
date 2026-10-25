@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', function() {
     var confirmationNote = document.getElementById('writeoff-confirm-note');
     var confirmationSubmit = confirmation.querySelector('.inventory-confirmation-submit');
     var activeReviewButton = document.getElementById('writeoff-review-button');
+    var activeSubmitHandler = null;
+
     var confirmationFields = {
         product: document.getElementById('writeoff-confirm-product'),
         barcode: document.getElementById('writeoff-confirm-barcode'),
@@ -91,6 +93,8 @@ document.addEventListener('DOMContentLoaded', function() {
         confirmationNote.textContent = 'Se guardarán la baja, el nuevo stock y un único registro en Kardex. Durante el procesamiento, confirmar queda bloqueado para evitar reenvíos. No se alteran compras ni ventas anteriores.';
         confirmationSubmit.textContent = 'Confirmar baja';
         activeReviewButton = reviewButton;
+        activeSubmitHandler = submitWriteoff;
+
         confirmationFields.product.textContent = selectedProduct.nombre || '---';
         confirmationFields.barcode.textContent = selectedProduct.codigo_barra || '---';
         confirmationFields.quantityReason.textContent = formatQuantity(quantity) + ' ' + unit + ' · ' + reason;
@@ -182,7 +186,7 @@ document.addEventListener('DOMContentLoaded', function() {
         input.value = product.nombre || '';
         summary.name.textContent = product.nombre || '---';
         summary.category.textContent = product.categoria || '---';
-        summary.subcategory.textContent = 'Por implementar';
+        summary.subcategory.textContent = product.subcategoria || product.subcategoria_nombre || 'General';
         var stock = Number(product.stock_actual);
         summary.stock.textContent = Number.isFinite(stock) ? stock + ' unidades' : '---';
         selectedStock = Number.isFinite(stock) ? stock : null;
@@ -259,6 +263,81 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    async function submitWriteoff() {
+        if (!selectedProduct) return;
+        var quantity = Number(quantityInput.value);
+        var reasonText = reasonSelect.options[reasonSelect.selectedIndex].text;
+        var justification = justificationInput.value.trim();
+        var lot = lotInput.value.trim();
+
+        confirmationSubmit.disabled = true;
+        var originalHtml = confirmationSubmit.innerHTML;
+        confirmationSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando baja...';
+
+        var ref = 'baja-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+        var payload = {
+            referencia_solicitud: ref,
+            id_producto: parseInt(selectedProduct.id_producto, 10),
+            motivo_baja: reasonText,
+            cantidad: quantity,
+            justificacion: justification,
+            lote: lot !== '' ? lot : null
+        };
+
+        try {
+            var response = await Api.post('inventario/bajas', payload);
+            if (!response) {
+                throw new Error('No se recibió respuesta del servidor.');
+            }
+
+            if (response.ok && response.data && response.data.status) {
+                var data = response.data.data;
+                closeConfirmation();
+                var isReplay = Boolean(response.data.idempotent_replay);
+                var msg = (isReplay ? 'Resultado recuperado (reintento previo detectado):\n\n' : 'Baja de inventario registrada con éxito:\n\n') +
+                    '• Producto: ' + data.producto + '\n' +
+                    '• Cantidad dada de baja: ' + data.cantidad + ' ' + (data.unidad || 'unidades') + '\n' +
+                    '• Motivo: ' + data.tipo_movimiento + '\n' +
+                    '• Nuevo saldo vigente: ' + data.saldo_resultante + ' unidades.';
+
+                if (typeof Modal !== 'undefined' && Modal.success) {
+                    await Modal.success(isReplay ? 'Baja ya confirmada' : 'Baja confirmada', msg);
+                } else {
+                    alert(msg);
+                }
+                resetWriteoff();
+            } else {
+                var errData = response.data || {};
+                var errMsg = errData.message || 'No se pudo registrar la baja.';
+
+                if (errData.errors) {
+                    if (errData.errors.cantidad) setValidationError(quantityInput, quantityError, errData.errors.cantidad);
+                    if (errData.errors.justificacion) setValidationError(justificationInput, justificationError, errData.errors.justificacion);
+                    if (errData.errors.id_producto) setValidationError(input, productError, errData.errors.id_producto);
+                }
+
+                closeConfirmation();
+
+                if (typeof Modal !== 'undefined' && Modal.error) {
+                    await Modal.error('Operación rechazada', errMsg);
+                } else {
+                    alert('Operación rechazada: ' + errMsg);
+                }
+            }
+        } catch (error) {
+            closeConfirmation();
+            var netMsg = 'Fallo de red o error de comunicación: ' + error.message;
+            if (typeof Modal !== 'undefined' && Modal.error) {
+                await Modal.error('Fallo de red', netMsg);
+            } else {
+                alert(netMsg);
+            }
+        } finally {
+            confirmationSubmit.disabled = false;
+            confirmationSubmit.innerHTML = originalHtml;
+        }
+    }
+
     input.addEventListener('input', function() {
         window.clearTimeout(searchTimer);
         var query = input.value.trim();
@@ -303,6 +382,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!event.target.closest('.inventory-product-search')) results.hidden = true;
     });
 
+    confirmationSubmit.addEventListener('click', async function() {
+        if (typeof activeSubmitHandler === 'function') {
+            await activeSubmitHandler();
+        }
+    });
+
     initStockAdjustment();
 
     function initStockAdjustment() {
@@ -337,7 +422,8 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         function getDirection() {
-            return document.querySelector('input[name="stock_adjustment_direction"]:checked').value;
+            var checked = document.querySelector('input[name="stock_adjustment_direction"]:checked');
+            return checked ? checked.value : 'entry';
         }
 
         function updateBalance() {
@@ -417,9 +503,101 @@ document.addEventListener('DOMContentLoaded', function() {
             confirmationNote.textContent = 'Se guardarán el ajuste, el nuevo stock y un único registro en Kardex. Durante el procesamiento, confirmar queda bloqueado para evitar reenvíos.';
             confirmationSubmit.textContent = 'Confirmar ajuste';
             activeReviewButton = review;
+            activeSubmitHandler = submitAdjustment;
+
             confirmation.hidden = false;
             document.body.classList.add('inventory-confirmation-open');
             confirmationBack.focus();
+        }
+
+        async function submitAdjustment() {
+            if (!selectedProduct) return;
+            var amount = Number(quantity.value);
+            var isEntry = getDirection() === 'entry';
+            var justText = justification.value.trim();
+
+            confirmationSubmit.disabled = true;
+            var originalHtml = confirmationSubmit.innerHTML;
+            confirmationSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Registrando ajuste...';
+
+            var ref = 'ajuste-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+            var payload = {
+                referencia_solicitud: ref,
+                id_producto: parseInt(selectedProduct.id_producto, 10),
+                tipo_ajuste: isEntry ? 'Ajuste positivo' : 'Ajuste negativo',
+                cantidad: amount,
+                saldo_anterior_esperado: parseInt(selectedStock, 10),
+                justificacion: justText
+            };
+
+            try {
+                var response = await Api.post('inventario/ajustes', payload);
+                if (!response) {
+                    throw new Error('No se recibió respuesta del servidor.');
+                }
+
+                if (response.ok && response.data && response.data.status) {
+                    var data = response.data.data;
+                    closeConfirmation();
+                    var isReplay = Boolean(response.data.idempotent_replay);
+                    var msg = (isReplay ? 'Resultado recuperado (reintento previo detectado):\n\n' : 'Ajuste de stock registrado con éxito:\n\n') +
+                        '• Producto: ' + data.producto + '\n' +
+                        '• Sentido aplicado: ' + data.tipo_movimiento + ' (' + (isEntry ? '+' : '−') + data.cantidad + ' ' + (data.unidad || 'unidades') + ')\n' +
+                        '• Nuevo saldo vigente: ' + data.saldo_resultante + ' unidades.';
+
+                    if (typeof Modal !== 'undefined' && Modal.success) {
+                        await Modal.success(isReplay ? 'Ajuste ya confirmado' : 'Ajuste confirmado', msg);
+                    } else {
+                        alert(msg);
+                    }
+                    reset();
+                } else {
+                    var errData = response.data || {};
+                    var errCode = errData.code || '';
+                    var errMsg = errData.message || 'No se pudo registrar el ajuste.';
+
+                    closeConfirmation();
+
+                    if (errCode === 'STOCK_CHANGED_CONFLICT') {
+                        var nuevoStock = (errData.data && typeof errData.data.stock_actual !== 'undefined')
+                            ? Number(errData.data.stock_actual)
+                            : null;
+                        if (nuevoStock !== null && Number.isFinite(nuevoStock)) {
+                            selectedStock = nuevoStock;
+                            summary.stock.textContent = formatQuantity(nuevoStock) + ' unidades';
+                            updateBalance();
+                        }
+                        var warnMsg = errMsg + '\n\nSe ha actualizado el saldo en pantalla. Verifique los nuevos valores antes de confirmar.';
+                        if (typeof Modal !== 'undefined' && Modal.warning) {
+                            await Modal.warning('Saldo modificado concurrentemente', warnMsg);
+                        } else {
+                            alert(warnMsg);
+                        }
+                    } else {
+                        if (errData.errors) {
+                            if (errData.errors.cantidad) setError(quantity, quantityError, errData.errors.cantidad);
+                            if (errData.errors.justificacion) setError(justification, justificationError, errData.errors.justificacion);
+                            if (errData.errors.id_producto) setError(productInput, productError, errData.errors.id_producto);
+                        }
+                        if (typeof Modal !== 'undefined' && Modal.error) {
+                            await Modal.error('Operación rechazada', errMsg);
+                        } else {
+                            alert('Operación rechazada: ' + errMsg);
+                        }
+                    }
+                }
+            } catch (error) {
+                closeConfirmation();
+                var netMsg = 'Fallo de red o error de comunicación: ' + error.message;
+                if (typeof Modal !== 'undefined' && Modal.error) {
+                    await Modal.error('Fallo de red', netMsg);
+                } else {
+                    alert(netMsg);
+                }
+            } finally {
+                confirmationSubmit.disabled = false;
+                confirmationSubmit.innerHTML = originalHtml;
+            }
         }
 
         function showResultsMessage(message) {
@@ -437,7 +615,7 @@ document.addEventListener('DOMContentLoaded', function() {
             productInput.value = product.nombre || '';
             summary.name.textContent = product.nombre || '---';
             summary.category.textContent = product.categoria || '---';
-            summary.subcategory.textContent = 'Por implementar';
+            summary.subcategory.textContent = product.subcategoria || product.subcategoria_nombre || 'General';
             selectedStock = Number(product.stock_actual);
             if (!Number.isFinite(selectedStock)) selectedStock = null;
             summary.stock.textContent = selectedStock === null ? '---' : formatQuantity(selectedStock) + ' unidades';
