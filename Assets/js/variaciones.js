@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var startDate = document.getElementById('variation-start-date');
     var endDate = document.getElementById('variation-end-date');
     var typeSelect = document.getElementById('variation-type');
+    var directionSelect = document.getElementById('variation-direction');
     var status = document.getElementById('variation-filter-status');
     var pagination = document.getElementById('variation-pagination');
     var summaryToggle = document.getElementById('variation-summary-toggle');
@@ -80,7 +81,8 @@ document.addEventListener('DOMContentLoaded', function() {
             var matchesStart = !startDate.value || date >= startDate.value;
             var matchesEnd = !endDate.value || date <= endDate.value;
             var matchesType = !typeSelect.value || row.type === typeSelect.value;
-            return matchesProduct && matchesCategory && matchesSubcategory && matchesStart && matchesEnd && matchesType;
+            var matchesDirection = !directionSelect.value || row.direction === directionSelect.value;
+            return matchesProduct && matchesCategory && matchesSubcategory && matchesStart && matchesEnd && matchesType && matchesDirection;
         });
     }
 
@@ -278,6 +280,7 @@ document.addEventListener('DOMContentLoaded', function() {
         startDate.value = defaultStartDate;
         endDate.value = defaultEndDate;
         typeSelect.value = '';
+        directionSelect.value = '';
         status.textContent = '';
         status.classList.remove('is-error');
         currentPage = 1;
