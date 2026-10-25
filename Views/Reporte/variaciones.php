@@ -44,6 +44,14 @@
                     <option value="Baja por vencimiento">Baja por vencimiento</option>
                 </select>
             </div>
+            <div class="kardex-filter-field">
+                <label for="variation-direction">Sentido</label>
+                <select id="variation-direction">
+                    <option value="">Todos</option>
+                    <option value="Incremento">Entradas</option>
+                    <option value="Disminución">Salidas</option>
+                </select>
+            </div>
         </div>
         <div class="kardex-filter-actions">
             <button id="variation-clear" type="button">Limpiar filtros</button>

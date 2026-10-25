@@ -1683,6 +1683,7 @@ button, select, input, textarea { font-family: inherit; }
 .variation-filter-grid { display: grid; grid-template-columns: 2fr repeat(4, minmax(0, 1fr)); gap: 9px; }
 .variation-filter-product { grid-column: span 1; }
 .variation-filter-grid .kardex-filter-field:nth-child(6) { grid-column: 1 / 2; }
+.variation-filter-grid .kardex-filter-field:nth-child(7) { grid-column: 2 / 3; }
 .variation-summary-card,
 .variation-table-card {
     border: 1px solid var(--border-color);
