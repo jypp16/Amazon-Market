@@ -90,3 +90,4 @@ class InventarioApiController extends ApiController
         return null;
     }
 }
+

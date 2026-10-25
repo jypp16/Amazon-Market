@@ -11,3 +11,4 @@ class OperacionInventarioModel extends Model {
         $this->primaryKey = 'id_operacion';
     }
 }
+
