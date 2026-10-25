@@ -2,6 +2,8 @@
 
 namespace Controllers\API;
 
+use Services\ControlSolicitudService;
+
 use Libraries\Core\ApiController;
 use Libraries\Core\InventarioException;
 use Models\VentaModel;
@@ -33,13 +35,13 @@ class VentaApiController extends ApiController
 
     private function extraerReferenciaSolicitud(array $input): ?string {
         if (!empty($input['referencia_solicitud']) && is_string($input['referencia_solicitud'])) {
-            return trim($input['referencia_solicitud']);
+            return ControlSolicitudService::validarReferenciaSolicitud($input['referencia_solicitud']);
         }
         $headerRef = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
         if (!empty($headerRef) && is_string($headerRef)) {
-            return trim($headerRef);
+            return ControlSolicitudService::validarReferenciaSolicitud($headerRef);
         }
-        return null;
+        throw InventarioException::validacion(['referencia_solicitud' => 'La referencia de solicitud es obligatoria para evitar operaciones duplicadas.']);
     }
 
     private function getVentas(?string $id): void
@@ -97,7 +99,7 @@ class VentaApiController extends ApiController
 
             $resultado = $this->ventaService->procesarVenta($data, $referenciaSolicitud);
 
-            $this->sendJsonResponse($resultado, !empty($resultado['status']) ? 201 : 400);
+            $this->sendJsonResponse($resultado, !empty($resultado['status']) ? (!empty($resultado['idempotent_replay']) ? 200 : 201) : 400);
 
         } catch (InventarioException $e) {
             $this->sendJsonResponse($e->asResponseArray(), $e->getStatusCode());

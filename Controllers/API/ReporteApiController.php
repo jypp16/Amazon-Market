@@ -19,6 +19,9 @@ class ReporteApiController extends ApiController {
     }
 
     public function get(?string $params = ""): void {
+        if (in_array($params, ['kardex', 'variaciones'], true)) {
+            $this->requireAdminActivo();
+        }
         $this->requirePermission('reportes.ver');
 
         $tipo = $params ?? '';

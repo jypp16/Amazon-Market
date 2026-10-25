@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var categoryLoadError = '';
     var categoriesData = {};
     var currentConsultaRef = null;
+    var appliedFilters = null;
     var isExportableCurrent = false;
 
     var defaultStartDate = startDate.value || (new Date().toISOString().slice(0, 7) + '-01');
@@ -142,9 +143,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             option.addEventListener('click', function() {
                 selectedProduct = product;
-                currentConsultaRef = null;
                 productInput.value = product.nombre || product.codigo_barra || '';
-                updateSummaryCards(null);
                 if (product.id_categoria) {
                     categorySelect.value = String(product.id_categoria);
                     updateSubcategories(product.id_categoria);
@@ -249,11 +248,18 @@ document.addEventListener('DOMContentLoaded', function() {
             limit: '10'
         });
 
-        if (startDate.value) params.set('fecha_inicio', startDate.value);
-        if (endDate.value) params.set('fecha_fin', endDate.value);
-        if (selectedProduct) params.set('id_producto', String(selectedProduct.id_producto));
-        if (categorySelect.value) params.set('id_categoria', categorySelect.value);
-        if (subcategorySelect.value) params.set('id_subcategoria', subcategorySelect.value);
+        if (!appliedFilters) {
+            appliedFilters = {
+                fecha_inicio: startDate.value,
+                fecha_fin: endDate.value,
+                id_producto: selectedProduct ? String(selectedProduct.id_producto) : '',
+                id_categoria: categorySelect.value,
+                id_subcategoria: subcategorySelect.value
+            };
+        }
+        Object.keys(appliedFilters).forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
         if (currentConsultaRef) params.set('referencia_consulta', currentConsultaRef);
 
         movementsBody.replaceChildren();
@@ -353,8 +359,6 @@ document.addEventListener('DOMContentLoaded', function() {
     productInput.addEventListener('input', function() {
         window.clearTimeout(searchTimer);
         selectedProduct = null;
-        currentConsultaRef = null;
-        updateSummaryCards(null);
         var query = productInput.value.trim();
         var sequence = ++searchSequence;
         if (!query) {
@@ -375,7 +379,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     categorySelect.addEventListener('change', function() {
-        currentConsultaRef = null;
         updateSubcategories(categorySelect.value);
         setStatus(categorySelect.value ? 'Categoría seleccionada.' : '', false);
         if (productInput.value.trim()) {
@@ -389,16 +392,15 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     subcategorySelect.addEventListener('change', function() {
-        currentConsultaRef = null;
         setStatus(subcategorySelect.value ? 'Subcategoría seleccionada.' : '', false);
     });
 
     startDate.addEventListener('change', function() {
-        currentConsultaRef = null;
+        setStatus('Filtros pendientes. Pulsa Consultar para aplicarlos.', false);
     });
 
     endDate.addEventListener('change', function() {
-        currentConsultaRef = null;
+        setStatus('Filtros pendientes. Pulsa Consultar para aplicarlos.', false);
     });
 
     clearButton.addEventListener('click', function() {
@@ -411,6 +413,7 @@ document.addEventListener('DOMContentLoaded', function() {
         endDate.value = defaultEndDate;
         selectedProduct = null;
         currentConsultaRef = null;
+        appliedFilters = null;
         updateSummaryCards(null);
         guidance.hidden = false;
         productResults.replaceChildren();
@@ -426,12 +429,18 @@ document.addEventListener('DOMContentLoaded', function() {
             productInput.focus();
             return;
         }
-        if (startDate.value && endDate.value && startDate.value > endDate.value) {
+        if (!startDate.value || !endDate.value) {
+            setStatus('Selecciona la fecha inicial y la fecha final.', true);
+            (!startDate.value ? startDate : endDate).focus();
+            return;
+        }
+        if (startDate.value > endDate.value) {
             setStatus('La fecha inicial no puede ser posterior a la fecha final.', true);
             startDate.focus();
             return;
         }
         currentConsultaRef = null;
+        appliedFilters = null;
         currentPage = 1;
         loadMovements();
     });

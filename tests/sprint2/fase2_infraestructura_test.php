@@ -151,13 +151,15 @@ assertTest(
 $rechazoDetalleCompraSQL = false;
 $db->beginTransaction();
 try {
-    $db->exec("INSERT INTO compra (id_proveedor, id_usuario, fecha_compra, total, estado) VALUES (1, 1, NOW(), 10.00, 1)");
+    $db->exec("INSERT INTO compra (id_proveedor, id_usuario, id_tipo_comprobante, serie, numero, fecha_emision, fecha_recepcion, total_documento, estado)
+               VALUES (1, 1, 1, 'TSTC', 'CHECK-TEST', CURDATE(), CURDATE(), 10.00, 'Confirmada')");
     $idCompraTemp = (int)$db->lastInsertId();
     // cantidad_presentaciones=2, equivalencia_aplicada=6, pero cantidad_base=10 (debería ser 12)
-    $db->exec("INSERT INTO detalle_compra (id_compra, id_producto, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, precio_unitario_compra, subtotal)
-               VALUES ({$idCompraTemp}, 1, 2, 6, 10, 5.00, 10.00)");
+    $db->exec("INSERT INTO detalle_compra (id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea)
+               VALUES ({$idCompraTemp}, 1, 1, 2, 6, 10, 10.00)");
 } catch (\PDOException $e) {
-    $rechazoDetalleCompraSQL = true;
+    $rechazoDetalleCompraSQL = (int)($e->errorInfo[1] ?? 0) === 4025
+        && str_contains($e->getMessage(), 'chk_detalle_compra_integridad');
 } finally {
     if ($db->inTransaction()) {
         $db->rollBack();

@@ -7,6 +7,7 @@ use Models\CategoriaModel;
 use Models\UsuarioModel;
 use Models\ClienteModel;
 use Models\KardexModel;
+use Models\SubcategoriaModel;
 use Libraries\Core\InventarioException;
 use Exception;
 
@@ -179,7 +180,49 @@ class ReporteService {
         return $items;
     }
 
+    private function validarClasificacionReporte(?int $idCategoria, ?int $idSubcategoria): void {
+        if ($idCategoria !== null && !(new CategoriaModel())->find($idCategoria)) {
+            throw InventarioException::validacion(['id_categoria' => 'La categoría seleccionada no existe.']);
+        }
+        if ($idSubcategoria !== null) {
+            $subcategoria = (new SubcategoriaModel())->find($idSubcategoria);
+            if (!$subcategoria || ($idCategoria !== null && (int)$subcategoria['id_categoria'] !== $idCategoria)) {
+                throw InventarioException::validacion(['id_subcategoria' => 'La subcategoría no existe o no corresponde a la categoría seleccionada.']);
+            }
+        }
+    }
+
+    private function consultaConsistente(callable $consulta): array {
+        $db = \Libraries\Core\Conexion::getInstance()->conect();
+        $propia = !$db->inTransaction();
+        if ($propia) {
+            $db->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $db->beginTransaction();
+        }
+        try {
+            $resultado = $consulta();
+            if ($propia) $db->commit();
+            return $resultado;
+        } catch (\Throwable $e) {
+            if ($propia && $db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    private function validarTiposFiltrosReporte(array $input): void {
+        foreach (['fecha_inicio', 'fecha_fin', 'desde', 'hasta', 'q', 'referencia_consulta', 'tipo_variacion', 'tipo', 'sentido', 'sentido_movimiento', 'direction'] as $campo) {
+            if (isset($input[$campo]) && !is_string($input[$campo])) {
+                throw InventarioException::validacion([$campo => 'El filtro debe ser un valor de texto.']);
+            }
+        }
+    }
+
     public function ejecutarReporteKardex(array $input, ?int $idUsuario = null): array {
+        $this->validarTiposFiltrosReporte($input);
+        return $this->consultaConsistente(fn() => $this->consultarReporteKardex($input, $idUsuario));
+    }
+
+    private function consultarReporteKardex(array $input, ?int $idUsuario): array {
         $kardexModel = new KardexModel();
 
         if ($idUsuario === null || $idUsuario <= 0) {
@@ -242,6 +285,7 @@ class ReporteService {
             );
         }
 
+        $this->validarClasificacionReporte($idCategoria ?: null, $idSubcategoria ?: null);
         $q = isset($input['q']) ? trim((string)$input['q']) : '';
 
         $pageRaw = $input['page'] ?? $input['pagina'] ?? 1;
@@ -358,9 +402,17 @@ class ReporteService {
         if ($idProducto !== null) {
             $saldoInicial = $kardexModel->obtenerSaldoInicial($idProducto, $fechaInicioInicio);
 
+            // El resumen es del período completo: la clasificación histórica y la
+            // búsqueda solo filtran filas, no alteran las existencias del producto.
+            $filasPeriodo = $kardexModel->consultarKardexCanonico([
+                'fecha_inicio_inicio' => $fechaInicioInicio,
+                'fecha_fin_fin' => $fechaFinFin,
+                'id_producto' => $idProducto,
+            ]);
+
             $totalEntradas = 0;
             $totalSalidas = 0;
-            foreach ($filas as $fila) {
+            foreach ($filasPeriodo as $fila) {
                 if ($fila['sentido_movimiento'] === 'INCREMENTO') {
                     $totalEntradas += (int)$fila['cantidad'];
                 } elseif ($fila['sentido_movimiento'] === 'DISMINUCION') {
@@ -380,7 +432,9 @@ class ReporteService {
                 'total_entradas' => $totalEntradas,
                 'total_salidas' => $totalSalidas,
                 'saldo_final' => $saldoFinal,
-                'total_movimientos' => $totalRegistros,
+                'total_movimientos' => count($filasPeriodo),
+                'movimientos_filtrados' => $totalRegistros,
+                'alcance' => 'PERIODO_COMPLETO_PRODUCTO',
             ];
             $exportable = true;
         } else {
@@ -473,6 +527,11 @@ class ReporteService {
     }
 
     public function ejecutarReporteVariaciones(array $input, ?int $idUsuario = null): array {
+        $this->validarTiposFiltrosReporte($input);
+        return $this->consultaConsistente(fn() => $this->consultarReporteVariaciones($input, $idUsuario));
+    }
+
+    private function consultarReporteVariaciones(array $input, ?int $idUsuario): array {
         $kardexModel = new KardexModel();
 
         if ($idUsuario === null || $idUsuario <= 0) {
@@ -481,6 +540,15 @@ class ReporteService {
 
         $fechaInicioRaw = trim((string)($input['fecha_inicio'] ?? $input['desde'] ?? ''));
         $fechaFinRaw = trim((string)($input['fecha_fin'] ?? $input['hasta'] ?? ''));
+
+        // Paginar solo con referencia reutiliza las fechas congeladas; una
+        // consulta nueva sí debe declarar ambas fechas, incluso sin resultados.
+        $soloReferencia = !empty($input['referencia_consulta'])
+            && !array_key_exists('fecha_inicio', $input) && !array_key_exists('desde', $input)
+            && !array_key_exists('fecha_fin', $input) && !array_key_exists('hasta', $input);
+        if (!$soloReferencia && ($fechaInicioRaw === '' || $fechaFinRaw === '')) {
+            throw InventarioException::validacion(['fechas' => 'La fecha inicial y la fecha final son obligatorias.']);
+        }
 
         $fechaInicio = $fechaInicioRaw !== '' ? $fechaInicioRaw : date('Y-m-01');
         $fechaFin = $fechaFinRaw !== '' ? $fechaFinRaw : date('Y-m-d');
@@ -536,6 +604,8 @@ class ReporteService {
         }
 
         $q = isset($input['q']) ? trim((string)$input['q']) : '';
+
+        $this->validarClasificacionReporte($idCategoria ?: null, $idSubcategoria ?: null);
 
         // Validación de tipo de variación
         $tipoVariacionRaw = trim((string)($input['tipo_variacion'] ?? $input['tipo'] ?? ''));

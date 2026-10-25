@@ -5,10 +5,20 @@
  * (amazon_market_sprint2_test) sin alterar el archivo .env ni la conexión habitual.
  */
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit('Las suites solo pueden ejecutarse desde CLI.');
+}
+
 define('SPRINT2_TEST_DB', 'amazon_market_sprint2_test');
 
 $_ENV['DB_NAME'] = SPRINT2_TEST_DB;
 putenv('DB_NAME=' . SPRINT2_TEST_DB);
+
+// Las pruebas no comparten los archivos de sesión del Apache habitual.
+if (session_status() === PHP_SESSION_NONE) {
+    session_save_path(sys_get_temp_dir());
+}
 
 require_once __DIR__ . '/../../Config/Config.php';
 require_once __DIR__ . '/../../Libraries/Core/Autoload.php';

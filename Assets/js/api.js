@@ -1,6 +1,39 @@
 const Api = (() => {
     const BASE = (typeof API_URL !== 'undefined') ? API_URL : '/AM4/AmazonMarket/api';
     const controllers = {};
+    const intents = new Map();
+    const activeIntents = new Map();
+
+    // Conserva la misma intención incluso si se pierde la respuesta o se recarga
+    // la pestaña. Solo se guarda su huella y referencia, nunca los datos enviados.
+    async function referenciaSolicitud(scope, payload) {
+        const bytes = new TextEncoder().encode(JSON.stringify(payload));
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+        // Cada contenido conserva su referencia: A → B → A debe recuperar A,
+        // aunque la respuesta de A se haya perdido y B haya sido rechazado.
+        const scopeKey = 'am-solicitud:' + BASE + ':' + scope;
+        const key = scopeKey + ':' + hash;
+        let intent = intents.get(key);
+        try { intent = JSON.parse(sessionStorage.getItem(key)) || intent; } catch (_) {}
+        if (!intent || intent.hash !== hash) {
+            intent = { hash, ref: 'am_' + crypto.randomUUID().replace(/-/g, '') };
+            intents.set(key, intent);
+            try { sessionStorage.setItem(key, JSON.stringify(intent)); } catch (_) {}
+        }
+        activeIntents.set(scopeKey, key);
+        return intent.ref;
+    }
+
+    function confirmarSolicitud(scope) {
+        const scopeKey = 'am-solicitud:' + BASE + ':' + scope;
+        const key = activeIntents.get(scopeKey);
+        if (key) {
+            intents.delete(key);
+            try { sessionStorage.removeItem(key); } catch (_) {}
+            activeIntents.delete(scopeKey);
+        }
+    }
 
     function getCsrfToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
@@ -59,6 +92,8 @@ const Api = (() => {
     }
 
     return {
+        referenciaSolicitud: referenciaSolicitud,
+        confirmarSolicitud: confirmarSolicitud,
         request: request,
         get: function(endpoint) { return request(endpoint, { method: 'GET' }); },
         post: function(endpoint, body) { return request(endpoint, { method: 'POST', body: body }); },

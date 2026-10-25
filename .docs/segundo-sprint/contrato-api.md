@@ -4,6 +4,15 @@
 **Versión de contrato:** 1.1 (Revisado y consolidado en Fase 1)  
 **Formato de intercambio:** `application/json; charset=utf-8` (excepto descargas binarias PDF/Excel)
 
+**Aclaraciones verificadas tras la auditoría de fases 1–7:**
+
+- Las escrituras de compras (crear, corregir, anular) y ventas exigen `referencia_solicitud` válida en el cuerpo o cabecera. Primera creación: 201; repetición ya confirmada: 200 sin duplicar movimientos. Se conservan las referencias de intenciones pendientes, incluso al volver de unos datos A a B y luego a A.
+- El resumen del Kardex de un producto corresponde a todo el período, independientemente de los filtros históricos de categoría, subcategoría o texto que se apliquen a la tabla. `resumen_producto.total_movimientos` cuenta ese período completo; `movimientos_filtrados` cuenta las filas de la tabla; `alcance` vale `PERIODO_COMPLETO_PRODUCTO`. Un resultado filtrado vacío no implica que el producto no tenga movimientos ni saldo.
+- Una nueva consulta de Variaciones exige ambas fechas. Paginar únicamente con `referencia_consulta` reutiliza las fechas guardadas. Categoría y subcategoría deben existir y corresponder entre sí; no se exige que la clasificación actual del producto coincida con la histórica.
+- Kardex aplica cambios de filtros al pulsar Consultar o Limpiar. Editar controles y luego paginar mantiene la consulta anterior y su referencia.
+
+Evidencia y entorno aislado: [correcciones-fases1-7.md](correcciones-fases1-7.md).
+
 ---
 
 ## 1. Convenciones Generales y Enrutamiento

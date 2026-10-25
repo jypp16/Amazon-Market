@@ -582,29 +582,35 @@ async function procesarVenta() {
     if (!carrito.length) { Modal.warning('Carrito vacío', 'Agregue al menos un producto.'); return; }
 
     var ok = await Modal.confirm('Procesar venta', '¿Confirmar venta por S/. ' + totalCarrito().toFixed(2) + '?', 'warning');
-    if (!ok) return;
+    if (!ok || btn.disabled) return;
 
     document.getElementById('loader_overlay').style.display = 'flex';
     btn.disabled = true;
     try {
-        var refSolicitud = 'am_req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-        var res = await Api.post('ventas', {
+        var payload = {
             id_cliente: parseInt(id_cliente, 10),
             id_tipo_comprobante: parseInt(id_tc, 10),
             id_metodo_pago: parseInt(id_mp, 10),
-            referencia_solicitud: refSolicitud,
             productos: carrito.map(function(i) { return { id_producto: parseInt(i.id_producto, 10), cantidad: parseInt(i.cantidad, 10) }; })
-        });
+        };
+        payload.referencia_solicitud = await Api.referenciaSolicitud('venta-procesar', payload);
+        var res = await Api.post('ventas', payload);
         document.getElementById('loader_overlay').style.display = 'none';
         if (res && res.ok && res.data.status) {
             var d = res.data.data;
+            // La operación ya está confirmada: liberar el carrito antes de
+            // imprimir o recargar catálogos (esos pasos también pueden fallar).
+            var itemsConfirmados = carrito;
+            carrito = [];
+            Api.confirmarSolicitud('venta-procesar');
+            renderCarrito();
             var tipoComprobante = document.getElementById('id_tipo_comprobante');
             var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex] ? tipoComprobante.options[tipoComprobante.selectedIndex].text : 'Boleta';
             var metodoPago = document.getElementById('id_metodo_pago');
             var mpNombre = metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '';
             imprimirTicket(
                 { serie: d.serie, numero: d.numero, total: d.total, tipo: tipoNombre },
-                carrito,
+                itemsConfirmados,
                 clienteSeleccionado ? clienteSeleccionado.nombre : 'Cliente general',
                 mpNombre
             );

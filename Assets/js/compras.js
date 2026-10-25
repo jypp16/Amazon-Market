@@ -571,6 +571,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const textoBoton = esCorreccion ? 'Guardando corrección...' : 'Confirmando...';
         botonConfirmar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + textoBoton;
         try {
+            const scope = esCorreccion ? 'compra-corregir-' + idCompraCorreccion : 'compra-crear';
+            payload.referencia_solicitud = await Api.referenciaSolicitud(scope, payload);
             const response = esCorreccion
                 ? await Api.put('compras/' + encodeURIComponent(idCompraCorreccion), payload)
                 : await Api.post('compras', payload);
@@ -582,6 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 esCorreccion ? 'Compra corregida' : 'Compra confirmada',
                 result.message || (esCorreccion ? 'La corrección se guardó correctamente.' : 'La compra se registró correctamente.')
             );
+            Api.confirmarSolicitud(scope);
             window.location.href = esCorreccion
                 ? BASE_URL + '/Compra/detalle/' + encodeURIComponent(idCompraCorreccion)
                 : BASE_URL + '/Compra';
@@ -1795,9 +1798,11 @@ function inicializarDetalleCompra() {
             botonConfirmarAnulacion.disabled = true;
             botonConfirmarAnulacion.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Anulando...';
             try {
+                const body = { motivo };
+                body.referencia_solicitud = await Api.referenciaSolicitud('compra-anular-' + idCompra, body);
                 const response = await Api.request('compras/' + encodeURIComponent(idCompra), {
                     method: 'DELETE',
-                    body: { motivo }
+                    body
                 });
                 const result = response && response.data;
                 if (!response || !response.ok || !result || !result.status) {
@@ -1805,6 +1810,7 @@ function inicializarDetalleCompra() {
                 }
                 dialogoAnulacion.close();
                 await Modal.success('Compra anulada', result.message || 'La compra fue anulada correctamente.');
+                Api.confirmarSolicitud('compra-anular-' + idCompra);
                 window.location.reload();
             } catch (exception) {
                 errorAnulacion.textContent = exception.message || 'No se pudo anular la compra.';

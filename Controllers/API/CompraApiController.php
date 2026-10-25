@@ -5,6 +5,7 @@ namespace Controllers\API;
 use Libraries\Core\ApiController;
 use Libraries\Core\InventarioException;
 use Services\CompraService;
+use Services\ControlSolicitudService;
 use Throwable;
 
 class CompraApiController extends ApiController {
@@ -17,13 +18,13 @@ class CompraApiController extends ApiController {
 
     private function extraerReferenciaSolicitud(array $input): ?string {
         if (!empty($input['referencia_solicitud']) && is_string($input['referencia_solicitud'])) {
-            return trim($input['referencia_solicitud']);
+            return ControlSolicitudService::validarReferenciaSolicitud($input['referencia_solicitud']);
         }
         $headerRef = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
         if (!empty($headerRef) && is_string($headerRef)) {
-            return trim($headerRef);
+            return ControlSolicitudService::validarReferenciaSolicitud($headerRef);
         }
-        return null;
+        throw InventarioException::validacion(['referencia_solicitud' => 'La referencia de solicitud es obligatoria para evitar operaciones duplicadas.']);
     }
 
     /**
@@ -60,7 +61,7 @@ class CompraApiController extends ApiController {
             $resultado = $this->compraService->registrarCompra($cabecera, $detalles, $id_usuario, $referenciaSolicitud);
 
             if (!empty($resultado['status'])) {
-                $this->sendJsonResponse($resultado, 201);
+                $this->sendJsonResponse($resultado, !empty($resultado['idempotent_replay']) ? 200 : 201);
             } else {
                 $this->sendJsonResponse($resultado, 400);
             }

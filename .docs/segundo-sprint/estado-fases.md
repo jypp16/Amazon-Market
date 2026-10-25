@@ -356,6 +356,12 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 ---
 
+## Correcciones posteriores de las fases 1 a 7 (25/10/2026)
+
+Se corrigieron los saldos con filtros históricos, las validaciones de reportes, las referencias obligatorias y estables de compras/ventas y la paginación del Kardex. La prueba de restricción SQL de la fase 2 ahora verifica el error real de la restricción; antes podía aprobar por columnas inexistentes.
+
+La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La base habitual no se migró. Las fases 8, 9 y 10 continúan pendientes.
+
 ## 10. Dependencias para la Fase 8 (PDF)
 
 - Implementar generación y descarga binaria de PDF en `ReporteApiController::get('exportar-pdf')` para `tipo=kardex` y `tipo=variaciones`.

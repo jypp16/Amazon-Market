@@ -24,7 +24,7 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
     <!-- Hojas de Estilos Corporativas (Azul y Dorado) -->
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/style.css?v=<?= filemtime(__DIR__ . '/../Assets/css/style.css') ?>">
     <script>const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
-    <script src="<?= BASE_URL ?>/Assets/js/api.js"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
 </head>
 <body>
     <div class="app-layout">
