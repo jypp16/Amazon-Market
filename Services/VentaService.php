@@ -2,275 +2,367 @@
 
 namespace Services;
 
-use Models\ProductoModel;
+use Libraries\Core\DefinicionMovimiento;
+use Libraries\Core\InventarioException;
 use Models\ClienteModel;
-use Models\VentaModel;
 use Models\DetalleVentaModel;
+use Models\MetodoPagoModel;
+use Models\ProductoModel;
+use Models\TipoComprobanteModel;
 use Models\UsuarioModel;
-use Libraries\Core\Validation;
+use Models\VentaModel;
 use PDO;
+use Exception;
+use Throwable;
 
 class VentaService {
+    private VentaModel $ventaModel;
+    private DetalleVentaModel $detalleModel;
+    private ProductoModel $productoModel;
+    private ClienteModel $clienteModel;
+    private MovimientoInventarioService $movimientoService;
+    private ControlSolicitudService $controlSolicitudService;
+    private PDO $pdo;
 
-    private $ventaModel;
-    private $detalleModel;
-    private $productoModel;
-    private $clienteModel;
-    private $pdo;
-
-    public function __construct() {
-        $this->ventaModel = new VentaModel();
-        $this->detalleModel = new DetalleVentaModel();
-        $this->productoModel = new ProductoModel();
-        $this->clienteModel = new ClienteModel();
-        $this->pdo = \Libraries\Core\Conexion::getInstance()->conect();
+    public function __construct(
+        ?VentaModel $ventaModel = null,
+        ?DetalleVentaModel $detalleModel = null,
+        ?ProductoModel $productoModel = null,
+        ?ClienteModel $clienteModel = null,
+        ?MovimientoInventarioService $movimientoService = null,
+        ?ControlSolicitudService $controlSolicitudService = null
+    ) {
+        $this->ventaModel = $ventaModel ?? new VentaModel();
+        $this->detalleModel = $detalleModel ?? new DetalleVentaModel();
+        $this->productoModel = $productoModel ?? new ProductoModel();
+        $this->clienteModel = $clienteModel ?? new ClienteModel();
+        $this->movimientoService = $movimientoService ?? new MovimientoInventarioService();
+        $this->pdo = $this->movimientoService->getPdo();
+        $this->controlSolicitudService = $controlSolicitudService ?? new ControlSolicitudService($this->pdo);
     }
 
-    public function procesarVenta(array $input): array {
-        // 1. Validar datos de entrada
-        $validator = new Validation($input);
-        $validator->required(['id_cliente', 'productos', 'id_tipo_comprobante'])
-            ->integer('id_cliente')
-            ->integer('id_tipo_comprobante');
-
-        if ($validator->fails()) {
-            return ['status' => false, 'message' => $validator->firstError()];
-        }
-
-        if (!is_array($input['productos']) || empty($input['productos'])) {
-            return ['status' => false, 'message' => 'Debe agregar al menos un producto a la venta.'];
-        }
-
-        // 2. Validar cada producto
-        foreach ($input['productos'] as $index => $item) {
-            $validation = $this->validarItemProducto($item, $index);
-            if ($validation !== true) {
-                return ['status' => false, 'message' => $validation];
-            }
-        }
-
-        // 3. Verificar existencia de cliente y comprobante
-        $id_cliente = intval($input['id_cliente']);
-        $id_tipo_comprobante = intval($input['id_tipo_comprobante']);
-
-        $cliente = $this->clienteModel->find($id_cliente);
-        if (!$cliente || $cliente['estado'] != 1) {
-            return ['status' => false, 'message' => 'El cliente seleccionado no existe o está inactivo.'];
-        }
-
-        // Validar que Factura requiera cliente con RUC (buscar ID por nombre, no hardcodear)
-        $facturaStmt = $this->pdo->prepare("SELECT id_tipo_comprobante FROM tipo_comprobante WHERE LOWER(nombre) LIKE '%factura%' AND estado = 1 LIMIT 1");
-        $facturaStmt->execute();
-        $facturaId = (int) $facturaStmt->fetchColumn();
-
-        if ($facturaId > 0 && $id_tipo_comprobante == $facturaId && intval($cliente['id_tipo_documento']) != 2) {
-            return ['status' => false, 'message' => 'Para emitir Factura, el cliente debe tener RUC. Seleccione un cliente con RUC.'];
-        }
-
-        $comprobanteSql = "SELECT COUNT(*) FROM tipo_comprobante WHERE id_tipo_comprobante = :id AND estado = 1";
-        $comprobanteStmt = $this->pdo->prepare($comprobanteSql);
-        $comprobanteStmt->execute([':id' => $id_tipo_comprobante]);
-        if ($comprobanteStmt->fetchColumn() == 0) {
-            return ['status' => false, 'message' => 'El tipo de comprobante seleccionado no es válido.'];
-        }
-
-        // 4. Validar inquilino autenticado (defensa BOLA/IDOR)
-        $id_usuario = intval($input['id_usuario'] ?? 0);
-        if ($id_usuario <= 0) {
-            return ['status' => false, 'message' => 'Sesión inválida: no se pudo identificar al usuario autenticado.'];
-        }
-
-        $usrStmt = $this->pdo->prepare("SELECT id_usuario, estado FROM usuario WHERE id_usuario = :id LIMIT 1");
-        $usrStmt->execute([':id' => $id_usuario]);
-        $usrRow = $usrStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$usrRow || intval($usrRow['estado']) !== 1) {
-            return ['status' => false, 'message' => 'El usuario autenticado no existe o está inactivo.'];
-        }
-
-        // 5. Ejecutar transacción vinculada al inquilino validado
-        return $this->ejecutarTransaccion($input, $id_cliente, $id_tipo_comprobante, $id_usuario);
+    public function getMovimientoService(): MovimientoInventarioService {
+        return $this->movimientoService;
     }
 
-    private function validarItemProducto(array $item, int $index): string|true {
-        if (empty($item['id_producto'])) {
-            return "El producto #" . ($index + 1) . " no tiene ID válido.";
+    /**
+     * Procesa y confirma una venta de forma atómica:
+     * valida cliente, comprobante, responsable y catálogo,
+     * descuenta existencias mediante bloqueo pesimista ordenado,
+     * registra cada salida en Kardex con FKs y snapshots históricos,
+     * e implementa idempotencia ante reenvíos.
+     */
+    public function procesarVenta(array $input, ?string $referencia_solicitud = null): array {
+        // Extraer referencia de solicitud si vino en el payload
+        if ($referencia_solicitud === null && !empty($input['referencia_solicitud']) && is_string($input['referencia_solicitud'])) {
+            $referencia_solicitud = trim($input['referencia_solicitud']);
         }
-        if (!isset($item['cantidad']) || $item['cantidad'] === '' || $item['cantidad'] === null) {
-            return "La cantidad del producto #" . ($index + 1) . " es obligatoria.";
+
+        // 1. Validar responsable autenticado en BD (defensa BOLA/IDOR)
+        $idUsuario = filter_var($input['id_usuario'] ?? null, FILTER_VALIDATE_INT);
+        if ($idUsuario === false || $idUsuario <= 0) {
+            throw InventarioException::noAutenticado();
         }
-        if (!is_numeric($item['cantidad'])) {
-            return "La cantidad del producto #" . ($index + 1) . " debe ser un número válido.";
+        $responsable = $this->movimientoService->verificarResponsableActivo((int)$idUsuario, false);
+
+        // 2. Validar cliente
+        $idCliente = filter_var($input['id_cliente'] ?? null, FILTER_VALIDATE_INT);
+        if ($idCliente === false || $idCliente <= 0) {
+            throw InventarioException::validacion(['id_cliente' => 'Debe seleccionar un cliente válido.']);
         }
-        if (floatval($item['cantidad']) <= 0) {
-            return "La cantidad del producto #" . ($index + 1) . " debe ser mayor a cero.";
+        $cliente = $this->clienteModel->find((int)$idCliente);
+        if (!$cliente || (int)($cliente['estado'] ?? 0) !== 1) {
+            throw InventarioException::validacion(['id_cliente' => 'El cliente seleccionado no existe o está inactivo.']);
         }
-        return true;
-    }
 
-    private function ejecutarTransaccion(array $input, int $id_cliente, int $id_tipo_comprobante, int $id_usuario): array {
-        $this->pdo->beginTransaction();
+        // 3. Validar tipo de comprobante
+        $idTipoComp = filter_var($input['id_tipo_comprobante'] ?? null, FILTER_VALIDATE_INT);
+        if ($idTipoComp === false || $idTipoComp <= 0) {
+            throw InventarioException::validacion(['id_tipo_comprobante' => 'Debe seleccionar un tipo de comprobante válido.']);
+        }
 
-        try {
-            $total_general = 0.00;
-            $detalles = [];
-            $productos = $input['productos'];
+        $stmtComp = $this->pdo->prepare('SELECT id_tipo_comprobante, nombre FROM tipo_comprobante WHERE id_tipo_comprobante = :id AND estado = 1');
+        $stmtComp->execute([':id' => $idTipoComp]);
+        $tipoComp = $stmtComp->fetch(PDO::FETCH_ASSOC);
+        if (!$tipoComp) {
+            throw InventarioException::validacion(['id_tipo_comprobante' => 'El tipo de comprobante seleccionado no es válido o está inactivo.']);
+        }
 
-            foreach ($productos as $item) {
-                $resultado = $this->procesarItemVenta($item);
-                if ($resultado['error']) {
-                    $this->pdo->rollBack();
-                    return ['status' => false, 'message' => $resultado['message']];
-                }
-                $total_general += $resultado['subtotal'];
-                $detalles[] = $resultado['detalle'];
-            }
-
-            // Crear venta — la serie y el correlativo viven en serie_comprobante,
-            // una fila por tipo de comprobante. SELECT ... FOR UPDATE bloquea
-            // esa fila específica dentro de la transacción, evitando que dos
-            // ventas concurrentes obtengan el mismo número (race condition).
-            $serieStmt = $this->pdo->prepare(
-                "SELECT id_serie, serie, correlativo_actual
-                 FROM serie_comprobante
-                 WHERE id_tipo_comprobante = :id AND estado = 1
-                 LIMIT 1 FOR UPDATE"
-            );
-            $serieStmt->execute([':id' => $id_tipo_comprobante]);
-            $serieRow = $serieStmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$serieRow) {
-                $this->pdo->rollBack();
-                return ['status' => false, 'message' => 'No hay una serie configurada para este tipo de comprobante.'];
-            }
-
-            $serie = $serieRow['serie'];
-            $siguienteCorrelativo = (int) $serieRow['correlativo_actual'] + 1;
-            $numero = str_pad($siguienteCorrelativo, 8, "0", STR_PAD_LEFT);
-
-            $updateSerieStmt = $this->pdo->prepare(
-                "UPDATE serie_comprobante SET correlativo_actual = :nuevo WHERE id_serie = :id_serie"
-            );
-            $updateSerieStmt->execute([
-                ':nuevo' => $siguienteCorrelativo,
-                ':id_serie' => $serieRow['id_serie']
+        // Si es Factura, validar que el cliente posea RUC (id_tipo_documento = 2)
+        if (stripos($tipoComp['nombre'], 'factura') !== false && (int)($cliente['id_tipo_documento'] ?? 0) !== 2) {
+            throw InventarioException::validacion([
+                'id_tipo_comprobante' => 'Para emitir Factura, el cliente debe tener RUC. Seleccione un cliente con RUC.'
             ]);
+        }
 
-            $ventaData = [
-                'id_cliente' => $id_cliente,
-                'id_usuario' => $id_usuario,
-                'id_tipo_comprobante' => $id_tipo_comprobante,
-                'serie' => $serie,
-                'numero' => $numero,
-                'total' => $total_general,
-                'id_metodo_pago' => intval($input['id_metodo_pago'] ?? 1),
-                'estado' => 1
+        // 4. Validar método de pago
+        $idMetodoPago = filter_var($input['id_metodo_pago'] ?? 1, FILTER_VALIDATE_INT);
+        if ($idMetodoPago === false || $idMetodoPago <= 0) {
+            throw InventarioException::validacion(['id_metodo_pago' => 'Debe seleccionar un método de pago válido.']);
+        }
+
+        // 5. Validar productos y cantidades enteras
+        $productos = $input['productos'] ?? null;
+        if (!is_array($productos) || empty($productos)) {
+            throw InventarioException::validacion(['productos' => 'Debe agregar al menos un producto a la venta.']);
+        }
+
+        $itemsNormalizados = [];
+        $demandaPorProducto = [];
+
+        foreach ($productos as $index => $item) {
+            $numLinea = $index + 1;
+            $idProd = filter_var($item['id_producto'] ?? null, FILTER_VALIDATE_INT);
+            if ($idProd === false || $idProd <= 0) {
+                throw InventarioException::validacion(["producto_{$numLinea}" => "El producto en la línea {$numLinea} no tiene un identificador válido."]);
+            }
+
+            // Exigir cantidad entera positiva (Sprint 2: envases individuales enteros)
+            $cantEntera = DefinicionMovimiento::validarCantidadEnteraPositiva(
+                $item['cantidad'] ?? null,
+                "cantidad_linea_{$numLinea}"
+            );
+
+            $idProdEntero = (int)$idProd;
+            $itemsNormalizados[] = [
+                'id_producto' => $idProdEntero,
+                'cantidad' => $cantEntera,
+                'numero_linea' => $numLinea
             ];
 
-            if (!$this->ventaModel->insert($ventaData)) {
-                $this->pdo->rollBack();
-                return ['status' => false, 'message' => 'Error al registrar la venta.'];
-            }
+            // Acumular demanda para manejar múltiples líneas del mismo producto
+            $demandaPorProducto[$idProdEntero] = ($demandaPorProducto[$idProdEntero] ?? 0) + $cantEntera;
+        }
 
-            $id_venta = $this->pdo->lastInsertId();
+        // Operación atómica de negocio
+        $operacion = function () use (
+            $idCliente, $idTipoComp, $idMetodoPago, $idUsuario, $responsable,
+            $itemsNormalizados, $demandaPorProducto
+        ) {
+            return $this->movimientoService->ejecutarEnTransaccion(function (PDO $pdo) use (
+                $idCliente, $idTipoComp, $idMetodoPago, $idUsuario, $responsable,
+                $itemsNormalizados, $demandaPorProducto
+            ) {
+                // 1. Bloquear productos involucrados en orden ascendente
+                $idsProductos = array_keys($demandaPorProducto);
+                $productosBloqueados = $this->movimientoService->bloquearProductosOrdenados($idsProductos);
 
-            // Insertar detalles y actualizar stock
-            foreach ($detalles as $det) {
-                $detalleData = [
-                    'id_venta' => $id_venta,
-                    'id_producto' => $det['id_producto'],
-                    'cantidad' => $det['cantidad'],
-                    'precio_unitario' => $det['precio_unitario'],
-                    'descuento' => 0.00,
-                    'subtotal' => $det['subtotal']
-                ];
-
-                if (!$this->detalleModel->insert($detalleData)) {
-                    $this->pdo->rollBack();
-                    return ['status' => false, 'message' => 'Error al registrar el detalle de la venta.'];
+                // 2. Validar que todos los productos estén activos
+                foreach ($idsProductos as $idProd) {
+                    $prod = $productosBloqueados[$idProd];
+                    if ((int)$prod['estado'] !== 1) {
+                        throw InventarioException::validacion([
+                            'id_producto' => "El producto \"{$prod['nombre']}\" se encuentra inactivo y no admite ventas."
+                        ]);
+                    }
                 }
 
-                $updateSql = "UPDATE producto SET stock_actual = stock_actual - :cantidad WHERE id_producto = :id_producto AND stock_actual >= :cantidad";
-                $updateStmt = $this->pdo->prepare($updateSql);
-                $updateStmt->execute([
-                    ':cantidad' => $det['cantidad'],
-                    ':id_producto' => $det['id_producto']
+                // 3. Validar disponibilidad de stock considerando la demanda acumulada
+                foreach ($demandaPorProducto as $idProd => $demandaTotal) {
+                    $stockActual = (int)$productosBloqueados[$idProd]['stock_actual'];
+                    if ($stockActual < $demandaTotal) {
+                        throw InventarioException::stockInsuficiente(
+                            $idProd,
+                            $stockActual,
+                            $demandaTotal,
+                            $productosBloqueados[$idProd]['nombre']
+                        );
+                    }
+                }
+
+                // 4. Bloquear y avanzar serie y correlativo de comprobante
+                $stmtSerie = $pdo->prepare(
+                    'SELECT id_serie, serie, correlativo_actual
+                       FROM serie_comprobante
+                      WHERE id_tipo_comprobante = :id AND estado = 1
+                      LIMIT 1 FOR UPDATE'
+                );
+                $stmtSerie->execute([':id' => $idTipoComp]);
+                $serieRow = $stmtSerie->fetch(PDO::FETCH_ASSOC);
+
+                if (!$serieRow) {
+                    throw new Exception('No hay una serie configurada para este tipo de comprobante.');
+                }
+
+                $serie = (string)$serieRow['serie'];
+                $siguienteCorrelativo = (int)$serieRow['correlativo_actual'] + 1;
+                $numero = str_pad((string)$siguienteCorrelativo, 8, '0', STR_PAD_LEFT);
+
+                $stmtUpdateSerie = $pdo->prepare(
+                    'UPDATE serie_comprobante SET correlativo_actual = :nuevo WHERE id_serie = :id_serie'
+                );
+                $stmtUpdateSerie->execute([
+                    ':nuevo' => $siguienteCorrelativo,
+                    ':id_serie' => (int)$serieRow['id_serie']
                 ]);
-                // Si ninguna fila fue afectada, el stock ya no alcanza (concurrencia)
-                if ($updateStmt->rowCount() === 0) {
-                    $this->pdo->rollBack();
-                    $prodInfo = $this->productoModel->find($det['id_producto']);
-                    $disponible = $prodInfo ? $prodInfo['stock_actual'] : 0;
-                    return ['status' => false, 'message' => "Stock insuficiente para el producto ID {$det['id_producto']}. Disponible: {$disponible}"];
+
+                // 5. Calcular subtotales y total general usando precio oficial vigente del catálogo
+                $detallesProcesados = [];
+                $totalCentimos = 0;
+
+                foreach ($itemsNormalizados as $item) {
+                    $idProd = $item['id_producto'];
+                    $cant = $item['cantidad'];
+                    $precioUnitario = (float)$productosBloqueados[$idProd]['precio_venta'];
+                    $subtotalLinea = round($precioUnitario * $cant, 2);
+                    $totalCentimos += (int)round($subtotalLinea * 100);
+
+                    $detallesProcesados[] = [
+                        'id_producto' => $idProd,
+                        'cantidad' => $cant,
+                        'precio_unitario' => $precioUnitario,
+                        'subtotal' => $subtotalLinea
+                    ];
                 }
+
+                $totalGeneral = $totalCentimos / 100;
+
+                // 6. Insertar cabecera de la venta
+                $stmtVenta = $pdo->prepare(
+                    'INSERT INTO venta (id_cliente, id_usuario, id_tipo_comprobante, serie, numero, fecha_venta, total, id_metodo_pago, estado)
+                     VALUES (:id_cliente, :id_usuario, :id_tipo_comprobante, :serie, :numero, NOW(), :total, :id_metodo_pago, 1)'
+                );
+                $stmtVenta->execute([
+                    ':id_cliente' => $idCliente,
+                    ':id_usuario' => $idUsuario,
+                    ':id_tipo_comprobante' => $idTipoComp,
+                    ':serie' => $serie,
+                    ':numero' => $numero,
+                    ':total' => $totalGeneral,
+                    ':id_metodo_pago' => $idMetodoPago
+                ]);
+                $idVenta = (int)$pdo->lastInsertId();
+
+                // 7. Insertar detalles y aplicar movimientos en Kardex
+                $stmtDetalle = $pdo->prepare(
+                    'INSERT INTO detalle_venta (id_venta, id_producto, cantidad, precio_unitario, descuento, subtotal)
+                     VALUES (:id_venta, :id_producto, :cantidad, :precio_unitario, 0.00, :subtotal)'
+                );
+
+                foreach ($detallesProcesados as $det) {
+                    $stmtDetalle->execute([
+                        ':id_venta' => $idVenta,
+                        ':id_producto' => $det['id_producto'],
+                        ':cantidad' => $det['cantidad'],
+                        ':precio_unitario' => $det['precio_unitario'],
+                        ':subtotal' => $det['subtotal']
+                    ]);
+                    $idDetalleVenta = (int)$pdo->lastInsertId();
+
+                    // Aplicar movimiento canónico VENTA (DISMINUCION)
+                    $this->movimientoService->aplicarMovimiento([
+                        'id_producto' => $det['id_producto'],
+                        'id_usuario' => $idUsuario,
+                        'origen_operacion' => DefinicionMovimiento::ORIGEN_VENTA,
+                        'sentido_movimiento' => DefinicionMovimiento::SENTIDO_DISMINUCION,
+                        'cantidad' => $det['cantidad'],
+                        'id_accion_venta' => $idVenta,
+                        'id_detalle_venta' => $idDetalleVenta,
+                        'referencia_operacion' => "Venta #{$idVenta} - {$serie}-{$numero}",
+                        'exigir_producto_activo' => true
+                    ]);
+                }
+
+                return [
+                    'status' => true,
+                    'message' => 'Venta registrada con éxito.',
+                    'data' => [
+                        'id_venta' => $idVenta,
+                        'serie' => $serie,
+                        'numero' => $numero,
+                        'total' => $totalGeneral
+                    ]
+                ];
+            });
+        };
+
+        // Soporte de idempotencia
+        if ($referencia_solicitud !== null && trim($referencia_solicitud) !== '') {
+            $payloadFuncional = [
+                'id_cliente' => $idCliente,
+                'id_tipo_comprobante' => $idTipoComp,
+                'id_metodo_pago' => $idMetodoPago,
+                'productos' => $itemsNormalizados
+            ];
+
+            $resIdemp = $this->controlSolicitudService->ejecutarConIdempotencia(
+                $idUsuario,
+                DefinicionMovimiento::SOLICITUD_VENTA,
+                $referencia_solicitud,
+                $payloadFuncional,
+                function (PDO $pdo) use ($operacion) {
+                    $resultado = $operacion();
+                    return [
+                        'id_registro' => (int)($resultado['data']['id_venta'] ?? 0),
+                        'response' => $resultado
+                    ];
+                }
+            );
+
+            $respuestaFinal = $resIdemp['response'];
+            // Si fue repetición idempotente, asegurar que la estructura data esté disponible
+            if (!empty($resIdemp['idempotent_replay']) && isset($respuestaFinal['data']['id_venta'])) {
+                $respuestaFinal['status'] = true;
+            }
+            return $respuestaFinal;
+        }
+
+        return $operacion();
+    }
+
+    /**
+     * Anula una venta registrada, restituyendo las unidades a inventario
+     * mediante ANULACION_VENTA (INCREMENTO).
+     */
+    public function anularVenta(int $id_venta, int $id_usuario, string $motivo = ''): array {
+        $motivo = trim($motivo);
+        if ($motivo === '') {
+            throw InventarioException::validacion(['motivo' => 'El motivo de anulación es obligatorio.']);
+        }
+
+        $responsable = $this->movimientoService->verificarResponsableActivo($id_usuario, false);
+
+        return $this->movimientoService->ejecutarEnTransaccion(function (PDO $pdo) use ($id_venta, $id_usuario, $motivo) {
+            $stmt = $pdo->prepare('SELECT * FROM venta WHERE id_venta = ? FOR UPDATE');
+            $stmt->execute([$id_venta]);
+            $venta = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$venta) {
+                throw new Exception("Venta no encontrada ID: {$id_venta}.");
+            }
+            if ((int)$venta['estado'] === 0) {
+                throw new Exception("La venta ya se encuentra anulada.");
             }
 
-            $this->pdo->commit();
+            $stmtDet = $pdo->prepare('SELECT * FROM detalle_venta WHERE id_venta = ?');
+            $stmtDet->execute([$id_venta]);
+            $detalles = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
+
+            $idsProductos = array_values(array_unique(array_column($detalles, 'id_producto')));
+            $this->movimientoService->bloquearProductosOrdenados($idsProductos);
+
+            foreach ($detalles as $det) {
+                $this->movimientoService->aplicarMovimiento([
+                    'id_producto' => (int)$det['id_producto'],
+                    'id_usuario' => $id_usuario,
+                    'origen_operacion' => DefinicionMovimiento::ORIGEN_ANULACION_VENTA,
+                    'sentido_movimiento' => DefinicionMovimiento::SENTIDO_INCREMENTO,
+                    'cantidad' => (int)$det['cantidad'],
+                    'id_accion_venta' => $id_venta,
+                    'id_detalle_venta' => (int)$det['id_detalle_venta'],
+                    'referencia_operacion' => "Anulación Venta #{$id_venta}",
+                    'justificacion' => $motivo,
+                    'exigir_producto_activo' => false
+                ]);
+            }
+
+            $stmtUpd = $pdo->prepare('UPDATE venta SET estado = 0 WHERE id_venta = ?');
+            $stmtUpd->execute([$id_venta]);
 
             return [
                 'status' => true,
-                'message' => 'Venta registrada con éxito.',
-                'data' => [
-                    'id_venta' => $id_venta,
-                    'serie' => $serie,
-                    'numero' => $numero,
-                    'total' => $total_general
-                ]
+                'message' => 'Venta anulada correctamente.'
             ];
-        } catch (\Exception $e) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            // No filtrar detalles internos al cliente; loguear la excepción.
-            error_log('Error en VentaService::ejecutarTransaccion -> ' . $e->getMessage());
-            return ['status' => false, 'message' => 'Ocurrió un error interno al procesar la venta. Intente nuevamente.'];
-        }
-    }
-
-    private function procesarItemVenta(array $item): array {
-        $id_prod = intval($item['id_producto']);
-        $cant = floatval($item['cantidad']);
-
-        $producto = $this->productoModel
-            ->select(['producto.*', 'unidad_medida.abreviatura as unidad'])
-            ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER')
-            ->where(['producto.id_producto' => $id_prod])
-            ->first();
-
-        if (!$producto || $producto['estado'] != 1) {
-            return ['error' => true, 'message' => "El producto con ID {$id_prod} no existe o está inactivo."];
-        }
-
-        if ($producto['stock_actual'] < $cant) {
-            return ['error' => true, 'message' => "Stock insuficiente para: {$producto['nombre']}. Disponible: {$producto['stock_actual']}"];
-        }
-
-        // Validar decimales según unidad
-        $unidad = strtolower(trim($producto['unidad'] ?? ''));
-        $unidadesDecimales = ['kg', 'lt', 'lb', 'gal', 'm', 'cm', 'ml', 'g', 'oz'];
-        $esDecimal = false;
-        foreach ($unidadesDecimales as $ud) {
-            if (strpos($unidad, $ud) !== false) {
-                $esDecimal = true;
-                break;
-            }
-        }
-
-        if (!$esDecimal && intval($cant) != $cant) {
-            return ['error' => true, 'message' => "El producto '{$producto['nombre']}' se vende por unidad. No se permiten decimales."];
-        }
-
-        $precio = floatval($producto['precio_venta']);
-        $subtotal = $precio * $cant;
-
-        return [
-            'error' => false,
-            'subtotal' => $subtotal,
-            'detalle' => [
-                'id_producto' => $id_prod,
-                'cantidad' => $cant,
-                'precio_unitario' => $precio,
-                'subtotal' => $subtotal
-            ]
-        ];
+        });
     }
 }

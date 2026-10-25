@@ -3,7 +3,7 @@
 **Proyecto:** Amazon-Market  
 **Base de datos exclusiva de pruebas (Fases 1–9):** `amazon_market_sprint2_test`  
 **Bootstrap de aislamiento:** [`tests/sprint2/bootstrap_test.php`](../../tests/sprint2/bootstrap_test.php)  
-**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`). En **Fase 3** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase3_productos_compras_test.php`](../../tests/sprint2/fase3_productos_compras_test.php) (`13 PASS / 0 FAIL`) cubriendo la creación con stock 0, edición sin modificación de existencias, presentaciones enteras (2 cajas de 24 = 48 unidades), corrección por delta neto $\Delta(P)$ sin error ante ventas intermedias, corrección de solo costo sin Kardex ($\Delta = 0$), rollback integral ante fallo, corrección consecutiva contra versión vigente, concurrencia compra/venta con `FOR UPDATE`, anulación única, consistencia contable en reportes de compras filtrados por `es_vigente = 1` e idempotencia con `referencia_solicitud`. Los casos específicos de las Fases 4 a 10 permanecen pendientes para sus respectivas fases.
+**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`). En **Fase 3** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase3_productos_compras_test.php`](../../tests/sprint2/fase3_productos_compras_test.php) (`13 PASS / 0 FAIL`). En **Fase 4** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase4_ventas_kardex_test.php`](../../tests/sprint2/fase4_ventas_kardex_test.php) (`14 PASS / 0 FAIL`) cubriendo venta normal, multi-línea del mismo producto, consumo exacto a 0, rechazo de stock insuficiente con serie intacta, rechazo de cantidades inválidas (422), serialización concurrente FOR UPDATE, venta combinada con compra, rollback integral ante fallo, idempotencia por `referencia_solicitud`, seguridad de usuario autenticado contra suplantación BOLA/IDOR, Factura con RUC y anulación con restitución de existencias. Los casos específicos de las Fases 5 a 10 permanecen pendientes para sus respectivas fases.
 
 ---
 
@@ -123,7 +123,7 @@
 | **CP-INT-01** | Fase 3 | `RI-01` / `Acuerdo 8` | Crear un producto nuevo intentando enviar `stock_actual = 50`; editar un producto existente intentando cambiar `stock_actual = 99`. | El producto nuevo se crea con `stock_actual = 0` y la edición no modifica `stock_actual`. | Pendiente |
 | **CP-INT-02** | Fase 3 | **Presentaciones de Compras conservadas** | Registrar una compra confirmada de **2 unidades de la presentación `Caja x 24` (`factor_conversion = 24`)** para un producto con `stock_actual = 0`. | `producto.stock_actual` se incrementa en **48 unidades individuales** (`stock_actual = 48`) y `kardex` registra una entrada de `48` unidades individuales (`saldo_anterior = 0`, `saldo_resultante = 48`). | Pendiente |
 | **CP-INT-03** | Fase 3 | `RI-02` / `RI-06` | Corregir una compra confirmada cambiando únicamente el costo unitario o lote sin cambiar las unidades; luego corregir cambiando la cantidad; luego anular la compra. | El cambio solo de costo/lote **no genera movimientos ficticios en `kardex`**; el cambio de cantidad ajusta `stock_actual` y `kardex` solo por la diferencia real de unidades individuales; la anulación revierte las unidades individuales si el stock alcanza. | Pendiente |
-| **CP-INT-04** | Fase 4 | `RI-03` / `RI-04` | Registrar una venta en el POS de 3 unidades individuales sobre un producto con `stock_actual = 48`. | En una sola transacción actualiza `stock_actual = 45` e inserta el movimiento `"Venta"` en `kardex` (`salida = 3`, `saldo_anterior = 48`, `saldo_resultante = 45`). | Pendiente |
+| **CP-INT-04** | Fase 4 | `RI-03` / `RI-04` | Registrar una venta en el POS de 3 unidades individuales sobre un producto con `stock_actual = 48`. | En una sola transacción actualiza `stock_actual = 45` e inserta el movimiento `"Venta"` en `kardex` (`salida = 3`, `saldo_anterior = 48`, `saldo_resultante = 45`). | **Aprobado en Fase 4** (`F4-VTA-01`) |
 | **CP-SEG-01** | Fase 2 | **Compatibilidad de catálogos con el POS y Vendedor** | Un usuario activo con rol **Vendedor (`id_rol = 2`)** consume `GET /api/productos` y `GET /api/categorias` desde el POS, y luego intenta invocar `GET /api/productos?modo=reporte`, `POST /api/inventario/bajas` o `GET /api/reportes/kardex`. | `GET /api/productos` y `GET /api/categorias` en modo estándar responden `200 OK` con el formato esperado por el POS; en cambio, `modo=reporte` y todos los endpoints de Inventario/Reportes del Sprint 2 responden `403 FORBIDDEN_ADMIN_ONLY`. | **Aprobado en Fase 2** (`F2-SEC-01` a `F2-SEC-05`) |
 
 ---
@@ -169,3 +169,52 @@
 | `F2-SEC-05` | `CSRFMiddleware` rechaza `POST` sin token o con token inválido y acepta token válido. | **PASS** |
 | `F2-CLEAN-01` | `amazon_market_sprint2_test` restaurada tras las pruebas a `stock_actual = 0` y `0` movimientos. | **PASS** |
 | `F2-ISO-01` | `amazon_market` (base principal) verificada 100 % intacta (`20` tablas, `106` productos con stock > 0, `98` ventas, `4` compras, `26` kardex). | **PASS** |
+
+---
+
+## 4. Resultados Ejecutados en Fase 3 (`tests/sprint2/fase3_productos_compras_test.php`)
+
+- **Comando ejecutado:** `C:\xampp\php\php.exe tests\sprint2\fase3_productos_compras_test.php`
+- **Base de datos utilizada:** `amazon_market_sprint2_test`
+- **Resultado global:** **13 PASS / 0 FAIL**
+
+| Código | Verificación Ejecutada | Resultado |
+|---|---|---|
+| `F3-PROD-01` | Producto nuevo ignora stock enviado y se crea estrictamente con `stock_actual = 0`. | **PASS** |
+| `F3-PROD-02` | Edición de producto actualiza atributos de catálogo pero no altera `stock_actual`. | **PASS** |
+| `F3-COMP-01` | Caso 1: Compra de 2 cajas de 24 genera entrada de 48 unidades en stock y Kardex canónico. | **PASS** |
+| `F3-COMP-02` | Caso 2: Compra 20, venta posterior 15 y corrección a 18 deja saldo final 3 sin error de stock negativo. | **PASS** |
+| `F3-COMP-03` | Caso 3: Corrección solo de costo no altera stock ni genera movimientos en Kardex ($\Delta = 0$). | **PASS** |
+| `F3-COMP-04` | Caso 4: Corrección con fallo intermedio realiza rollback completo sin corromper versiones ni stock. | **PASS** |
+| `F3-COMP-05` | Caso 5: Segunda corrección calcula delta contra la versión vigente ($12 - 14 = -2$) dejando stock en 12. | **PASS** |
+| `F3-COMP-06` | Caso 6: Bloqueo `FOR UPDATE` preserva actualizaciones concurrentes ($10 - 4 = 6$) sin actualizaciones perdidas. | **PASS** |
+| `F3-COMP-07` | Caso 7: Anulación repetida es rechazada sin duplicar la reversión de stock. | **PASS** |
+| `F3-REP-01` | Reporte de Compras filtra estrictamente `es_vigente = 1`, sin duplicar unidades ni generar falsas diferencias. | **PASS** |
+| `F3-IDEM-01` | Control de solicitud idempotente responde repetición sin volver a sumar existencias. | **PASS** |
+| `F3-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0. | **PASS** |
+| `F3-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |
+
+---
+
+## 5. Resultados Ejecutados en Fase 4 (`tests/sprint2/fase4_ventas_kardex_test.php`)
+
+- **Comando ejecutado:** `C:\xampp\php\php.exe tests\sprint2\fase4_ventas_kardex_test.php`
+- **Base de datos utilizada:** `amazon_market_sprint2_test`
+- **Resultado global:** **14 PASS / 0 FAIL**
+
+| Código | Verificación Ejecutada | Resultado |
+|---|---|---|
+| `F4-VTA-01` | Venta normal de línea única: descuenta stock atómicamente, incrementa correlativo y genera Kardex con snapshots y FKs (`id_accion_venta`, `id_detalle_venta`). | **PASS** |
+| `F4-VTA-02` | Venta multi-línea del mismo producto: valida demanda agregada ($\sum \text{cantidad}$), genera múltiples detalles y movimientos Kardex correlativos. | **PASS** |
+| `F4-VTA-03` | Consumo de stock exacto hasta 0: permite agotar existencias exactamente sin inconsistencias. | **PASS** |
+| `F4-VTA-04` | Rechazo por stock insuficiente (`409 INSUFFICIENT_STOCK`): no altera stock ni quema correlativo de serie. | **PASS** |
+| `F4-VTA-05` | Rechazo estricto de cantidades inválidas (decimal, decimal string, cero, negativo, texto) con `422 VALIDATION_ERROR`. | **PASS** |
+| `F4-VTA-06` | Concurrencia entre ventas: bloqueo ordenado `FOR UPDATE` previene sobreventa; primera venta descuenta y segunda es rechazada `409`. | **PASS** |
+| `F4-VTA-07` | Operación combinada Compra y Venta: saldos kardex consistentes en secuencia (1 -> 11 compra -> 4 venta). | **PASS** |
+| `F4-VTA-08` | Atomicidad y Rollback completo: fallo inducido revierte venta, kardex, stock y correlativo sin efectos residuales. | **PASS** |
+| `F4-VTA-09` | Idempotencia de Venta: reintento devuelve respuesta idéntica sin doble descuento; payload alterado rechaza `409 IDEMPOTENCY_PAYLOAD_MISMATCH`. | **PASS** |
+| `F4-VTA-10` | Seguridad de identidad del responsable: rechaza usuarios inexistentes (403/401) o no autenticados (401), previniendo BOLA/IDOR. | **PASS** |
+| `F4-VTA-11` | Validación comercial: Factura exige obligatoriamente cliente con RUC (`id_tipo_documento = 2`); rechaza DNI (422) y acepta RUC con serie F001. | **PASS** |
+| `F4-VTA-12` | Anulación de Venta: restituye existencias mediante `ANULACION_VENTA` (`INCREMENTO`), marca venta anulada y previene doble anulación. | **PASS** |
+| `F4-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0 (`kardex = 0`, `ventas = 0`, `detalles = 0`). | **PASS** |
+| `F4-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |

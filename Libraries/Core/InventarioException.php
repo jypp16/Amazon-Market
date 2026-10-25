@@ -36,6 +36,14 @@ class InventarioException extends \RuntimeException {
         return $this->httpStatus;
     }
 
+    public function getStatusCode(): int {
+        return $this->httpStatus;
+    }
+
+    public function asResponseArray(): array {
+        return $this->toApiResponse();
+    }
+
     public function getErrors(): array {
         return $this->errors;
     }

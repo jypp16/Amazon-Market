@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Cierre de Fase 2)
+**Última actualización:** 2026-10-25 (Cierre de Fase 4)
 
 ---
 
@@ -13,7 +13,7 @@
 | **Fase 1** | **Preparación y contratos** | Respaldo verificado, copia aislada de pruebas con escenario limpio, acuerdos, matriz de diferencias, contrato API (incluyendo selector de sentido, `referencia_solicitud` y `referencia_consulta`) y plan de pruebas. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
 | **Fase 2** | **Datos, seguridad y base común de movimientos** | Migraciones de estructura (`subcategoria`, instantáneas históricas en `kardex`, control de idempotencia `referencia_solicitud`, almacenamiento de `referencia_consulta`), validación de Administrador activo, base común transaccional de movimientos y compatibilidad de catálogos con POS. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
 | **Fase 3** | **Productos y Compras** | Productos nuevos con `stock_actual = 0`, bloqueo de edición de stock desde catálogo, validación entera de `stock_minimo`, conservación de presentaciones y equivalencias de Compras (ej. 2 cajas de 24 = 48 unidades individuales) y corrección/anulación sin movimientos ficticios en `kardex`. | `amazon_market_sprint2_test` | **Completada** |
-| **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 7** | **Variaciones y nuevo selector de sentido** | Incorporación del nuevo selector independiente “Sentido del movimiento” (`Todas`, `Entradas`, `Salidas`) en `Views/Reporte/variaciones.php`, consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y por producto único, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
@@ -133,5 +133,58 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
      - `F3-CLEAN-01`: Limpieza de registros de prueba y stock restablecido a 0.
      - `F3-ISO-01`: Aislamiento verificado: Base principal `amazon_market` 100 % intacta (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex).
 
-4. **Dependencias para la Fase 4 (Ventas)**:
-   - Integrar `VentaService` y `VentaApiController` con `MovimientoInventarioService` (`ORIGEN_VENTA`, `SENTIDO_DISMINUCION` en unidades enteras individuales) y `ControlSolicitudService`, aplicando bloqueo ordenado `FOR UPDATE` para garantizar la integridad concurrente del inventario con las compras y el catálogo.
+---
+
+## 6. Evidencias Reales de Cierre de la Fase 4
+
+1. **Ventas atómicas integradas con Kardex y bloqueo pesimista**:
+   - [`Services/VentaService.php`](../../Services/VentaService.php):
+     - `procesarVenta`: Valida usuario responsable activo en BD, cliente activo, tipo de comprobante activo y método de pago. Si es Factura, valida que el cliente posea RUC (`id_tipo_documento = 2`). Exige cantidades enteras positivas $\ge 1$ mediante `DefinicionMovimiento::validarCantidadEnteraPositiva`.
+     - Manejo de demanda agregada: Si el carrito contiene múltiples líneas del mismo producto, acumula la demanda total ($\sum \text{cantidad}$) para validar suficiencia antes de autorizar.
+     - Bloqueo determinístico: Ejecuta en transacción llamando a `bloquearProductosOrdenados` (`ORDER BY p.id_producto ASC FOR UPDATE`), garantizando serialización ante ventas concurrentes y previniendo interbloqueos (*deadlocks*).
+     - Serie y correlativo seguros: Bloquea la fila en `serie_comprobante` con `FOR UPDATE` dentro de la misma transacción. En caso de error, el correlativo no se quema ni genera huecos en la serie.
+     - Aplicación canónica en `kardex`: Descuenta existencias mediante `MovimientoInventarioService::aplicarMovimiento` con `ORIGEN_VENTA` y `SENTIDO_DISMINUCION`, vinculando las claves foráneas exclusivas `id_accion_venta` e `id_detalle_venta`, y registrando snapshots históricos completos (código, nombre, categoría, subcategoría, unidad, responsable y rol).
+     - Idempotencia: Integra `ControlSolicitudService::ejecutarConIdempotencia` bajo el canal `SOLICITUD_VENTA`. Solicitudes repetidas con idéntica referencia devuelven la confirmación original sin duplicar el descuento de existencias ni quemar correlativos; cargas alteradas con la misma referencia son rechazadas con `409 IDEMPOTENCY_PAYLOAD_MISMATCH`.
+     - `anularVenta`: Restituye existencias mediante `ORIGEN_ANULACION_VENTA` (`INCREMENTO`) con justificación obligatoria y previene re-anulaciones de ventas ya anuladas.
+   - [`Controllers/API/VentaApiController.php`](../../Controllers/API/VentaApiController.php):
+     - Requiere permiso `ventas.procesar`.
+     - Fuerza `$data['id_usuario'] = (int)$this->authenticatedUserId;` (prevención de suplantación de identidad BOLA/IDOR).
+     - Extrae `referencia_solicitud` desde el cuerpo JSON o encabezados `X-Request-Reference` / `X-Idempotency-Key`.
+     - Mapea `InventarioException` a códigos canónicos de respuesta HTTP (409, 422, etc.).
+   - [`Controllers/VentaController.php`](../../Controllers/VentaController.php):
+     - En método `guardar()`, asigna usuario autenticado de sesión y extrae encabezado de referencia de solicitud, delegando la operación atómica a `VentaService`.
+   - [`Assets/js/venta.js`](../../Assets/js/venta.js):
+     - Forza cantidades enteras (`parseInt`), pasos de 1 en inputs (`step = "1"`, `min = "1"`), envía `referencia_solicitud` única (`VTA-<timestamp>-<rand>`) en el payload y formatea cantidades enteras en el ticket impreso.
+
+2. **Suite de pruebas automatizadas de la Fase 4**:
+   - [`tests/sprint2/fase4_ventas_kardex_test.php`](../../tests/sprint2/fase4_ventas_kardex_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **14 PASS / 0 FAIL**:
+     - `F4-VTA-01`: Venta normal de línea única: descuenta stock atómicamente, incrementa correlativo y genera Kardex con snapshots y FKs (`id_accion_venta`, `id_detalle_venta`).
+     - `F4-VTA-02`: Venta multi-línea del mismo producto: valida demanda agregada (4 + 6 = 10), genera múltiples detalles y movimientos Kardex correlativos.
+     - `F4-VTA-03`: Consumo de stock exacto hasta 0: permite agotar existencias exactamente sin inconsistencia.
+     - `F4-VTA-04`: Rechazo por stock insuficiente (`409 INSUFFICIENT_STOCK`): no altera stock ni quema correlativo de serie.
+     - `F4-VTA-05`: Rechazo estricto de cantidades inválidas (decimal, decimal string, cero, negativo, texto) con `422 VALIDATION_ERROR`.
+     - `F4-VTA-06`: Concurrencia entre ventas: bloqueo ordenado `FOR UPDATE` previene sobreventa; primera venta descuenta y segunda es rechazada 409.
+     - `F4-VTA-07`: Operación combinada Compra y Venta: saldos kardex consistentes en secuencia (1 -> 11 compra -> 4 venta).
+     - `F4-VTA-08`: Atomicidad y Rollback completo: fallo inducido revierte venta, kardex, stock y correlativo sin efectos residuales.
+     - `F4-VTA-09`: Idempotencia de Venta: reintento devuelve respuesta idéntica sin doble descuento; payload alterado rechaza `409 IDEMPOTENCY_PAYLOAD_MISMATCH`.
+     - `F4-VTA-10`: Seguridad de identidad del responsable: rechaza usuarios inexistentes (403/401) o no autenticados (401), blindando contra BOLA/IDOR.
+     - `F4-VTA-11`: Validación comercial: Factura exige obligatoriamente cliente con RUC (`id_tipo_documento = 2`); rechaza DNI (422) y acepta RUC con serie F001.
+     - `F4-VTA-12` Anulación de Venta: restituye existencias mediante `ANULACION_VENTA` (`INCREMENTO`), marca venta anulada y previene doble anulación.
+     - `F4-CLEAN-01`: Limpieza final en base de pruebas: registros temporales eliminados y stock en 0 (`kardex = 0`, `ventas = 0`, `detalles = 0`).
+     - `F4-ISO-01`: Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex).
+
+3. **Verificación de regresión cruzada**:
+   - Fase 2 (`fase2_infraestructura_test.php`): **24 PASS / 0 FAIL**.
+   - Fase 3 (`fase3_productos_compras_test.php`): **13 PASS / 0 FAIL**.
+   - Fase 4 (`fase4_ventas_kardex_test.php`): **14 PASS / 0 FAIL**.
+   - Total acumulado de pruebas: **51 PASS / 0 FAIL**.
+
+---
+
+## 7. Dependencias para la Fase 5 (Bajas y ajustes)
+
+- Conectar `Views/Inventario/ajustes.php` y los endpoints `POST /api/inventario/bajas` y `POST /api/inventario/ajustes` a `MovimientoInventarioService` y `ControlSolicitudService`.
+- Implementar validación de `justificacion` obligatoria en ambas operaciones.
+- Implementar validación de `saldo_anterior_esperado` en ajustes positivos y negativos (`409 STOCK_CHANGED_CONFLICT`).
+- Conservar campo `lote` opcional en bajas ("Sin lote" si no se especifica).
+- Manejo estricto de cantidades enteras positivas en envases individuales.
