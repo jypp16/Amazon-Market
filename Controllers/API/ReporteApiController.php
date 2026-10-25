@@ -48,18 +48,14 @@ class ReporteApiController extends ApiController {
                 }
                 break;
             case 'variaciones':
-                $this->requireAdminActivo('reportes.variaciones');
-                $this->sendJsonResponse([
-                    'status' => true,
-                    'data' => [
-                        'items' => [],
-                        'resumen' => [
-                            'total_registros' => 0,
-                            'total_entradas_unidades' => 0,
-                            'total_salidas_unidades' => 0
-                        ]
-                    ]
-                ]);
+                $admin = $this->requireAdminActivo('reportes.variaciones');
+                try {
+                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteVariaciones($input, (int)$admin['id_usuario'])]);
+                } catch (InventarioException $error) {
+                    $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
+                } catch (\InvalidArgumentException $error) {
+                    $this->sendJsonResponse(['status' => false, 'code' => 'VALIDATION_ERROR', 'message' => $error->getMessage()], 422);
+                }
                 break;
             case 'clientes':
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteClientes($input)]);

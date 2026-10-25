@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Cierre de Fase 5)
+**Última actualización:** 2026-10-25 (Cierre de Fase 7)
 
 ---
 
@@ -16,7 +16,7 @@
 | **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | **Completada** |
-| **Fase 7** | **Variaciones y nuevo selector de sentido** | Incorporación del nuevo selector independiente “Sentido del movimiento” (`Todas`, `Entradas`, `Salidas`) en `Views/Reporte/variaciones.php`, consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y por producto único, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 7** | **Variaciones y nuevo selector de sentido** | Conexión real del Reporte de Variaciones reutilizando selector de sentido (`Todas`, `Entradas`, `Salidas`), consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y de producto único, exclusión de compras y ventas, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 9** | **Excel** | Generación y descarga de Excel para Kardex (incluyendo producto específico sin movimientos) y Variaciones, conservando estilos, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta` y PDF. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 10** | **Verificación integral y actualización controlada** | Pruebas integrales de extremo a extremo, concurrencia y rendimiento (1 000 movimientos y 5 usuarios simultáneos) sobre `amazon_market_sprint2_test`, seguidas de respaldo, archivado de operaciones antiguas de prueba y sincronización controlada en `amazon_market`. | `amazon_market_sprint2_test` y `amazon_market` | Pendiente |
@@ -289,10 +289,77 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 ---
 
-## 9. Dependencias para la Fase 7 (Variaciones y nuevo selector de sentido)
+## 9. Evidencias Reales de Cierre de la Fase 7
 
-- Incorporar en `Views/Reporte/variaciones.php` el nuevo selector independiente **“Sentido del movimiento”** (`Todas`, `Entradas`, `Salidas`) sin sustituir al selector actual “Tipo de variación”.
-- Combinar todos los filtros mediante `AND` (`tipo_variacion` y `sentido`).
-- Implementar endpoint `GET /api/reportes/variaciones` en `ReporteApiController` y `ReporteService`, filtrando exclusivamente `BAJA_DANO`, `BAJA_VENCIMIENTO`, `AJUSTE_POSITIVO` y `AJUSTE_NEGATIVO`.
-- Proveer resúmenes para vista general (tabla desglosada por producto con incrementos y disminuciones) y vista de producto único.
-- Conectar persistencia de consulta congelada en `reporte_consulta_snapshot` para Variaciones.
+1. **Modelo y Servicio Canónico de Variaciones**:
+   - [`Models/KardexModel.php`](../../Models/KardexModel.php):
+     - `consultarVariacionesCanonicas(array $filtros)`: Filtra estrictamente por `k.origen_operacion IN ('BAJA_DANO', 'BAJA_VENCIMIENTO', 'AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO')` dentro del rango cronológico inclusivo, con exclusión total de compras, ventas y sus anulaciones o correcciones. Aplica filtros opcionales de producto (`id_producto`), búsqueda textual en snapshot (`q`), categoría histórica (`id_categoria_snapshot`), subcategoría histórica (`id_subcategoria_snapshot`), `tipo_movimiento` y `sentido_movimiento` combinados por `AND`, ordenados determinísticamente por `fecha_movimiento ASC, id_kardex ASC`.
+   - [`Services/ReporteService.php`](../../Services/ReporteService.php):
+     - `reporteVariaciones` / `ejecutarReporteVariaciones`:
+       - Normalización y validación estricta de fechas (`fecha_inicio <= fecha_fin`), rechazando fechas invertidas o inexistentes con `422 VALIDATION_ERROR`.
+       - Normalización del selector de sentido (`TODOS`, `INCREMENTO`, `DISMINUCION`), mapeando valores visibles (`"Todas"`, `"Entradas"`, `"Salidas"`) y rechazando sentidos no válidos con `422 VALIDATION_ERROR`.
+       - Cálculo canónico del resumen:
+         - Vista multi-producto: `total_operaciones`, `productos_con_variaciones`, `es_producto_unico = false`, `resumen_producto_unico = null`, `resumen_por_producto` con desglose exacto de operaciones, incrementos y disminuciones por producto, y `totales_por_tipo` para cada una de las 4 variaciones (`baja_por_dano`, `baja_por_vencimiento`, `ajuste_positivo`, `ajuste_negativo`).
+         - Vista de producto único: cuando el resultado corresponde a un solo producto, expone `es_producto_unico = true` y `resumen_producto_unico` con `operaciones`, `incrementos` (`+N`) y `disminuciones` (`−N`).
+       - Regla de exportabilidad sin resultados: si no existen variaciones coincidentes, devuelve `total_operaciones = 0`, `items = []` y `exportable = false`.
+       - Consistencia de consulta congelada (`referencia_consulta`): genera snapshot con `tipo_reporte = 'variaciones'`, comprobando expiración (`410 QUERY_REFERENCE_EXPIRED`), pertenencia del usuario (`403 QUERY_REFERENCE_FORBIDDEN`) y conflicto ante filtros alterados (`409 QUERY_FILTERS_MISMATCH`).
+   - [`Controllers/API/ReporteApiController.php`](../../Controllers/API/ReporteApiController.php):
+     - Reconocimiento real de `GET /api/reportes/variaciones` protegido con `requireAdminActivo('reportes.variaciones')`, delegando a `ReporteService::reporteVariaciones` y mapeando excepciones a respuestas HTTP JSON (403, 409, 410, 422).
+   - [`Controllers/ReporteController.php`](../../Controllers/ReporteController.php):
+     - Acción web `variaciones()` protegida con sesión activa y rol Administrador (`id_rol = 1`).
+
+2. **Conexión de Frontend**:
+   - [`Views/Reporte/variaciones.php`](../../Views/Reporte/variaciones.php):
+     - `#variation-start-date` ajustado a fecha inicial dinámica del mes (`<?= date('Y-m-01') ?>`).
+     - Conservado el selector de sentido `#variation-direction` (`""` -> Todos, `"Incremento"` -> Entradas, `"Disminución"` -> Salidas) y la grilla de filtros.
+   - [`Assets/js/variaciones.js`](../../Assets/js/variaciones.js):
+     - Eliminados los datos de demostración fijos; consumo en tiempo real de `GET /api/reportes/variaciones` y `GET /api/categorias?modo=reporte`.
+     - Carga dinámica en cascada de subcategorías dependientes de la categoría seleccionada.
+     - Separación estricta entre filtros en edición y filtros activos aplicados (`appliedFilters`): al paginar con `referencia_consulta`, se envían los filtros guardados en la consulta sin verse afectados por ediciones pendientes en los controles de formulario.
+     - Renderizado de las 9 columnas de la tabla con insignias de tipo, entradas y salidas coloreadas y formateadas.
+     - Conmutación automática entre `#variation-all-products-summary` (con tabla desglosada por producto `#variation-product-breakdown`) y `#variation-single-product-summary`.
+     - Deshabilitación de botones de exportación cuando `exportable === false`.
+
+3. **Suite de Pruebas Automatizadas de la Fase 7**:
+   - [`tests/sprint2/fase7_variaciones_test.php`](../../tests/sprint2/fase7_variaciones_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **22 PASS / 0 FAIL**:
+     - `F7-ORIGEN-01`: Reporte incluye exactamente los 4 orígenes válidos (`BAJA_DANO`, `BAJA_VENCIMIENTO`, `AJUSTE_POSITIVO`, `AJUSTE_NEGATIVO`).
+     - `F7-EXCLUSION-01`: Exclusión estricta de compras y ventas.
+     - `F7-SENTIDO-TODOS-01`: Sentido `TODOS` devuelve entradas y salidas.
+     - `F7-SENTIDO-INC-01`: Sentido `INCREMENTO` devuelve exclusivamente entradas (ajustes positivos).
+     - `F7-SENTIDO-DISM-01`: Sentido `DISMINUCION` devuelve exclusivamente salidas (bajas y ajustes negativos).
+     - `F7-SENTIDO-INV-01`: Sentido no válido rechazado con `422 VALIDATION_ERROR`.
+     - `F7-AND-COMB-01`: Combinación `AND` válida (`tipo_variacion` + `sentido`) devuelve resultados filtrados.
+     - `F7-AND-EMPTY-01`: Combinación excluyente devuelve `total = 0`, `items = []` y `exportable = false` sin modificar filtros.
+     - `F7-VAL-FECHAS-01`: Fechas invertidas o inexistentes rechazan `422 VALIDATION_ERROR`.
+     - `F7-HIST-CAT-01`: Filtro evalúa exclusivamente clasificación histórica grabada en el snapshot.
+     - `F7-INACT-01`: Producto inactivo con historial de variaciones es plenamente consultable.
+     - `F7-RESUMEN-MULTI-01`: Resumen multi-producto exacto con desglose por producto y totales por tipo.
+     - `F7-RESUMEN-SINGLE-01`: Resumen de producto único activa tarjeta individual con `+incrementos` y `−disminuciones`.
+     - `F7-ZERO-EXPORT-01`: Consulta sin resultados marca `exportable = false`.
+     - `F7-PAGE-CONSIST-01`: Paginación mediante `referencia_consulta` sin solapamiento ni saltos.
+     - `F7-SNAP-IMMUN-01`: Instantánea congelada bajo `referencia_consulta` es inmune a transacciones concurrentes posteriores.
+     - `F7-SNAP-EXPIRE-01`: Referencia de consulta vencida responde `410 QUERY_REFERENCE_EXPIRED`.
+     - `F7-SNAP-FORBID-01`: Referencia de otro usuario responde `403 QUERY_REFERENCE_FORBIDDEN`.
+     - `F7-SNAP-MISMATCH-01`: Alterar filtros manteniendo referencia activa responde `409 QUERY_FILTERS_MISMATCH`.
+     - `F7-RBAC-01`: Permiso `reportes.variaciones` exclusivo de Administrador y denegado a Vendedor; controlador web protegido.
+     - `F7-CLEAN-01`: Limpieza controlada en base de pruebas.
+     - `F7-ISO-01`: Aislamiento verificado de la base principal `amazon_market` (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex intactos).
+
+4. **Verificación de Regresión Cruzada Acumulada del Sprint 2**:
+   - Fase 2 (`fase2_infraestructura_test.php`): **24 PASS / 0 FAIL**.
+   - Fase 3 (`fase3_productos_compras_test.php`): **13 PASS / 0 FAIL**.
+   - Fase 4 (`fase4_ventas_kardex_test.php`): **14 PASS / 0 FAIL**.
+   - Fase 5 (`fase5_bajas_ajustes_test.php`): **14 PASS / 0 FAIL**.
+   - Fase 6 (`fase6_kardex_test.php`): **18 PASS / 0 FAIL**.
+   - Fase 7 (`fase7_variaciones_test.php`): **22 PASS / 0 FAIL**.
+   - **Total acumulado de pruebas: 105 PASS / 0 FAIL**.
+
+---
+
+## 10. Dependencias para la Fase 8 (PDF)
+
+- Implementar generación y descarga binaria de PDF en `ReporteApiController::get('exportar-pdf')` para `tipo=kardex` y `tipo=variaciones`.
+- Reutilizar la biblioteca institucional existente (`Libraries/PDF/ReportPDF.php` / `fpdf.php`), respetando colores, márgenes y tipografías del sistema.
+- Validar y leer los datos congelados en `reporte_consulta_snapshot` a través del parámetro obligatorio `referencia_consulta`.
+- Soportar exportación de Kardex para producto específico sin movimientos en el período (`exportable = true`, mostrando saldo inicial real y saldo final de cierre).
+- Bloquear exportación con `422 EMPTY_EXPORT_NOT_ALLOWED` cuando la consulta no tenga resultados en Kardex general o Variaciones (`exportable = false`).

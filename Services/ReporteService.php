@@ -134,6 +134,9 @@ class ReporteService {
         return $this->ejecutarReporteKardex($filtros, $idUsuario);
     }
 
+    public function reporteVariaciones(array $filtros, ?int $idUsuario = null): array {
+        return $this->ejecutarReporteVariaciones($filtros, $idUsuario);
+    }
 
     private function formatearItemsKardex(array $filas): array {
         $items = [];
@@ -421,6 +424,363 @@ class ReporteService {
                 'pages' => $totalPaginas,
             ],
             'movimientos' => $items,
+            'paginacion' => [
+                'pagina' => $page,
+                'por_pagina' => $limit,
+                'total' => $totalRegistros,
+                'total_paginas' => $totalPaginas,
+            ],
+        ];
+    }
+
+    private function formatearItemsVariaciones(array $filas): array {
+        $items = [];
+        foreach ($filas as $fila) {
+            $sentido = $fila['sentido_movimiento'];
+            $cantidad = (int)$fila['cantidad'];
+            $esIncremento = $sentido === 'INCREMENTO';
+
+            $lote = 'Sin lote';
+            if (($fila['condicion_lote'] ?? '') === 'CON_LOTE' && !empty($fila['numero_lote'])) {
+                $lote = $fila['numero_lote'];
+            }
+
+            $items[] = [
+                'id_kardex' => (int)$fila['id_kardex'],
+                'fecha_hora' => $fila['fecha_movimiento'],
+                'fecha_movimiento' => $fila['fecha_movimiento'],
+                'id_producto' => (int)$fila['id_producto'],
+                'codigo_barra' => $fila['producto_codigo_snapshot'] ?: '',
+                'producto_nombre' => $fila['producto_nombre_snapshot'],
+                'categoria_nombre' => $fila['categoria_nombre_snapshot'] ?: 'Sin categoría',
+                'subcategoria_nombre' => $fila['subcategoria_nombre_snapshot'] ?: 'General',
+                'unidad_abreviatura' => $fila['unidad_abreviatura_snapshot'] ?: 'UND',
+                'tipo_variacion' => $fila['tipo_movimiento'],
+                'tipo_movimiento' => $fila['tipo_movimiento'],
+                'sentido' => $sentido,
+                'sentido_movimiento' => $sentido,
+                'entrada' => $esIncremento ? $cantidad : null,
+                'salida' => !$esIncremento ? $cantidad : null,
+                'cantidad' => $cantidad,
+                'saldo_anterior' => (int)$fila['stock_anterior'],
+                'saldo_resultante' => (int)$fila['stock_resultante'],
+                'responsable' => !empty($fila['responsable_nombre_snapshot']) ? $fila['responsable_nombre_snapshot'] : 'No disponible',
+                'lote' => $lote,
+                'justificacion' => $fila['justificacion'] ?? '',
+            ];
+        }
+        return $items;
+    }
+
+    public function ejecutarReporteVariaciones(array $input, ?int $idUsuario = null): array {
+        $kardexModel = new KardexModel();
+
+        if ($idUsuario === null || $idUsuario <= 0) {
+            $idUsuario = (int)($_SESSION['idUser'] ?? ($_SESSION['userData']['id_usuario'] ?? 1));
+        }
+
+        $fechaInicioRaw = trim((string)($input['fecha_inicio'] ?? $input['desde'] ?? ''));
+        $fechaFinRaw = trim((string)($input['fecha_fin'] ?? $input['hasta'] ?? ''));
+
+        $fechaInicio = $fechaInicioRaw !== '' ? $fechaInicioRaw : date('Y-m-01');
+        $fechaFin = $fechaFinRaw !== '' ? $fechaFinRaw : date('Y-m-d');
+
+        $dtInicio = \DateTimeImmutable::createFromFormat('!Y-m-d', $fechaInicio);
+        $dtFin = \DateTimeImmutable::createFromFormat('!Y-m-d', $fechaFin);
+
+        if (!$dtInicio || $dtInicio->format('Y-m-d') !== $fechaInicio) {
+            throw InventarioException::validacion(
+                ['fecha_inicio' => 'La fecha inicial no tiene un formato válido (YYYY-MM-DD).'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+        if (!$dtFin || $dtFin->format('Y-m-d') !== $fechaFin) {
+            throw InventarioException::validacion(
+                ['fecha_fin' => 'La fecha final no tiene un formato válido (YYYY-MM-DD).'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+
+        if ($fechaInicio > $fechaFin) {
+            throw InventarioException::validacion(
+                ['fecha_inicio' => 'La fecha inicial no puede ser posterior a la fecha final.'],
+                'La fecha inicial no puede ser posterior a la fecha final.'
+            );
+        }
+
+        $fechaInicioInicio = $fechaInicio . ' 00:00:00';
+        $fechaFinFin = $fechaFin . ' 23:59:59';
+
+        $idProducto = !empty($input['id_producto']) ? filter_var($input['id_producto'], FILTER_VALIDATE_INT) : null;
+        if (isset($input['id_producto']) && $input['id_producto'] !== '' && ($idProducto === false || $idProducto < 1)) {
+            throw InventarioException::validacion(
+                ['id_producto' => 'El identificador de producto debe ser un entero positivo.'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+
+        $idCategoria = !empty($input['id_categoria']) ? filter_var($input['id_categoria'], FILTER_VALIDATE_INT) : null;
+        if (isset($input['id_categoria']) && $input['id_categoria'] !== '' && ($idCategoria === false || $idCategoria < 1)) {
+            throw InventarioException::validacion(
+                ['id_categoria' => 'El identificador de categoría debe ser un entero positivo.'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+
+        $idSubcategoria = !empty($input['id_subcategoria']) ? filter_var($input['id_subcategoria'], FILTER_VALIDATE_INT) : null;
+        if (isset($input['id_subcategoria']) && $input['id_subcategoria'] !== '' && ($idSubcategoria === false || $idSubcategoria < 1)) {
+            throw InventarioException::validacion(
+                ['id_subcategoria' => 'El identificador de subcategoría debe ser un entero positivo.'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+
+        $q = isset($input['q']) ? trim((string)$input['q']) : '';
+
+        // Validación de tipo de variación
+        $tipoVariacionRaw = trim((string)($input['tipo_variacion'] ?? $input['tipo'] ?? ''));
+        $tiposPermitidos = ['', 'Ajuste negativo', 'Ajuste positivo', 'Baja por daño', 'Baja por vencimiento'];
+        if (!in_array($tipoVariacionRaw, $tiposPermitidos, true)) {
+            throw InventarioException::validacion(
+                ['tipo_variacion' => 'El tipo de variación no es válido.'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+
+        // Normalización y validación del sentido de movimiento
+        $sentidoRaw = trim((string)($input['sentido'] ?? $input['sentido_movimiento'] ?? $input['direction'] ?? ''));
+        $sentidoNormalizado = 'TODOS';
+        if ($sentidoRaw === '' || in_array(mb_strtoupper($sentidoRaw, 'UTF-8'), ['TODOS', 'TODAS'], true)) {
+            $sentidoNormalizado = 'TODOS';
+        } elseif (in_array(mb_strtoupper($sentidoRaw, 'UTF-8'), ['INCREMENTO', 'ENTRADAS'], true)) {
+            $sentidoNormalizado = 'INCREMENTO';
+        } elseif (in_array(mb_strtoupper($sentidoRaw, 'UTF-8'), ['DISMINUCION', 'DISMINUCIÓN', 'SALIDAS'], true)) {
+            $sentidoNormalizado = 'DISMINUCION';
+        } else {
+            throw InventarioException::validacion(
+                ['sentido' => 'El sentido de movimiento no es válido (valores permitidos: TODOS, INCREMENTO, DISMINUCION).'],
+                'Verifique los filtros ingresados.'
+            );
+        }
+
+        $pageRaw = $input['page'] ?? $input['pagina'] ?? 1;
+        $page = filter_var($pageRaw, FILTER_VALIDATE_INT);
+        if ($page === false || $page < 1) {
+            $page = 1;
+        }
+
+        $limitRaw = $input['limit'] ?? $input['por_pagina'] ?? 10;
+        $limit = filter_var($limitRaw, FILTER_VALIDATE_INT);
+        if ($limit === false || $limit < 1) {
+            $limit = 10;
+        } elseif ($limit > 100) {
+            $limit = 100;
+        }
+
+        $filtrosCanonicos = [
+            'fecha_inicio' => $fechaInicio,
+            'fecha_fin' => $fechaFin,
+            'id_producto' => $idProducto ? (int)$idProducto : null,
+            'q' => $q,
+            'id_categoria' => $idCategoria ? (int)$idCategoria : null,
+            'id_subcategoria' => $idSubcategoria ? (int)$idSubcategoria : null,
+            'tipo_variacion' => $tipoVariacionRaw,
+            'sentido' => $sentidoNormalizado,
+        ];
+        $hashFiltros = hash('sha256', json_encode($filtrosCanonicos));
+
+        $referenciaConsulta = trim((string)($input['referencia_consulta'] ?? ''));
+
+        if ($referenciaConsulta !== '') {
+            $snapshot = $kardexModel->obtenerSnapshotPorReferencia($referenciaConsulta, 'variaciones');
+            if (!$snapshot) {
+                throw InventarioException::referenciaConsultaExpirada($referenciaConsulta);
+            }
+
+            if (!empty($snapshot['esta_expirado'])) {
+                throw InventarioException::referenciaConsultaExpirada($referenciaConsulta);
+            }
+
+            if ((int)$snapshot['id_usuario'] !== $idUsuario) {
+                throw InventarioException::referenciaConsultaNoAutorizada();
+            }
+
+            $filtrosEnviados = isset($input['fecha_inicio']) || isset($input['desde'])
+                || isset($input['fecha_fin']) || isset($input['hasta'])
+                || isset($input['id_producto']) || isset($input['id_categoria'])
+                || isset($input['id_subcategoria']) || isset($input['q'])
+                || isset($input['tipo_variacion']) || isset($input['sentido']);
+
+            if ($filtrosEnviados && $snapshot['hash_filtros'] !== $hashFiltros) {
+                throw InventarioException::filtrosConsultaConflicto($referenciaConsulta);
+            }
+
+            $kardexModel->renovarExpiracionSnapshot((int)$snapshot['id_snapshot'], 30);
+
+            $totalRegistros = (int)$snapshot['total_registros'];
+            $exportable = (bool)$snapshot['exportable'];
+            $resumen = json_decode($snapshot['resumen_json'], true) ?: [];
+            $filtrosAplicados = json_decode($snapshot['filtros_json'], true) ?: $filtrosCanonicos;
+
+            $totalPaginas = max(1, (int)ceil($totalRegistros / $limit));
+            if ($page > $totalPaginas) {
+                $page = $totalPaginas;
+            }
+            $offset = ($page - 1) * $limit;
+
+            $filasPaginadas = $kardexModel->obtenerItemsSnapshotPaginados((int)$snapshot['id_snapshot'], $offset, $limit);
+            $items = $this->formatearItemsVariaciones($filasPaginadas);
+
+            return [
+                'referencia_consulta' => $referenciaConsulta,
+                'expira_en' => $snapshot['expira_en'],
+                'filtros_aplicados' => $filtrosAplicados,
+                'resumen' => $resumen,
+                'exportable' => $exportable,
+                'items' => $items,
+                'pagination' => [
+                    'total' => $totalRegistros,
+                    'page' => $page,
+                    'limit' => $limit,
+                    'pages' => $totalPaginas,
+                ],
+                'variaciones' => $items,
+                'paginacion' => [
+                    'pagina' => $page,
+                    'por_pagina' => $limit,
+                    'total' => $totalRegistros,
+                    'total_paginas' => $totalPaginas,
+                ],
+            ];
+        }
+
+        if ($idProducto !== null) {
+            $productoInfo = $kardexModel->obtenerProductoParaReporte($idProducto);
+            if (!$productoInfo) {
+                throw InventarioException::validacion(
+                    ['id_producto' => 'El producto seleccionado no existe.'],
+                    'Verifique los filtros ingresados.'
+                );
+            }
+        }
+
+        $filtrosConsulta = [
+            'fecha_inicio_inicio' => $fechaInicioInicio,
+            'fecha_fin_fin' => $fechaFinFin,
+            'id_producto' => $idProducto,
+            'id_categoria' => $idCategoria,
+            'id_subcategoria' => $idSubcategoria,
+            'tipo_variacion' => $tipoVariacionRaw,
+            'sentido' => $sentidoNormalizado,
+            'q' => $q,
+        ];
+        $filas = $kardexModel->consultarVariacionesCanonicas($filtrosConsulta);
+        $totalRegistros = count($filas);
+        $kardexIds = array_column($filas, 'id_kardex');
+
+        // Cálculo del resumen
+        $porProducto = [];
+        $totalesPorTipo = [
+            'baja_por_dano' => ['operaciones' => 0, 'unidades' => 0],
+            'baja_por_vencimiento' => ['operaciones' => 0, 'unidades' => 0],
+            'ajuste_positivo' => ['operaciones' => 0, 'unidades' => 0],
+            'ajuste_negativo' => ['operaciones' => 0, 'unidades' => 0],
+        ];
+
+        foreach ($filas as $fila) {
+            $idProd = (int)$fila['id_producto'];
+            $cantidad = (int)$fila['cantidad'];
+            $sentidoFila = $fila['sentido_movimiento'];
+            $origen = $fila['origen_operacion'];
+
+            if (!isset($porProducto[$idProd])) {
+                $porProducto[$idProd] = [
+                    'id_producto' => $idProd,
+                    'codigo_barra' => $fila['producto_codigo_snapshot'] ?: '',
+                    'producto_nombre' => $fila['producto_nombre_snapshot'],
+                    'operaciones' => 0,
+                    'incrementos' => 0,
+                    'disminuciones' => 0,
+                ];
+            }
+
+            $porProducto[$idProd]['operaciones']++;
+            if ($sentidoFila === 'INCREMENTO') {
+                $porProducto[$idProd]['incrementos'] += $cantidad;
+            } else {
+                $porProducto[$idProd]['disminuciones'] += $cantidad;
+            }
+
+            switch ($origen) {
+                case 'BAJA_DANO':
+                    $totalesPorTipo['baja_por_dano']['operaciones']++;
+                    $totalesPorTipo['baja_por_dano']['unidades'] += $cantidad;
+                    break;
+                case 'BAJA_VENCIMIENTO':
+                    $totalesPorTipo['baja_por_vencimiento']['operaciones']++;
+                    $totalesPorTipo['baja_por_vencimiento']['unidades'] += $cantidad;
+                    break;
+                case 'AJUSTE_POSITIVO':
+                    $totalesPorTipo['ajuste_positivo']['operaciones']++;
+                    $totalesPorTipo['ajuste_positivo']['unidades'] += $cantidad;
+                    break;
+                case 'AJUSTE_NEGATIVO':
+                    $totalesPorTipo['ajuste_negativo']['operaciones']++;
+                    $totalesPorTipo['ajuste_negativo']['unidades'] += $cantidad;
+                    break;
+            }
+        }
+
+        $resumenPorProducto = array_values($porProducto);
+        $productosConVariaciones = count($resumenPorProducto);
+        $esProductoUnico = ($productosConVariaciones === 1);
+        $resumenProductoUnico = $esProductoUnico ? $resumenPorProducto[0] : null;
+
+        $resumen = [
+            'total_operaciones' => $totalRegistros,
+            'productos_con_variaciones' => $productosConVariaciones,
+            'es_producto_unico' => $esProductoUnico,
+            'resumen_producto_unico' => $resumenProductoUnico,
+            'resumen_por_producto' => $resumenPorProducto,
+            'totales_por_tipo' => $totalesPorTipo,
+        ];
+
+        $exportable = ($totalRegistros > 0);
+
+        $nuevaReferencia = 'rc-' . date('YmdHis') . '-' . bin2hex(random_bytes(8));
+        $guardado = $kardexModel->guardarSnapshotConsulta(
+            $nuevaReferencia,
+            $idUsuario,
+            'variaciones',
+            $hashFiltros,
+            $filtrosCanonicos,
+            $resumen,
+            $totalRegistros,
+            $exportable,
+            $kardexIds
+        );
+
+        $totalPaginas = max(1, (int)ceil($totalRegistros / $limit));
+        if ($page > $totalPaginas) {
+            $page = $totalPaginas;
+        }
+        $filasPaginadas = array_slice($filas, ($page - 1) * $limit, $limit);
+        $items = $this->formatearItemsVariaciones($filasPaginadas);
+
+        return [
+            'referencia_consulta' => $nuevaReferencia,
+            'expira_en' => $guardado['expira_en'] ?? '',
+            'filtros_aplicados' => $filtrosCanonicos,
+            'resumen' => $resumen,
+            'exportable' => $exportable,
+            'items' => $items,
+            'pagination' => [
+                'total' => $totalRegistros,
+                'page' => $page,
+                'limit' => $limit,
+                'pages' => $totalPaginas,
+            ],
+            'variaciones' => $items,
             'paginacion' => [
                 'pagina' => $page,
                 'por_pagina' => $limit,

@@ -103,6 +103,58 @@ class KardexModel extends Model {
     }
 
     /**
+     * Consulta canónica de variaciones de inventario (bajas y ajustes exclusivamente).
+     * Excluye compras, ventas, anulaciones y correcciones.
+     * Orden cronológico determinístico: fecha_movimiento ASC, id_kardex ASC.
+     */
+    public function consultarVariacionesCanonicas(array $filtros): array {
+        $sql = "SELECT k.*
+                FROM kardex k
+                WHERE k.origen_operacion IN ('BAJA_DANO', 'BAJA_VENCIMIENTO', 'AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO')
+                  AND k.fecha_movimiento BETWEEN :fecha_inicio AND :fecha_fin";
+        $params = [
+            ':fecha_inicio' => $filtros['fecha_inicio_inicio'],
+            ':fecha_fin' => $filtros['fecha_fin_fin'],
+        ];
+
+        if (!empty($filtros['id_producto'])) {
+            $sql .= " AND k.id_producto = :id_producto";
+            $params[':id_producto'] = (int)$filtros['id_producto'];
+        }
+
+        if (!empty($filtros['id_categoria'])) {
+            $sql .= " AND k.id_categoria_snapshot = :id_categoria";
+            $params[':id_categoria'] = (int)$filtros['id_categoria'];
+        }
+
+        if (!empty($filtros['id_subcategoria'])) {
+            $sql .= " AND k.id_subcategoria_snapshot = :id_subcategoria";
+            $params[':id_subcategoria'] = (int)$filtros['id_subcategoria'];
+        }
+
+        if (!empty($filtros['tipo_variacion'])) {
+            $sql .= " AND k.tipo_movimiento = :tipo_variacion";
+            $params[':tipo_variacion'] = $filtros['tipo_variacion'];
+        }
+
+        if (!empty($filtros['sentido']) && $filtros['sentido'] !== 'TODOS') {
+            $sql .= " AND k.sentido_movimiento = :sentido";
+            $params[':sentido'] = $filtros['sentido'];
+        }
+
+        if (!empty($filtros['q'])) {
+            $sql .= " AND (k.producto_nombre_snapshot LIKE :q OR k.producto_codigo_snapshot LIKE :q)";
+            $params[':q'] = '%' . trim($filtros['q']) . '%';
+        }
+
+        $sql .= " ORDER BY k.fecha_movimiento ASC, k.id_kardex ASC";
+
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Guarda la instantánea de consulta congelada en reporte_consulta_snapshot
      * y reporte_consulta_snapshot_item para consistencia de paginación y exportación.
      */

@@ -28,7 +28,7 @@
             </div>
             <div class="kardex-filter-field">
                 <label for="variation-start-date">Desde (obligatorio)</label>
-                <input id="variation-start-date" type="date" value="2026-10-01">
+                <input id="variation-start-date" type="date" value="<?= date('Y-m-01') ?>">
             </div>
             <div class="kardex-filter-field">
                 <label for="variation-end-date">Hasta (obligatorio)</label>
