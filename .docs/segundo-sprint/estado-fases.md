@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Revisión y cierre de Fase 1)
+**Última actualización:** 2026-10-25 (Cierre de Fase 2)
 
 ---
 
@@ -11,7 +11,7 @@
 | Fase | Nombre Oficial de la Fase | Alcance Principal | Base de Datos Utilizada | Estado |
 |---|---|---|---|---|
 | **Fase 1** | **Preparación y contratos** | Respaldo verificado, copia aislada de pruebas con escenario limpio, acuerdos, matriz de diferencias, contrato API (incluyendo selector de sentido, `referencia_solicitud` y `referencia_consulta`) y plan de pruebas. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
-| **Fase 2** | **Datos, seguridad y base común de movimientos** | Migraciones de estructura (`subcategoria`, instantáneas históricas en `kardex`, control de idempotencia `referencia_solicitud`, almacenamiento de `referencia_consulta`), validación de Administrador activo y compatibilidad de catálogos con POS. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 2** | **Datos, seguridad y base común de movimientos** | Migraciones de estructura (`subcategoria`, instantáneas históricas en `kardex`, control de idempotencia `referencia_solicitud`, almacenamiento de `referencia_consulta`), validación de Administrador activo, base común transaccional de movimientos y compatibilidad de catálogos con POS. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
 | **Fase 3** | **Productos y Compras** | Productos nuevos con `stock_actual = 0`, bloqueo de edición de stock desde catálogo, validación entera de `stock_minimo`, conservación de presentaciones y equivalencias de Compras (ej. 2 cajas de 24 = 48 unidades individuales) y corrección/anulación sin movimientos ficticios en `kardex`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | Pendiente |
@@ -78,3 +78,22 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 ### Dependencias para Iniciar la Fase 2 (Datos, seguridad y base común de movimientos)
 - Crear y ejecutar sobre `amazon_market_sprint2_test` las migraciones `01_estructura_inventario_sprint2.sql` (tablas `subcategoria`, operaciones de inventario, campos snapshot históricos en `kardex`, tabla de control de idempotencia `referencia_solicitud` y tablas de consistencia de consulta `referencia_consulta`) y `02_configuracion_permisos_sprint2.sql`.
 - Implementar la validación de Administrador activo para las rutas del Sprint 2 conservando la compatibilidad de `/api/productos` y `/api/categorias` con el POS y el rol Vendedor, así como la base común transaccional de movimientos.
+
+
+---
+
+## 4. Evidencias Reales de Cierre de la Fase 2
+
+1. **Scripts SQL creados y ejecutados en `amazon_market_sprint2_test`**:
+   - [`database/segundo_sprint/01_estructura_inventario_sprint2.sql`](../../database/segundo_sprint/01_estructura_inventario_sprint2.sql): Crea `subcategoria`, convierte `producto.stock_actual` y `stock_minimo` a `INT(11)` con `chk_producto_stock_entero_no_negativo` y FK compuesta `fk_producto_subcategoria_categoria`, agrega versionado a `detalle_compra` con `chk_detalle_compra_integridad`, crea `operacion_inventario` con `chk_op_inv_integridad`, amplía `kardex` con `origen_operacion`, `sentido_movimiento`, FKs `ON DELETE RESTRICT`, columnas snapshot históricas e inmutabilidad mediante triggers (`trg_kardex_before_insert_integridad` y `trg_kardex_before_update_inmutable`), y crea `control_solicitud_idempotencia`, `reporte_consulta_snapshot` y `reporte_consulta_snapshot_item`.
+   - [`database/segundo_sprint/02_configuracion_permisos_sprint2.sql`](../../database/segundo_sprint/02_configuracion_permisos_sprint2.sql): Crea la subcategoría predeterminada `"General"` para cada una de las 6 categorías, vincula los 107 productos a la subcategoría `"General"` de su categoría, registra y asigna los permisos `inventario.ajustes`, `reportes.kardex`, `reportes.variaciones` y `reportes.exportar` exclusivamente al rol Administrador (`id_rol = 1`), e instala los triggers de correspondencia categoría-subcategoría.
+2. **Infraestructura transaccional común, idempotencia y seguridad**:
+   - [`Libraries/Core/DefinicionMovimiento.php`](../../Libraries/Core/DefinicionMovimiento.php): Constantes canónicas y reglas determinísticas de `origen_operacion`, `sentido_movimiento`, `condicion_lote` y validación de cantidades enteras positivas.
+   - [`Libraries/Core/InventarioException.php`](../../Libraries/Core/InventarioException.php): Excepciones tipadas con códigos HTTP y códigos de dominio (`VALIDATION_ERROR`, `INSUFFICIENT_STOCK`, `STOCK_CHANGED_CONFLICT`, `IDEMPOTENCY_PAYLOAD_MISMATCH`, `REQUEST_IN_PROGRESS`, `AUTH_REQUIRED`, `FORBIDDEN_ADMIN_ONLY`).
+   - [`Services/MovimientoInventarioService.php`](../../Services/MovimientoInventarioService.php): Infraestructura transaccional común con bloqueo determinístico (`ORDER BY p.id_producto ASC FOR UPDATE`), verificación de responsable activo en BD, validación de `saldo_anterior_esperado`, prohibición de saldos negativos y persistencia de snapshots históricos en `kardex`.
+   - [`Services/ControlSolicitudService.php`](../../Services/ControlSolicitudService.php): Control de solicitudes repetidas y simultáneas por `(id_usuario, tipo_operacion, referencia_solicitud)` con bloqueo `GET_LOCK(..., 0)` y tabla `control_solicitud_idempotencia`.
+   - [`Libraries/Middleware/AuthMiddleware.php`](../../Libraries/Middleware/AuthMiddleware.php), [`Libraries/Middleware/RBACMiddleware.php`](../../Libraries/Middleware/RBACMiddleware.php), [`Libraries/Middleware/CSRFMiddleware.php`](../../Libraries/Middleware/CSRFMiddleware.php), [`Libraries/Core/ApiController.php`](../../Libraries/Core/ApiController.php), [`Controllers/API/ProductoApiController.php`](../../Controllers/API/ProductoApiController.php), [`Controllers/API/CategoriaApiController.php`](../../Controllers/API/CategoriaApiController.php), [`Controllers/API/ReporteApiController.php`](../../Controllers/API/ReporteApiController.php) y [`Views/Header.php`](../../Views/Header.php).
+3. **Suite de pruebas automatizadas**:
+   - [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **24 PASS / 0 FAIL**.
+4. **Dependencias para la Fase 3 (Productos y Compras)**:
+   - Conectar `ProductoApiController`, `ProductoService` y `CompraService` a `MovimientoInventarioService` y `ControlSolicitudService`, garantizando que productos nuevos inicien con `stock_actual = 0`, que `stock_actual` no pueda editarse desde Productos y que Compras conserve presentaciones/equivalencias y registre correcciones/anulaciones en `kardex` sin movimientos ficticios.

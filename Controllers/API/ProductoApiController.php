@@ -9,7 +9,12 @@ use Models\UnidadMedidaModel;
 class ProductoApiController extends ApiController {
 
     public function get(?string $params = ""): void {
-        $this->requirePermission('productos.listar');
+        $modo = $this->getParam('modo', '');
+        if ($modo === 'reporte') {
+            $this->requireAdminActivo('reportes.ver');
+        } else {
+            $this->requirePermission('productos.listar');
+        }
         $this->getProductos($params);
     }
 
@@ -30,14 +35,28 @@ class ProductoApiController extends ApiController {
     }
 
     private function getProductos(?string $id): void {
+        $modo = $this->getParam('modo', '');
         if (!empty($id)) {
             $idVal = intval($id);
-            $producto = $this->model
-                ->select(['producto.*', 'categoria.nombre as categoria', 'unidad_medida.abreviatura as unidad'])
+            $query = $this->model
+                ->select([
+                    'producto.*',
+                    'categoria.nombre as categoria',
+                    'subcategoria.nombre as subcategoria',
+                    'unidad_medida.abreviatura as unidad'
+                ])
                 ->join('categoria', 'producto.id_categoria = categoria.id_categoria', 'INNER')
+                ->join('subcategoria', 'producto.id_subcategoria = subcategoria.id_subcategoria', 'LEFT')
                 ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER')
-                ->where(['producto.id_producto' => $idVal, 'producto.estado = 1'])
-                ->first();
+                ->where(['producto.id_producto' => $idVal]);
+
+            if ($modo === 'reporte') {
+                $query->where(['(producto.estado = 1 OR EXISTS (SELECT 1 FROM kardex k WHERE k.id_producto = producto.id_producto))']);
+            } else {
+                $query->where(['producto.estado = 1']);
+            }
+
+            $producto = $query->first();
 
             if (!$producto) {
                 $this->sendJsonResponse(['status' => false, 'message' => 'El producto solicitado no existe'], 404);
@@ -46,15 +65,27 @@ class ProductoApiController extends ApiController {
         } else {
             $search = $this->getParam('q', '');
             $categoria = $this->getParam('categoria', '');
+            $subcategoria = $this->getParam('subcategoria', '');
             $stock = $this->getParam('stock', '');
             $page = max(1, intval($this->getParam('page', 1)));
             $limit = min(500, max(1, intval($this->getParam('limit', 10))));
 
             $query = $this->model
-                ->select(['producto.*', 'categoria.nombre as categoria', 'unidad_medida.abreviatura as unidad'])
+                ->select([
+                    'producto.*',
+                    'categoria.nombre as categoria',
+                    'subcategoria.nombre as subcategoria',
+                    'unidad_medida.abreviatura as unidad'
+                ])
                 ->join('categoria', 'producto.id_categoria = categoria.id_categoria', 'INNER')
-                ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER')
-                ->where(['producto.estado = 1']);
+                ->join('subcategoria', 'producto.id_subcategoria = subcategoria.id_subcategoria', 'LEFT')
+                ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER');
+
+            if ($modo === 'reporte') {
+                $query->where(['(producto.estado = 1 OR EXISTS (SELECT 1 FROM kardex k WHERE k.id_producto = producto.id_producto))']);
+            } else {
+                $query->where(['producto.estado = 1']);
+            }
 
             if (!empty($search)) {
                 $query->orLikeWhere([
@@ -64,6 +95,9 @@ class ProductoApiController extends ApiController {
             }
             if (!empty($categoria)) {
                 $query->where(['producto.id_categoria' => intval($categoria)]);
+            }
+            if (!empty($subcategoria)) {
+                $query->where(['producto.id_subcategoria' => intval($subcategoria)]);
             }
             if ($stock === 'bajo') {
                 $query->where(['producto.stock_actual <= producto.stock_minimo']);

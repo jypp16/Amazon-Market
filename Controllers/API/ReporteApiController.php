@@ -37,11 +37,26 @@ class ReporteApiController extends ApiController {
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteInventario()]);
                 break;
             case 'kardex':
+                $this->requireAdminActivo('reportes.kardex');
                 try {
                     $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteKardex($input)]);
                 } catch (\InvalidArgumentException $error) {
                     $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
                 }
+                break;
+            case 'variaciones':
+                $this->requireAdminActivo('reportes.variaciones');
+                $this->sendJsonResponse([
+                    'status' => true,
+                    'data' => [
+                        'items' => [],
+                        'resumen' => [
+                            'total_registros' => 0,
+                            'total_entradas_unidades' => 0,
+                            'total_salidas_unidades' => 0
+                        ]
+                    ]
+                ]);
                 break;
             case 'clientes':
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteClientes($input)]);
@@ -80,6 +95,14 @@ class ReporteApiController extends ApiController {
         $input = $this->getInput();
         $tipo = $input['tipo'] ?? '';
         $email = $input['email'] ?? '';
+
+        if ($tipo === 'kardex') {
+            $this->requireAdminActivo('reportes.kardex');
+            $this->requireAdminActivo('reportes.exportar');
+        } elseif ($tipo === 'variaciones') {
+            $this->requireAdminActivo('reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+        }
 
         if (empty($tipo) || empty($email)) {
             $this->sendJsonResponse(['status' => false, 'message' => 'Faltan parámetros: tipo y email son requeridos.'], 400);
@@ -122,6 +145,13 @@ class ReporteApiController extends ApiController {
 
     private function exportarPdf(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'kardex') {
+            $this->requireAdminActivo('reportes.kardex');
+            $this->requireAdminActivo('reportes.exportar');
+        } elseif ($tipo === 'variaciones') {
+            $this->requireAdminActivo('reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+        }
         if ($tipo === 'compras') {
             $this->exportarPdfCompras($input);
             return;
@@ -255,6 +285,13 @@ class ReporteApiController extends ApiController {
 
     private function exportarExcel(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'kardex') {
+            $this->requireAdminActivo('reportes.kardex');
+            $this->requireAdminActivo('reportes.exportar');
+        } elseif ($tipo === 'variaciones') {
+            $this->requireAdminActivo('reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+        }
         if ($tipo === 'compras') {
             $this->exportarExcelCompras($input);
             return;

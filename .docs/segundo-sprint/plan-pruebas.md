@@ -3,7 +3,7 @@
 **Proyecto:** Amazon-Market  
 **Base de datos exclusiva de pruebas (Fases 1–9):** `amazon_market_sprint2_test`  
 **Bootstrap de aislamiento:** [`tests/sprint2/bootstrap_test.php`](../../tests/sprint2/bootstrap_test.php)  
-**Estado de ejecución:** En Fase 1 únicamente se ejecutaron las verificaciones de respaldo, restauración, aislamiento de conexión y escenario limpio. Todos los casos de prueba funcionales, de integración, concurrencia y rendimiento descritos a continuación se encuentran **Pendientes de ejecución** para sus respectivas Fases 2 a 10.
+**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`) cubriendo estructura, restricciones de cantidades/saldos, referencias, representación inequívoca, atomicidad/reversión, idempotencia/solicitudes simultáneas, snapshots históricos inmutables, autorización de Administrador activo, CSRF y compatibilidad con el POS. Los casos específicos de endpoints de las Fases 3 a 10 permanecen pendientes para sus respectivas fases.
 
 ---
 
@@ -53,11 +53,11 @@
 
 | ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
 |---|---|---|---|---|---|
-| **CP-IDEM-01** | Fases 2–5 | `CL-07.3` / `CL-08.4` | Reenvío de una solicitud ya confirmada (`referencia_solicitud` idéntica, mismo usuario, misma operación y mismos datos). | `200 OK` (`OPERATION_ALREADY_CONFIRMED`, `idempotent_replay = true`) devolviendo el resultado original ya registrado **sin volver a descontar ni incrementar stock** y sin insertar otro movimiento en `kardex`. | Pendiente |
-| **CP-IDEM-02** | Fases 2–5 | `Acuerdo 9` | Reenvío de la misma `referencia_solicitud` del usuario pero modificando datos del payload (p. ej. cambiando `cantidad` o `id_producto`). | `409 Conflict` (`IDEMPOTENCY_PAYLOAD_MISMATCH`) rechazando el conflicto sin ejecutar la operación. | Pendiente |
-| **CP-IDEM-03** | Fases 2–5 | `Acuerdo 9` | Recepción de una segunda petición con la misma `referencia_solicitud` mientras la primera aún está en estado `EN_PROCESO`. | `409 Conflict` (`REQUEST_IN_PROGRESS`, `estado_solicitud = "EN_PROCESO"`) informando su estado sin duplicar la operación. | Pendiente |
-| **CP-ATOM-01** | Fases 2–5 | `Acuerdo 9` / `RI-04` | Fallo intermedio inducido durante una compra, venta, baja o ajuste (p. ej. error al insertar en `kardex` tras haber ejecutado el `UPDATE` de `producto.stock_actual`). | `ROLLBACK` completo de la transacción: `producto.stock_actual` conserva su valor previo, no quedan cabeceras huérfanas y la solicitud queda marcada como `FALLIDA`. | Pendiente |
-| **CP-CONC-01** | Fases 2–5 | `Acuerdo 9` / `RNF` | Dos operaciones simultáneas intentan descontar 8 y 6 unidades de un mismo producto con `stock_actual = 10` (`SELECT ... FOR UPDATE`). | La primera transacción que obtiene el bloqueo confirma y deja `stock_actual = 2` (o `4`); la segunda lee el nuevo saldo bloqueado, detecta stock insuficiente (`409 INSUFFICIENT_STOCK`) y hace `ROLLBACK` sin perder actualizaciones ni dejar stock negativo. | Pendiente |
+| **CP-IDEM-01** | Fases 2–5 | `CL-07.3` / `CL-08.4` | Reenvío de una solicitud ya confirmada (`referencia_solicitud` idéntica, mismo usuario, misma operación y mismos datos). | `200 OK` (`OPERATION_ALREADY_CONFIRMED`, `idempotent_replay = true`) devolviendo el resultado original ya registrado **sin volver a descontar ni incrementar stock** y sin insertar otro movimiento en `kardex`. | **Aprobado en Fase 2** (`F2-IDEM-01`, `F2-IDEM-02` en infraestructura común; se revalidará en endpoints Fases 3–5) |
+| **CP-IDEM-02** | Fases 2–5 | `Acuerdo 9` | Reenvío de la misma `referencia_solicitud` del usuario pero modificando datos del payload (p. ej. cambiando `cantidad` o `id_producto`). | `409 Conflict` (`IDEMPOTENCY_PAYLOAD_MISMATCH`) rechazando el conflicto sin ejecutar la operación. | **Aprobado en Fase 2** (`F2-IDEM-03` en infraestructura común) |
+| **CP-IDEM-03** | Fases 2–5 | `Acuerdo 9` | Recepción de una segunda petición con la misma `referencia_solicitud` mientras la primera aún está en estado `EN_PROCESO`. | `409 Conflict` (`REQUEST_IN_PROGRESS`, `estado_solicitud = "EN_PROCESO"`) informando su estado sin duplicar la operación. | **Aprobado en Fase 2** (`F2-IDEM-04` con doble conexión PDO concurrente) |
+| **CP-ATOM-01** | Fases 2–5 | `Acuerdo 9` / `RI-04` | Fallo intermedio inducido durante una compra, venta, baja o ajuste (p. ej. error al insertar en `kardex` tras haber ejecutado el `UPDATE` de `producto.stock_actual`). | `ROLLBACK` completo de la transacción: `producto.stock_actual` conserva su valor previo, no quedan cabeceras huérfanas y la solicitud queda marcada como `FALLIDA`. | **Aprobado en Fase 2** (`F2-MOV-03` en infraestructura transaccional común) |
+| **CP-CONC-01** | Fases 2–5 | `Acuerdo 9` / `RNF` | Dos operaciones simultáneas intentan descontar 8 y 6 unidades de un mismo producto con `stock_actual = 10` (`SELECT ... FOR UPDATE`). | La primera transacción que obtiene el bloqueo confirma y deja `stock_actual = 2` (o `4`); la segunda lee el nuevo saldo bloqueado, detecta stock insuficiente (`409 INSUFFICIENT_STOCK`) y hace `ROLLBACK` sin perder actualizaciones ni dejar stock negativo. | **Aprobado en Fase 2** (`F2-MOV-01`, `F2-MOV-02`) |
 
 ---
 
@@ -107,7 +107,7 @@
 | **CP-INT-02** | Fase 3 | **Presentaciones de Compras conservadas** | Registrar una compra confirmada de **2 unidades de la presentación `Caja x 24` (`factor_conversion = 24`)** para un producto con `stock_actual = 0`. | `producto.stock_actual` se incrementa en **48 unidades individuales** (`stock_actual = 48`) y `kardex` registra una entrada de `48` unidades individuales (`saldo_anterior = 0`, `saldo_resultante = 48`). | Pendiente |
 | **CP-INT-03** | Fase 3 | `RI-02` / `RI-06` | Corregir una compra confirmada cambiando únicamente el costo unitario o lote sin cambiar las unidades; luego corregir cambiando la cantidad; luego anular la compra. | El cambio solo de costo/lote **no genera movimientos ficticios en `kardex`**; el cambio de cantidad ajusta `stock_actual` y `kardex` solo por la diferencia real de unidades individuales; la anulación revierte las unidades individuales si el stock alcanza. | Pendiente |
 | **CP-INT-04** | Fase 4 | `RI-03` / `RI-04` | Registrar una venta en el POS de 3 unidades individuales sobre un producto con `stock_actual = 48`. | En una sola transacción actualiza `stock_actual = 45` e inserta el movimiento `"Venta"` en `kardex` (`salida = 3`, `saldo_anterior = 48`, `saldo_resultante = 45`). | Pendiente |
-| **CP-SEG-01** | Fase 2 | **Compatibilidad de catálogos con el POS y Vendedor** | Un usuario activo con rol **Vendedor (`id_rol = 2`)** consume `GET /api/productos` y `GET /api/categorias` desde el POS, y luego intenta invocar `GET /api/productos?modo=reporte`, `POST /api/inventario/bajas` o `GET /api/reportes/kardex`. | `GET /api/productos` y `GET /api/categorias` en modo estándar responden `200 OK` con el formato esperado por el POS; en cambio, `modo=reporte` y todos los endpoints de Inventario/Reportes del Sprint 2 responden `403 FORBIDDEN_ADMIN_ONLY`. | Pendiente |
+| **CP-SEG-01** | Fase 2 | **Compatibilidad de catálogos con el POS y Vendedor** | Un usuario activo con rol **Vendedor (`id_rol = 2`)** consume `GET /api/productos` y `GET /api/categorias` desde el POS, y luego intenta invocar `GET /api/productos?modo=reporte`, `POST /api/inventario/bajas` o `GET /api/reportes/kardex`. | `GET /api/productos` y `GET /api/categorias` en modo estándar responden `200 OK` con el formato esperado por el POS; en cambio, `modo=reporte` y todos los endpoints de Inventario/Reportes del Sprint 2 responden `403 FORBIDDEN_ADMIN_ONLY`. | **Aprobado en Fase 2** (`F2-SEC-01` a `F2-SEC-05`) |
 
 ---
 
@@ -116,3 +116,39 @@
 | ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
 |---|---|---|---|---|---|
 | **CP-REND-01** | Fase 10 | `RNF` (1 000 movimientos y 5 usuarios simultáneos) | En `amazon_market_sprint2_test` con un historial de **1 000 movimientos en `kardex`**, **5 sesiones simultáneas** ejecutan consultas y exportaciones de Kardex/Variaciones combinadas con registros concurrentes de operaciones de inventario. | Tiempos de respuesta dentro de los umbrales operativos ($\le 2\text{ s}$ en consultas paginadas, $\le 5\text{ s}$ en exportaciones PDF/Excel de 1 000 filas), 0 interbloqueos no controlados (*deadlocks*), 0 discrepancias entre `producto.stock_actual` y el último `saldo_resultante` en `kardex`, y consistencia intacta en cada `referencia_consulta`. | Pendiente |
+
+
+---
+
+## 3. Resultados Ejecutados en Fase 2 (`tests/sprint2/fase2_infraestructura_test.php`)
+
+- **Comando ejecutado:** `C:\xampp\php\php.exe tests\sprint2\fase2_infraestructura_test.php`
+- **Base de datos utilizada:** `amazon_market_sprint2_test`
+- **Resultado global:** **24 PASS / 0 FAIL**
+
+| Código | Verificación Ejecutada | Resultado |
+|---|---|---|
+| `F2-DB-01` | 107 productos con `stock_actual` y `stock_minimo` enteros no negativos y `id_subcategoria` poblado. | **PASS** |
+| `F2-DB-02` | Las 6 categorías existentes (5 activas y 1 inactiva) cuentan con su subcategoría `"General"`. | **PASS** |
+| `F2-DB-03` | Trigger `trg_categoria_after_insert_subcategoria_general` crea subcategoría `"General"` automáticamente al crear categoría. | **PASS** |
+| `F2-DB-04` | FK compuesta `fk_producto_subcategoria_categoria` rechaza asignar a un producto una subcategoría de otra categoría. | **PASS** |
+| `F2-QTY-01` | `DefinicionMovimiento::validarCantidadEnteraPositiva` rechaza `0`, `-5`, `'2.5'`, `'abc'`, `''` y `null` con `422 VALIDATION_ERROR`. | **PASS** |
+| `F2-QTY-02` | Restricción `chk_producto_stock_entero_no_negativo` impide `stock_actual < 0` en tabla `producto`. | **PASS** |
+| `F2-QTY-03` | Restricción `chk_detalle_compra_integridad` impide `cantidad_base <> cantidad_presentaciones * equivalencia_aplicada`. | **PASS** |
+| `F2-REF-01` | Trigger `trg_kardex_before_insert_integridad` rechaza movimientos en `kardex` sin referencia de operación válida. | **PASS** |
+| `F2-MOV-01` | `MovimientoInventarioService` impide dejar stock en negativo y responde `409 INSUFFICIENT_STOCK`. | **PASS** |
+| `F2-MOV-02` | `MovimientoInventarioService` detecta cambio concurrente de `saldo_anterior_esperado` y responde `409 STOCK_CHANGED_CONFLICT`. | **PASS** |
+| `F2-MOV-03` | Reversión atómica completa (`ROLLBACK`) cuando falla un paso intermedio en un lote de movimientos. | **PASS** |
+| `F2-IDEM-01` | Primera solicitud válida ejecuta la operación, actualiza stock y devuelve `201 Created`. | **PASS** |
+| `F2-IDEM-02` | Solicitud repetida con misma `referencia_solicitud` y mismo payload devuelve `200 OK` (`OPERATION_ALREADY_CONFIRMED`) sin volver a modificar el stock. | **PASS** |
+| `F2-IDEM-03` | Misma `referencia_solicitud` con payload distinto es rechazada con `409 IDEMPOTENCY_PAYLOAD_MISMATCH`. | **PASS** |
+| `F2-IDEM-04` | Solicitud simultánea en curso desde otra conexión es detectada mediante `GET_LOCK(..., 0)` y rechazada con `409 REQUEST_IN_PROGRESS`. | **PASS** |
+| `F2-HIST-01` | El movimiento en `kardex` conserva snapshots históricos inmutables aunque cambie el nombre del producto en catálogo después. | **PASS** |
+| `F2-HIST-02` | Trigger `trg_kardex_before_update_inmutable` impide alterar registros históricos en `kardex`. | **PASS** |
+| `F2-SEC-01` | Sesión no autenticada es rechazada por `AuthMiddleware::verificarUsuarioActivoEnSesion()`. | **PASS** |
+| `F2-SEC-02` | Administrador activo es validado contra BD (sincronizando nombre real) y posee permisos de Sprint 2. | **PASS** |
+| `F2-SEC-03` | Usuario desactivado en BD (`estado = 0`) es rechazado inmediatamente con `401 AUTH_REQUIRED` aunque tenga sesión abierta. | **PASS** |
+| `F2-SEC-04` | Rol Vendedor (`id_rol = 2`) tiene denegadas las funciones del Sprint 2 (`403 FORBIDDEN_ADMIN_ONLY`) pero conserva acceso al POS y catálogo. | **PASS** |
+| `F2-SEC-05` | `CSRFMiddleware` rechaza `POST` sin token o con token inválido y acepta token válido. | **PASS** |
+| `F2-CLEAN-01` | `amazon_market_sprint2_test` restaurada tras las pruebas a `stock_actual = 0` y `0` movimientos. | **PASS** |
+| `F2-ISO-01` | `amazon_market` (base principal) verificada 100 % intacta (`20` tablas, `106` productos con stock > 0, `98` ventas, `4` compras, `26` kardex). | **PASS** |
