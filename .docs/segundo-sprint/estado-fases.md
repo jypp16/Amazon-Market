@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | **Fase 1** | **Preparación y contratos** | Respaldo verificado, copia aislada de pruebas con escenario limpio, acuerdos, matriz de diferencias, contrato API (incluyendo selector de sentido, `referencia_solicitud` y `referencia_consulta`) y plan de pruebas. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
 | **Fase 2** | **Datos, seguridad y base común de movimientos** | Migraciones de estructura (`subcategoria`, instantáneas históricas en `kardex`, control de idempotencia `referencia_solicitud`, almacenamiento de `referencia_consulta`), validación de Administrador activo, base común transaccional de movimientos y compatibilidad de catálogos con POS. | `amazon_market_sprint2_test` (`amazon_market` intacta) | **Completada** |
-| **Fase 3** | **Productos y Compras** | Productos nuevos con `stock_actual = 0`, bloqueo de edición de stock desde catálogo, validación entera de `stock_minimo`, conservación de presentaciones y equivalencias de Compras (ej. 2 cajas de 24 = 48 unidades individuales) y corrección/anulación sin movimientos ficticios en `kardex`. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 3** | **Productos y Compras** | Productos nuevos con `stock_actual = 0`, bloqueo de edición de stock desde catálogo, validación entera de `stock_minimo`, conservación de presentaciones y equivalencias de Compras (ej. 2 cajas de 24 = 48 unidades individuales) y corrección/anulación sin movimientos ficticios en `kardex`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 4** | **Ventas** | Registro atómico de salidas de Venta en `kardex` junto con el descuento de `stock_actual` en unidades enteras individuales (`equivalencia = 1`), bloqueo `FOR UPDATE` e idempotencia. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | Pendiente |
@@ -97,3 +97,41 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
    - [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **24 PASS / 0 FAIL**.
 4. **Dependencias para la Fase 3 (Productos y Compras)**:
    - Conectar `ProductoApiController`, `ProductoService` y `CompraService` a `MovimientoInventarioService` y `ControlSolicitudService`, garantizando que productos nuevos inicien con `stock_actual = 0`, que `stock_actual` no pueda editarse desde Productos y que Compras conserve presentaciones/equivalencias y registre correcciones/anulaciones en `kardex` sin movimientos ficticios.
+
+---
+
+## 5. Evidencias Reales de Cierre de la Fase 3
+
+1. **Productos estrictamente alineados con el inventario**:
+   - [`Services/ProductoService.php`](../../Services/ProductoService.php): Método `crear()` fuerza `stock_actual = 0` sin importar lo provisto en la petición. Método `actualizar()` excluye y no procesa `stock_actual` en el `UPDATE`, impidiendo modificaciones manuales de existencias. Valida `stock_minimo >= 0` entero y asignación de `id_subcategoria` con verificación de correspondencia compuesta (`(id_subcategoria, id_categoria)`). Se eliminó la lógica de unidades fraccionarias (`$unidadesDecimales`), manteniendo enteros en unidades de envases individuales.
+   - [`Controllers/API/ProductoApiController.php`](../../Controllers/API/ProductoApiController.php): Endpoints `POST /api/productos` y `PUT /api/productos/{id}` alineados con la regla de stock 0 en creación y exclusión de stock en actualización.
+   - [`Controllers/ProductoController.php`](../../Controllers/ProductoController.php), [`Views/Producto/nuevo.php`](../../Views/Producto/nuevo.php), [`Views/Producto/editar.php`](../../Views/Producto/editar.php), [`Assets/js/producto.js`](../../Assets/js/producto.js) y [`Assets/js/productos.js`](../../Assets/js/productos.js): Selector dinámico de subcategorías dependiente de la categoría seleccionada, campo de stock en modo solo lectura/informativo con advertencia explícita y pasos enteros (`step = "1"`) en `stock_minimo`.
+
+2. **Compras coherentes con presentaciones, versionamiento inmutable y Kardex canónico**:
+   - [`Models/DetalleCompraModel.php`](../../Models/DetalleCompraModel.php): `obtenerDetallesPorCompra($id_compra, $soloVigentes = true)` filtra `es_vigente = 1` por defecto y añade `obtenerMaxVersion($id_compra)` para el control de versiones consecutivas.
+   - [`Models/CompraModel.php`](../../Models/CompraModel.php): Métodos `obtenerResumenCompras`, `obtenerDetallesFiltrados` y cálculo de productos más comprados filtran estrictamente `detalle_compra.es_vigente = 1`, evitando que las versiones reemplazadas de compras corregidas dupliquen unidades o disparen discrepancias en `compras_con_diferencias`. Métodos `anularCompraConMotivo`, `corregirCompraConMotivo`, `registrarHistorial` y `obtenerHistorialPorCompra`.
+   - [`Services/CompraService.php`](../../Services/CompraService.php):
+     - `registrarCompra`: Conserva presentaciones (`Unidad`, `Caja x 12`, `Caja x 24`), valida equivalencias (`cantidad_base = presentaciones * equivalencia`), bloquea productos ordenadamente (`bloquearProductosOrdenados`) y aplica movimiento canónico `ORIGEN_COMPRA` (`INCREMENTO`) con snapshots históricos completos y FKs de compra y detalle.
+     - `corregirCompra`: En lugar de eliminar detalles antiguos, calcula la diferencia neta por producto $\Delta(P) = U_{\text{nueva}}(P) - U_{\text{vigente}}(P)$. Si $\Delta = 0$ (corrección solo de costo, comprobante o lote), no genera movimientos ficticios en `kardex`. Si $\Delta \ne 0$, aplica `ORIGEN_CORRECCION_COMPRA` (`INCREMENTO` si $\Delta > 0$ o `DISMINUCION` si $\Delta < 0$). Si $\Delta < 0$, valida suficiencia de existencias antes de alterar saldos (`409 INSUFFICIENT_STOCK`). Marca la versión anterior con `es_vigente = 0, reemplazado_en = NOW()` e inserta la nueva versión con `version_detalle = $max + 1, es_vigente = 1, id_detalle_origen`.
+     - `anularCompra`: Valida que el stock cubra todas las unidades vigentes a revertir, aplica `ORIGEN_ANULACION_COMPRA` (`DISMINUCION`) por cada detalle vigente, marca la cabecera como `Anulada` e impide anulaciones duplicadas.
+     - `obtenerReporteCompras`: Reporte común para PDF y Excel filtrado por `es_vigente = 1`, garantizando cuadratura contable exacta.
+   - [`Controllers/API/CompraApiController.php`](../../Controllers/API/CompraApiController.php): Requiere rol Administrador activo en `PUT` (`compras.editar`) y `DELETE` (`compras.eliminar`), extrae `referencia_solicitud` para ejecución idempotente y maneja `InventarioException`.
+
+3. **Suite de pruebas automatizadas de la Fase 3**:
+   - [`tests/sprint2/fase3_productos_compras_test.php`](../../tests/sprint2/fase3_productos_compras_test.php): Ejecutada sobre `amazon_market_sprint2_test` con resultado **13 PASS / 0 FAIL**:
+     - `F3-PROD-01`: Creación de producto nuevo con `stock_actual = 0`.
+     - `F3-PROD-02`: Edición de producto omite `stock_actual` sin alterarlo.
+     - `F3-COMP-01`: Caso 1 — Compra de 2 cajas de 24: entrada de 48 unidades en stock y Kardex canónico.
+     - `F3-COMP-02`: Caso 2 — Compra 20, venta posterior 15 y corrección a 18: saldo final 3 sin error de stock negativo.
+     - `F3-COMP-03`: Caso 3 — Corrección solo de costo: stock y movimientos sin cambios ($\Delta = 0$).
+     - `F3-COMP-04`: Caso 4 — Corrección con fallo intermedio: rollback completo de detalles y existencias.
+     - `F3-COMP-05`: Caso 5 — Segunda corrección: delta calculado contra la versión vigente ($12 - 14 = -2$).
+     - `F3-COMP-06`: Caso 6 — Compra concurrente con venta: serializada por `FOR UPDATE` sin actualizaciones perdidas ($10 - 4 = 6$).
+     - `F3-COMP-07`: Caso 7 — Anulación repetida: una sola reversión sin duplicar decremento.
+     - `F3-REP-01`: Reporte de compras filtra `es_vigente = 1` sin duplicación de líneas ni falsas discrepancias.
+     - `F3-IDEM-01`: Idempotencia de solicitudes repetidas devuelve resultado sin sumar stock duplicado.
+     - `F3-CLEAN-01`: Limpieza de registros de prueba y stock restablecido a 0.
+     - `F3-ISO-01`: Aislamiento verificado: Base principal `amazon_market` 100 % intacta (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex).
+
+4. **Dependencias para la Fase 4 (Ventas)**:
+   - Integrar `VentaService` y `VentaApiController` con `MovimientoInventarioService` (`ORIGEN_VENTA`, `SENTIDO_DISMINUCION` en unidades enteras individuales) y `ControlSolicitudService`, aplicando bloqueo ordenado `FOR UPDATE` para garantizar la integridad concurrente del inventario con las compras y el catálogo.

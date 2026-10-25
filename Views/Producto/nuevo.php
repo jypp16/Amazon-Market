@@ -6,7 +6,7 @@
         <a href="<?= BASE_URL ?>/Producto" class="btn btn-secondary"><i class="fa-solid fa-arrow-left-long"></i> Volver</a>
     </div>
     
-    <form action="<?= BASE_URL ?>/Producto/guardar" method="POST" class="form-grid">
+    <form action="<?= BASE_URL ?>/Producto/guardar" method="POST" class="form-grid" id="form_producto_nuevo">
         <?php csrf_field(); ?>
         <div class="form-group col-6">
             <label for="codigo_barra">Código de Barra <span class="required">*</span></label>
@@ -33,6 +33,13 @@
         </div>
 
         <div class="form-group col-6">
+            <label for="id_subcategoria">Subcategoría <span class="required">*</span></label>
+            <select id="id_subcategoria" name="id_subcategoria" required>
+                <!-- Opciones pobladas dinámicamente según la categoría seleccionada -->
+            </select>
+        </div>
+
+        <div class="form-group col-4">
             <label for="id_unidad">Unidad de Medida <span class="required">*</span></label>
             <select id="id_unidad" name="id_unidad" required>
                 <?php foreach($data['unidades'] as $un): ?>
@@ -47,13 +54,14 @@
         </div>
 
         <div class="form-group col-4">
-            <label for="stock_actual">Stock Inicial <span class="required">*</span></label>
-            <input type="number" id="stock_actual" name="stock_actual" placeholder="0" step="1" min="0" required>
+            <label for="stock_minimo">Stock Mínimo <span class="required">*</span></label>
+            <input type="number" id="stock_minimo" name="stock_minimo" placeholder="1" step="1" min="0" value="1" required>
         </div>
 
-        <div class="form-group col-4">
-            <label for="stock_minimo">Stock Mínimo <span class="required">*</span></label>
-            <input type="number" id="stock_minimo" name="stock_minimo" placeholder="1" step="1" min="0" required>
+        <div class="form-group col-12">
+            <div class="alert alert-info" style="margin: 0; padding: 10px 14px; font-size: 0.9rem;">
+                <i class="fa-solid fa-circle-info"></i> <strong>Control de inventario:</strong> Los productos nuevos se crean con stock inicial cero. Las existencias se ingresan exclusivamente mediante el módulo de <strong>Compras</strong>.
+            </div>
         </div>
 
         <div class="form-actions col-12">
@@ -63,6 +71,9 @@
     </form>
 </div>
 
+<script>
+window.SUBCATEGORIAS_DATA = <?= json_encode($data['subcategorias'] ?? [], JSON_UNESCAPED_UNICODE) ?>;
+</script>
 <script src="<?= BASE_URL ?>/Assets/js/producto.js"></script>
 
 <?php require_once "Views/Footer.php"; ?>

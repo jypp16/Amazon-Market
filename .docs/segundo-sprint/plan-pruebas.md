@@ -3,7 +3,7 @@
 **Proyecto:** Amazon-Market  
 **Base de datos exclusiva de pruebas (Fases 1–9):** `amazon_market_sprint2_test`  
 **Bootstrap de aislamiento:** [`tests/sprint2/bootstrap_test.php`](../../tests/sprint2/bootstrap_test.php)  
-**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`) cubriendo estructura, restricciones de cantidades/saldos, referencias, representación inequívoca, atomicidad/reversión, idempotencia/solicitudes simultáneas, snapshots históricos inmutables, autorización de Administrador activo, CSRF y compatibilidad con el POS. Los casos específicos de endpoints de las Fases 3 a 10 permanecen pendientes para sus respectivas fases.
+**Estado de ejecución:** En Fase 1 se verificaron respaldo, restauración, aislamiento de conexión y escenario limpio. En **Fase 2** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase2_infraestructura_test.php`](../../tests/sprint2/fase2_infraestructura_test.php) (`24 PASS / 0 FAIL`). En **Fase 3** se ejecutó y aprobó la suite automatizada [`tests/sprint2/fase3_productos_compras_test.php`](../../tests/sprint2/fase3_productos_compras_test.php) (`13 PASS / 0 FAIL`) cubriendo la creación con stock 0, edición sin modificación de existencias, presentaciones enteras (2 cajas de 24 = 48 unidades), corrección por delta neto $\Delta(P)$ sin error ante ventas intermedias, corrección de solo costo sin Kardex ($\Delta = 0$), rollback integral ante fallo, corrección consecutiva contra versión vigente, concurrencia compra/venta con `FOR UPDATE`, anulación única, consistencia contable en reportes de compras filtrados por `es_vigente = 1` e idempotencia con `referencia_solicitud`. Los casos específicos de las Fases 4 a 10 permanecen pendientes para sus respectivas fases.
 
 ---
 
@@ -46,6 +46,23 @@
 | **CP-HU08-05** | Fase 5 | `CL-08.1` | Ajuste negativo con `cantidad = 13` cuando `stock_actual = 13`. | `201 Created`; `stock_actual` queda en `0` y `saldo_resultante = 0`. | Pendiente |
 | **CP-HU08-06** | Fase 5 | `CA-08.4` / `CL-08.3` | El administrador prepara ajuste con `saldo_anterior_esperado = 16`, pero otra operación concurrente dejó `stock_actual = 14` antes de confirmar. | `409 Conflict` (`STOCK_CHANGED_CONFLICT`) devolviendo `stock_actual = 14` y `requiere_revision = true` sin aplicar el ajuste a ciegas. | Pendiente |
 | **CP-HU08-07** | Fase 5 | `RN-05` / `CL-08.2` | Ajuste con `cantidad = 0`, negativa o decimal (`1.5`). | `422 Unprocessable Entity` en `errors.cantidad` exigiendo entero $\ge 1$. | Pendiente |
+
+---
+
+### 2.2.1 HU-Productos y HU-Compras: Coherencia con el Inventario (Fase 3)
+
+| ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
+|---|---|---|---|---|---|
+| **CP-PROD-01** | Fase 3 | `Acuerdo 8` / `RN-01` | Registro de producto nuevo intentando inyectar `stock_actual = 50`. | `201 Created`; el producto se inserta estrictamente con `stock_actual = 0` y `stock_minimo >= 0` entero; subcategoría validada. | **Aprobado en Fase 3** (`F3-PROD-01`) |
+| **CP-PROD-02** | Fase 3 | `Acuerdo 8` / `RN-01` | Edición de producto enviando `stock_actual = 999` en el cuerpo de la petición. | `200 OK`; se actualizan los datos de catálogo, pero `stock_actual` permanece inalterado (el campo se omite en la consulta de actualización). | **Aprobado en Fase 3** (`F3-PROD-02`) |
+| **CP-COMP-01** | Fase 3 | `Caso Obligatorio 1` | Compra de 2 cajas de presentación x 24 unidades individuales. | `201 Created`; `cantidad_base = 48`; se incrementa `stock_actual` en +48 y se registra movimiento canónico `COMPRA` en `kardex` con FKs completas. | **Aprobado en Fase 3** (`F3-COMP-01`) |
+| **CP-COMP-02** | Fase 3 | `Caso Obligatorio 2` | Compra de 20 unidades, venta posterior de 15 (saldo = 5) y corrección de compra a 18 unidades. | `200 OK`; se calcula delta neto $\Delta = 18 - 20 = -2$; como hay 5 unidades, se descuentan 2 dejando `stock_actual = 3` sin error de stock negativo. | **Aprobado en Fase 3** (`F3-COMP-02`) |
+| **CP-COMP-03** | Fase 3 | `Caso Obligatorio 3` | Corrección exclusiva de costo o datos de cabecera manteniendo las cantidades originales. | `200 OK`; $\Delta = 0$; se genera nueva versión de detalle (`version_detalle = 2`, `es_vigente = 1`), pero **no se inserta ningún movimiento en Kardex** ni se altera el stock. | **Aprobado en Fase 3** (`F3-COMP-03`) |
+| **CP-COMP-04** | Fase 3 | `Caso Obligatorio 4` | Corrección con múltiples productos donde uno falla por stock insuficiente o producto inválido. | Excepción capturada; `ROLLBACK` integral; ningún producto sufre alteración de existencias y los detalles vigentes se mantienen intactos. | **Aprobado en Fase 3** (`F3-COMP-04`) |
+| **CP-COMP-05** | Fase 3 | `Caso Obligatorio 5` | Compra original de 10 (v1), primera corrección a 14 (v2) y segunda corrección a 12 (v3). | `200 OK`; la segunda corrección evalúa $\Delta = 12 - 14 = -2$ contra la versión vigente v2, dejando saldo final exacto en 12. | **Aprobado en Fase 3** (`F3-COMP-05`) |
+| **CP-COMP-06** | Fase 3 | `Caso Obligatorio 6` | Operaciones simultáneas sobre el mismo producto (compra +10 y venta -4) bajo serialización `FOR UPDATE`. | Ambas transacciones confirman en orden sin actualizaciones perdidas (`stock_resultante = 6`). | **Aprobado en Fase 3** (`F3-COMP-06`) |
+| **CP-COMP-07** | Fase 3 | `Caso Obligatorio 7` | Intento de anular dos veces consecutivas la misma compra. | Primera anulación exitosa (`estado = "Anulada"`, reversión de existencias); segundo intento rechazado con excepción sin volver a restar stock. | **Aprobado en Fase 3** (`F3-COMP-07`) |
+| **CP-COMP-08** | Fase 3 | `Integridad Reportes` | Generación de reporte de compras con historial de versiones corregidas. | `obtenerResumenCompras` y `obtenerReporteCompras` filtran `es_vigente = 1`; `compras_con_diferencias = 0`; no se duplican importes ni unidades. | **Aprobado en Fase 3** (`F3-REP-01`) |
 
 ---
 

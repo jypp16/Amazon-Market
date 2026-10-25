@@ -3,14 +3,27 @@
 namespace Controllers\API;
 
 use Libraries\Core\ApiController;
+use Libraries\Core\InventarioException;
 use Services\CompraService;
+use Throwable;
 
 class CompraApiController extends ApiController {
-    private $compraService;
+    private CompraService $compraService;
 
     public function __construct() {
         parent::__construct();
         $this->compraService = new CompraService();
+    }
+
+    private function extraerReferenciaSolicitud(array $input): ?string {
+        if (!empty($input['referencia_solicitud']) && is_string($input['referencia_solicitud'])) {
+            return trim($input['referencia_solicitud']);
+        }
+        $headerRef = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
+        if (!empty($headerRef) && is_string($headerRef)) {
+            return trim($headerRef);
+        }
+        return null;
     }
 
     /**
@@ -26,10 +39,10 @@ class CompraApiController extends ApiController {
             }
 
             // Validaciones básicas de cabecera
-            $camposRequeridosCabecera = ['id_proveedor', 'id_tipo_comprobante', 'serie', 'numero', 'fecha_emision', 'total_documento', 'detalles'];
+            $camposRequeridosCabecera = ['id_proveedor', 'id_tipo_comprobante', 'serie', 'numero', 'detalles'];
             foreach ($camposRequeridosCabecera as $campo) {
                 if (!isset($input[$campo])) {
-                    $this->sendJsonResponse(['status' => false, 'message' => "Falta el campo requerido: $campo"], 400);
+                    $this->sendJsonResponse(['status' => false, 'message' => "Falta el campo requerido: {$campo}"], 400);
                 }
             }
 
@@ -37,40 +50,24 @@ class CompraApiController extends ApiController {
                 $this->sendJsonResponse(['status' => false, 'message' => 'La compra debe tener al menos un detalle válido.'], 400);
             }
 
-            // Validaciones básicas de detalles
-            foreach ($input['detalles'] as $index => $detalle) {
-                $camposRequeridosDetalle = ['id_producto', 'id_presentacion', 'cantidad_presentaciones', 'equivalencia_aplicada', 'importe_final_linea'];
-                foreach ($camposRequeridosDetalle as $campo) {
-                    if (!isset($detalle[$campo])) {
-                        $this->sendJsonResponse(['status' => false, 'message' => "Falta el campo '$campo' en el detalle índice $index."], 400);
-                    }
-                }
-                
-                if ($detalle['cantidad_presentaciones'] <= 0 || $detalle['equivalencia_aplicada'] <= 0) {
-                    $this->sendJsonResponse(['status' => false, 'message' => "Las cantidades y equivalencias deben ser mayores a cero en el detalle índice $index."], 400);
-                }
-                
-                if ($detalle['importe_final_linea'] < 0) {
-                    $this->sendJsonResponse(['status' => false, 'message' => "El importe no puede ser negativo en el detalle índice $index."], 400);
-                }
-            }
-
-            // Usar el ID de usuario autenticado del ApiController
-            $id_usuario = $this->authenticatedUserId ?? 1;
+            $referenciaSolicitud = $this->extraerReferenciaSolicitud($input);
+            $id_usuario = (int)($this->authenticatedUserId ?? 1);
 
             $detalles = $input['detalles'];
-            unset($input['detalles']);
+            unset($input['detalles'], $input['referencia_solicitud']);
             $cabecera = $input;
 
-            $resultado = $this->compraService->registrarCompra($cabecera, $detalles, $id_usuario);
+            $resultado = $this->compraService->registrarCompra($cabecera, $detalles, $id_usuario, $referenciaSolicitud);
 
-            if ($resultado['status']) {
-                $this->sendJsonResponse($resultado, 201); // Created
+            if (!empty($resultado['status'])) {
+                $this->sendJsonResponse($resultado, 201);
             } else {
-                $this->sendJsonResponse($resultado, 400); // Bad Request
+                $this->sendJsonResponse($resultado, 400);
             }
 
-        } catch (\Exception $e) {
+        } catch (InventarioException $e) {
+            $this->sendJsonResponse($e->asResponseArray(), $e->getStatusCode());
+        } catch (Throwable $e) {
             $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
         }
     }
@@ -107,7 +104,9 @@ class CompraApiController extends ApiController {
                     'por_pagina' => $resultado['por_pagina']
                 ], 200);
             }
-        } catch (\Exception $e) {
+        } catch (InventarioException $e) {
+            $this->sendJsonResponse($e->asResponseArray(), $e->getStatusCode());
+        } catch (Throwable $e) {
             $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
         }
     }
@@ -117,9 +116,9 @@ class CompraApiController extends ApiController {
      */
     public function put(?string $id = ''): void {
         try {
-            $this->requirePermission('compras.editar');
+            $this->requireAdminActivo('compras.editar');
             if (empty($id)) {
-                throw new \Exception("ID de la compra es requerido para corregir.");
+                $this->sendJsonResponse(['status' => false, 'message' => 'ID de la compra es requerido para corregir.'], 400);
             }
 
             $input = $this->getInput();
@@ -132,33 +131,23 @@ class CompraApiController extends ApiController {
                 $this->sendJsonResponse(['status' => false, 'message' => 'El motivo de corrección es obligatorio.'], 400);
             }
 
-            // Validaciones básicas de detalles para PUT
-            foreach ($input['detalles'] as $index => $detalle) {
-                if (isset($detalle['cantidad_presentaciones']) && $detalle['cantidad_presentaciones'] <= 0) {
-                    $this->sendJsonResponse(['status' => false, 'message' => "Las cantidades deben ser mayores a cero en el detalle índice $index."], 400);
-                }
-                if (isset($detalle['equivalencia_aplicada']) && $detalle['equivalencia_aplicada'] <= 0) {
-                    $this->sendJsonResponse(['status' => false, 'message' => "Las equivalencias deben ser mayores a cero en el detalle índice $index."], 400);
-                }
-                if (isset($detalle['importe_final_linea']) && $detalle['importe_final_linea'] < 0) {
-                    $this->sendJsonResponse(['status' => false, 'message' => "El importe no puede ser negativo en el detalle índice $index."], 400);
-                }
-            }
+            $referenciaSolicitud = $this->extraerReferenciaSolicitud($input);
+            $id_usuario = (int)($this->authenticatedUserId ?? 1);
 
-            $id_usuario = $this->authenticatedUserId ?? 1;
-            
             $detalles = $input['detalles'];
-            unset($input['detalles']);
+            unset($input['detalles'], $input['motivo'], $input['referencia_solicitud']);
             $cabecera = $input;
 
-            $resultado = $this->compraService->corregirCompra((int)$id, $cabecera, $detalles, $id_usuario, $motivo);
+            $resultado = $this->compraService->corregirCompra((int)$id, $cabecera, $detalles, $id_usuario, $motivo, $referenciaSolicitud);
 
-            if ($resultado['status']) {
+            if (!empty($resultado['status'])) {
                 $this->sendJsonResponse($resultado, 200);
             } else {
                 $this->sendJsonResponse($resultado, 400);
             }
-        } catch (\Exception $e) {
+        } catch (InventarioException $e) {
+            $this->sendJsonResponse($e->asResponseArray(), $e->getStatusCode());
+        } catch (Throwable $e) {
             $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
         }
     }
@@ -168,12 +157,9 @@ class CompraApiController extends ApiController {
      */
     public function delete(?string $id = ''): void {
         try {
-            $this->requirePermission('compras.eliminar');
-            if ((int)($_SESSION['rol'] ?? 0) !== 1) {
-                $this->sendJsonResponse(['status' => false, 'message' => 'Solo un administrador puede anular compras.'], 403);
-            }
+            $this->requireAdminActivo('compras.eliminar');
             if (empty($id)) {
-                throw new \Exception("ID de la compra es requerido para anular.");
+                $this->sendJsonResponse(['status' => false, 'message' => 'ID de la compra es requerido para anular.'], 400);
             }
 
             $input = $this->getInput();
@@ -182,15 +168,19 @@ class CompraApiController extends ApiController {
                 $this->sendJsonResponse(['status' => false, 'message' => 'El motivo de anulación es obligatorio.'], 400);
             }
 
-            $id_usuario = $this->authenticatedUserId ?? 1;
-            $resultado = $this->compraService->anularCompra((int)$id, $id_usuario, $motivo);
+            $referenciaSolicitud = $this->extraerReferenciaSolicitud($input);
+            $id_usuario = (int)($this->authenticatedUserId ?? 1);
 
-            if ($resultado['status']) {
+            $resultado = $this->compraService->anularCompra((int)$id, $id_usuario, $motivo, $referenciaSolicitud);
+
+            if (!empty($resultado['status'])) {
                 $this->sendJsonResponse($resultado, 200);
             } else {
                 $this->sendJsonResponse($resultado, 400);
             }
-        } catch (\Exception $e) {
+        } catch (InventarioException $e) {
+            $this->sendJsonResponse($e->asResponseArray(), $e->getStatusCode());
+        } catch (Throwable $e) {
             $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
         }
     }

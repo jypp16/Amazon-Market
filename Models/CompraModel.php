@@ -67,7 +67,9 @@ class CompraModel extends Model {
             COALESCE(SUM(CASE WHEN resumen_detalle.lineas IS NULL OR resumen_detalle.importe <> compra.total_documento THEN 1 ELSE 0 END), 0) AS compras_con_diferencias"
             . $desde . ' LEFT JOIN (
                 SELECT id_compra, COUNT(*) AS lineas, SUM(importe_final_linea) AS importe, SUM(cantidad_base) AS unidades
-                FROM detalle_compra GROUP BY id_compra
+                FROM detalle_compra
+                WHERE es_vigente = 1
+                GROUP BY id_compra
             ) resumen_detalle ON resumen_detalle.id_compra = compra.id_compra' . $donde;
         $consulta = $this->conect()->prepare($sql);
         $consulta->execute($valores);
@@ -77,7 +79,7 @@ class CompraModel extends Model {
         }
         $consulta = $this->conect()->prepare('SELECT detalle_compra.id_producto, producto.nombre AS producto,
                 SUM(detalle_compra.cantidad_base) AS cantidad_base' . $desde . '
-            INNER JOIN detalle_compra ON detalle_compra.id_compra = compra.id_compra
+            INNER JOIN detalle_compra ON detalle_compra.id_compra = compra.id_compra AND detalle_compra.es_vigente = 1
             LEFT JOIN producto ON producto.id_producto = detalle_compra.id_producto'
             . $donde . " AND compra.estado <> 'Anulada'
             GROUP BY detalle_compra.id_producto, producto.nombre
@@ -123,7 +125,7 @@ class CompraModel extends Model {
                 CAST(detalle_compra.importe_final_linea * 100 AS SIGNED) AS importe_centimos,
                 CAST(detalle_compra.importe_final_linea / NULLIF(detalle_compra.cantidad_presentaciones, 0) AS DECIMAL(20,8)) AS costo_por_presentacion'
             . $desde . '
-            INNER JOIN detalle_compra ON detalle_compra.id_compra = compra.id_compra
+            INNER JOIN detalle_compra ON detalle_compra.id_compra = compra.id_compra AND detalle_compra.es_vigente = 1
             LEFT JOIN producto ON producto.id_producto = detalle_compra.id_producto
             LEFT JOIN presentacion ON presentacion.id_presentacion = detalle_compra.id_presentacion'
             . $donde . ' ORDER BY detalle_compra.id_compra, detalle_compra.id_detalle_compra');
@@ -172,6 +174,15 @@ class CompraModel extends Model {
             'motivo_anulacion' => $motivo,
             'fecha_anulacion' => date('Y-m-d H:i:s')
         ]);
+    }
+
+    public function corregirCompraConMotivo($id_compra, $motivo, array $datosCabecera = []) {
+        $actualizaciones = array_merge($datosCabecera, [
+            'estado' => 'Corregida',
+            'motivo_correccion' => $motivo,
+            'fecha_correccion' => date('Y-m-d H:i:s')
+        ]);
+        return $this->update($id_compra, $actualizaciones);
     }
 
     public function registrarHistorial($id_compra, $id_usuario, $tipo_accion, $motivo, $datos_anteriores = null) {

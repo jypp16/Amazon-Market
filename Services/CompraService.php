@@ -2,131 +2,655 @@
 
 namespace Services;
 
+use Libraries\Core\Conexion;
+use Libraries\Core\DefinicionMovimiento;
+use Libraries\Core\InventarioException;
 use Models\CompraModel;
 use Models\DetalleCompraModel;
 use Models\ProductoModel;
 use Models\KardexModel;
-use PDOException;
+use Models\ProveedorModel;
+use Models\UsuarioModel;
+use PDO;
 use Exception;
+use Throwable;
 
 class CompraService {
-    private $compraModel;
-    private $detalleCompraModel;
-    private $productoModel;
-    private $kardexModel;
+    private CompraModel $compraModel;
+    private DetalleCompraModel $detalleCompraModel;
+    private ProductoModel $productoModel;
+    private KardexModel $kardexModel;
+    private MovimientoInventarioService $movimientoService;
+    private ControlSolicitudService $controlSolicitudService;
 
-    public function __construct() {
-        $this->compraModel = new CompraModel();
-        $this->detalleCompraModel = new DetalleCompraModel();
-        $this->productoModel = new ProductoModel();
-        $this->kardexModel = new KardexModel();
+    public function __construct(
+        ?CompraModel $compraModel = null,
+        ?DetalleCompraModel $detalleCompraModel = null,
+        ?ProductoModel $productoModel = null,
+        ?KardexModel $kardexModel = null,
+        ?MovimientoInventarioService $movimientoService = null,
+        ?ControlSolicitudService $controlSolicitudService = null
+    ) {
+        $this->compraModel = $compraModel ?? new CompraModel();
+        $this->detalleCompraModel = $detalleCompraModel ?? new DetalleCompraModel();
+        $this->productoModel = $productoModel ?? new ProductoModel();
+        $this->kardexModel = $kardexModel ?? new KardexModel();
+        $this->movimientoService = $movimientoService ?? new MovimientoInventarioService();
+        $this->controlSolicitudService = $controlSolicitudService ?? new ControlSolicitudService($this->movimientoService->getPdo());
+    }
+
+    public function getMovimientoService(): MovimientoInventarioService {
+        return $this->movimientoService;
     }
 
     /**
-     * Registra una compra asegurando la atomicidad con una transacción
+     * Registra una compra asegurando atomicidad, verificación de catálogo,
+     * bloqueo pesimista ordenado y generación canónica de movimientos en Kardex.
      */
-    public function registrarCompra(array $cabecera, array $detalles, $id_usuario) {
-        $pdo = $this->compraModel->conect();
-        
-        try {
-            // Iniciar Transacción
-            $pdo->beginTransaction();
+    public function registrarCompra(array $cabecera, array $detalles, int $id_usuario, ?string $referencia_solicitud = null): array {
+        $operacion = function () use ($cabecera, $detalles, $id_usuario) {
+            // Validar responsable
+            $responsable = $this->movimientoService->verificarResponsableActivo($id_usuario, false);
+
+            // Validar proveedor
+            $idProveedor = filter_var($cabecera['id_proveedor'] ?? null, FILTER_VALIDATE_INT);
+            if (!$idProveedor || $idProveedor <= 0) {
+                throw InventarioException::validacion(['id_proveedor' => 'Debe seleccionar un proveedor válido.']);
+            }
+            $proveedor = (new ProveedorModel())->find((int)$idProveedor);
+            if (!$proveedor || (int)($proveedor['estado'] ?? 0) !== 1) {
+                throw InventarioException::validacion(['id_proveedor' => 'El proveedor seleccionado no existe o se encuentra inactivo.']);
+            }
+
+            // Validar tipo comprobante
+            $idTipoComp = filter_var($cabecera['id_tipo_comprobante'] ?? null, FILTER_VALIDATE_INT);
+            if (!$idTipoComp || $idTipoComp <= 0) {
+                throw InventarioException::validacion(['id_tipo_comprobante' => 'Debe seleccionar un tipo de comprobante válido.']);
+            }
+
+            $serie = trim((string)($cabecera['serie'] ?? ''));
+            $numero = trim((string)($cabecera['numero'] ?? ''));
+            if ($serie === '' || $numero === '') {
+                throw InventarioException::validacion(['comprobante' => 'La serie y el número de comprobante son obligatorios.']);
+            }
+
+            // Validar duplicado previo de comprobante
+            if ($this->compraModel->existeComprobante($idProveedor, $idTipoComp, $serie, $numero)) {
+                throw new Exception("El comprobante {$serie}-{$numero} ya se encuentra registrado para este proveedor.");
+            }
+
+            if (empty($detalles) || !is_array($detalles)) {
+                throw InventarioException::validacion(['detalles' => 'La compra debe incluir al menos un detalle de producto.']);
+            }
+
+            // Validar lotes y vencimientos
             $this->validarProductosYLotes($detalles);
 
-            // 1. Verificar si ya existe el comprobante (Evitar duplicados)
-            if ($this->compraModel->existeComprobante(
-                $cabecera['id_proveedor'],
-                $cabecera['id_tipo_comprobante'],
-                $cabecera['serie'],
-                $cabecera['numero']
-            )) {
-                throw new Exception("El comprobante ya se encuentra registrado para este proveedor.");
-            }
+            // Validar detalles y calcular cantidades base enteras
+            $detallesNormalizados = [];
+            $idsProductos = [];
+            $totalCalculadoCentimos = 0;
 
-            // 2. Insertar Cabecera de Compra
-            $datosCompra = [
-                'id_proveedor' => $cabecera['id_proveedor'],
-                'id_usuario' => $id_usuario,
-                'id_tipo_comprobante' => $cabecera['id_tipo_comprobante'],
-                'serie' => $cabecera['serie'],
-                'numero' => $cabecera['numero'],
-                'fecha_emision' => $cabecera['fecha_emision'],
-                'fecha_recepcion' => $cabecera['fecha_recepcion'] ?? date('Y-m-d'),
-                'total_documento' => $cabecera['total_documento'],
-                'estado' => 'Confirmada'
-            ];
+            foreach ($detalles as $idx => $det) {
+                $numLinea = $idx + 1;
+                $idProd = filter_var($det['id_producto'] ?? null, FILTER_VALIDATE_INT);
+                if (!$idProd || $idProd <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "El producto en la línea {$numLinea} no es válido."]);
+                }
 
-            if (!$this->compraModel->insert($datosCompra)) {
-                throw new Exception("Error al registrar la cabecera de la compra.");
-            }
+                $idPres = filter_var($det['id_presentacion'] ?? null, FILTER_VALIDATE_INT);
+                if (!$idPres || $idPres <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "La presentación en la línea {$numLinea} no es válida."]);
+                }
 
-            // Obtener el ID de la compra insertada
-            $id_compra = $pdo->lastInsertId();
+                $cantPres = filter_var($det['cantidad_presentaciones'] ?? null, FILTER_VALIDATE_INT);
+                if ($cantPres === false || $cantPres <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "La cantidad de presentaciones en la línea {$numLinea} debe ser un entero mayor a 0."]);
+                }
 
-            // 3. Procesar Detalles de Compra
-            foreach ($detalles as $detalle) {
-                // Calcular cantidad base (unidades)
-                $cantidad_presentaciones = $detalle['cantidad_presentaciones'];
-                $equivalencia = $detalle['equivalencia_aplicada'];
-                $cantidad_base = $cantidad_presentaciones * $equivalencia;
+                $equiv = filter_var($det['equivalencia_aplicada'] ?? null, FILTER_VALIDATE_INT);
+                if ($equiv === false || $equiv <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "La equivalencia aplicada en la línea {$numLinea} debe ser un entero mayor a 0."]);
+                }
 
-                $datosDetalle = [
-                    'id_compra' => $id_compra,
-                    'id_producto' => $detalle['id_producto'],
-                    'id_presentacion' => $detalle['id_presentacion'],
-                    'cantidad_presentaciones' => $cantidad_presentaciones,
-                    'equivalencia_aplicada' => $equivalencia,
-                    'cantidad_base' => $cantidad_base,
-                    'importe_final_linea' => $detalle['importe_final_linea'],
-                    'numero_lote' => $detalle['numero_lote'] ?? null,
-                    'fecha_vencimiento' => $detalle['fecha_vencimiento'] ?? null
+                $cantBase = $cantPres * $equiv;
+                $importeLinea = (float)($det['importe_final_linea'] ?? 0);
+                if ($importeLinea < 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "El importe en la línea {$numLinea} no puede ser negativo."]);
+                }
+
+                $totalCalculadoCentimos += (int)round($importeLinea * 100);
+                $idsProductos[] = (int)$idProd;
+
+                $detallesNormalizados[] = [
+                    'id_producto' => (int)$idProd,
+                    'id_presentacion' => (int)$idPres,
+                    'cantidad_presentaciones' => $cantPres,
+                    'equivalencia_aplicada' => $equiv,
+                    'cantidad_base' => $cantBase,
+                    'importe_final_linea' => $importeLinea,
+                    'numero_lote' => !empty($det['numero_lote']) ? trim((string)$det['numero_lote']) : null,
+                    'fecha_vencimiento' => !empty($det['fecha_vencimiento']) ? trim((string)$det['fecha_vencimiento']) : null,
                 ];
+            }
 
-                if (!$this->detalleCompraModel->insert($datosDetalle)) {
-                    throw new Exception("Error al registrar el detalle del producto ID: " . $detalle['id_producto']);
-                }
-                
-                $id_detalle = $pdo->lastInsertId();
+            $totalDoc = isset($cabecera['total_documento']) ? (float)$cabecera['total_documento'] : ($totalCalculadoCentimos / 100);
 
-                // 4. Actualizar Stock del Producto
-                $producto = $this->productoModel->find($detalle['id_producto']);
-                if (!$producto) {
-                    throw new Exception("Producto no encontrado ID: " . $detalle['id_producto']);
-                }
-
-                $stock_anterior = (int) $producto['stock_actual'];
-                $stock_resultante = $stock_anterior + $cantidad_base;
-
-                if (!$this->productoModel->actualizarStock($detalle['id_producto'], $cantidad_base, 'sumar')) {
-                    throw new Exception("Error al actualizar el stock del producto ID: " . $detalle['id_producto']);
+            return $this->movimientoService->ejecutarEnTransaccion(function (PDO $pdo) use (
+                $cabecera, $detallesNormalizados, $idsProductos, $idProveedor, $idTipoComp, $serie, $numero, $totalDoc, $id_usuario
+            ) {
+                // Bloquear productos en orden ascendente
+                $productosBloqueados = $this->movimientoService->bloquearProductosOrdenados($idsProductos);
+                foreach ($detallesNormalizados as $dn) {
+                    $prod = $productosBloqueados[$dn['id_producto']];
+                    if ($prod['estado'] !== 1) {
+                        throw InventarioException::validacion([
+                            'id_producto' => "El producto '{$prod['nombre']}' se encuentra inactivo y no admite compras."
+                        ]);
+                    }
                 }
 
-                // 5. Registrar Movimiento en Kardex
-                $datosKardex = [
-                    'id_producto' => $detalle['id_producto'],
+                // Verificar comprobante nuevamente bajo bloqueo
+                if ($this->compraModel->existeComprobante($idProveedor, $idTipoComp, $serie, $numero)) {
+                    throw new Exception("El comprobante {$serie}-{$numero} ya se encuentra registrado para este proveedor.");
+                }
+
+                // Insertar cabecera de compra
+                $datosCabecera = [
+                    'id_proveedor' => $idProveedor,
                     'id_usuario' => $id_usuario,
-                    'tipo_movimiento' => 'Ingreso',
-                    'cantidad' => $cantidad_base,
-                    'stock_anterior' => $stock_anterior,
-                    'stock_resultante' => $stock_resultante,
-                    'id_accion_compra' => $id_compra,
-                    'id_detalle_compra' => $id_detalle
+                    'id_tipo_comprobante' => $idTipoComp,
+                    'serie' => $serie,
+                    'numero' => $numero,
+                    'fecha_emision' => $cabecera['fecha_emision'] ?? date('Y-m-d'),
+                    'fecha_recepcion' => $cabecera['fecha_recepcion'] ?? date('Y-m-d'),
+                    'total_documento' => $totalDoc,
+                    'estado' => 'Confirmada'
                 ];
 
-                if (!$this->kardexModel->registrarMovimiento($datosKardex)) {
-                    throw new Exception("Error al registrar el movimiento en Kardex para el producto ID: " . $detalle['id_producto']);
+                $stmtCompra = $pdo->prepare('INSERT INTO compra (id_proveedor, id_usuario, id_tipo_comprobante, serie, numero, fecha_emision, fecha_recepcion, total_documento, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                $stmtCompra->execute([
+                    $datosCabecera['id_proveedor'],
+                    $datosCabecera['id_usuario'],
+                    $datosCabecera['id_tipo_comprobante'],
+                    $datosCabecera['serie'],
+                    $datosCabecera['numero'],
+                    $datosCabecera['fecha_emision'],
+                    $datosCabecera['fecha_recepcion'],
+                    $datosCabecera['total_documento'],
+                    $datosCabecera['estado']
+                ]);
+                $idCompra = (int)$pdo->lastInsertId();
+
+                // Insertar detalles e invocar aplicarMovimiento
+                $stmtDetalle = $pdo->prepare('INSERT INTO detalle_compra (id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea, numero_lote, fecha_vencimiento, version_detalle, es_vigente, id_detalle_origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, NULL)');
+
+                foreach ($detallesNormalizados as $det) {
+                    $stmtDetalle->execute([
+                        $idCompra,
+                        $det['id_producto'],
+                        $det['id_presentacion'],
+                        $det['cantidad_presentaciones'],
+                        $det['equivalencia_aplicada'],
+                        $det['cantidad_base'],
+                        $det['importe_final_linea'],
+                        $det['numero_lote'],
+                        $det['fecha_vencimiento']
+                    ]);
+                    $idDetalle = (int)$pdo->lastInsertId();
+
+                    // Aplicar movimiento de inventario (INCREMENTO canónico)
+                    $this->movimientoService->aplicarMovimiento([
+                        'id_producto' => $det['id_producto'],
+                        'id_usuario' => $id_usuario,
+                        'origen_operacion' => DefinicionMovimiento::ORIGEN_COMPRA,
+                        'sentido_movimiento' => DefinicionMovimiento::SENTIDO_INCREMENTO,
+                        'cantidad' => $det['cantidad_base'],
+                        'id_accion_compra' => $idCompra,
+                        'id_detalle_compra' => $idDetalle,
+                        'lote' => $det['numero_lote'],
+                        'referencia_operacion' => "Compra #{$idCompra} - {$serie}-{$numero}",
+                        'exigir_producto_activo' => true
+                    ]);
                 }
+
+                return [
+                    'status' => true,
+                    'message' => 'Compra registrada correctamente.',
+                    'id_compra' => $idCompra
+                ];
+            });
+        };
+
+        if ($referencia_solicitud !== null && trim($referencia_solicitud) !== '') {
+            $payload = [
+                'cabecera' => $cabecera,
+                'detalles' => $detalles
+            ];
+            $resIdemp = $this->controlSolicitudService->ejecutarConIdempotencia(
+                $id_usuario,
+                DefinicionMovimiento::SOLICITUD_COMPRA,
+                $referencia_solicitud,
+                $payload,
+                function (PDO $pdo) use ($operacion) {
+                    $res = $operacion();
+                    return [
+                        'id_registro' => (int)($res['id_compra'] ?? 0),
+                        'response' => $res
+                    ];
+                }
+            );
+            $resp = $resIdemp['response'];
+            if (!empty($resIdemp['idempotent_replay']) && isset($resp['data']['id_compra'])) {
+                $resp['id_compra'] = $resp['data']['id_compra'];
+            }
+            return $resp;
+        }
+
+        return $operacion();
+    }
+
+    /**
+     * Corrige una compra existente mediante versionamiento inmutable de detalles (version_detalle),
+     * cálculo de diferencia neta por producto (Δ = nuevas - vigentes), validación estricta de stock
+     * y emisión de movimientos Kardex únicamente cuando Δ ≠ 0.
+     */
+    public function corregirCompra(int $id_compra, array $cabecera, array $nuevosDetalles, int $id_usuario, string $motivo = '', ?string $referencia_solicitud = null): array {
+        $motivo = trim($motivo);
+        if ($motivo === '') {
+            throw InventarioException::validacion(['motivo' => 'El motivo de corrección es obligatorio.']);
+        }
+
+        $operacion = function () use ($id_compra, $cabecera, $nuevosDetalles, $id_usuario, $motivo) {
+            // Exigir rol Administrador activo
+            $responsable = $this->movimientoService->verificarResponsableActivo($id_usuario, true);
+
+            // Validar cabecera y comprobante
+            $idProveedor = filter_var($cabecera['id_proveedor'] ?? null, FILTER_VALIDATE_INT);
+            if (!$idProveedor || $idProveedor <= 0) {
+                throw InventarioException::validacion(['id_proveedor' => 'Debe seleccionar un proveedor válido.']);
+            }
+            $idTipoComp = filter_var($cabecera['id_tipo_comprobante'] ?? null, FILTER_VALIDATE_INT);
+            if (!$idTipoComp || $idTipoComp <= 0) {
+                throw InventarioException::validacion(['id_tipo_comprobante' => 'Debe seleccionar un tipo de comprobante válido.']);
+            }
+            $serie = trim((string)($cabecera['serie'] ?? ''));
+            $numero = trim((string)($cabecera['numero'] ?? ''));
+            if ($serie === '' || $numero === '') {
+                throw InventarioException::validacion(['comprobante' => 'La serie y el número son obligatorios.']);
             }
 
-            // Confirmar Transacción
-            $pdo->commit();
-            return ['status' => true, 'message' => 'Compra registrada correctamente.', 'id_compra' => $id_compra];
+            if ($this->compraModel->existeComprobante($idProveedor, $idTipoComp, $serie, $numero, $id_compra)) {
+                throw new Exception("El comprobante {$serie}-{$numero} ya se encuentra registrado para este proveedor en otra compra.");
+            }
 
-        } catch (Exception $e) {
-            // Revertir cambios si hay error
-            $pdo->rollBack();
-            return ['status' => false, 'message' => $e->getMessage()];
+            if (empty($nuevosDetalles) || !is_array($nuevosDetalles)) {
+                throw InventarioException::validacion(['detalles' => 'La corrección debe incluir al menos un detalle de producto.']);
+            }
+
+            $this->validarProductosYLotes($nuevosDetalles);
+
+            // Normalizar nuevos detalles
+            $detallesNormalizados = [];
+            $idsProductosNuevos = [];
+            $unidadesNuevasPorProducto = [];
+            $totalCalculadoCentimos = 0;
+
+            foreach ($nuevosDetalles as $idx => $det) {
+                $numLinea = $idx + 1;
+                $idProd = filter_var($det['id_producto'] ?? null, FILTER_VALIDATE_INT);
+                if (!$idProd || $idProd <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "El producto en la línea {$numLinea} no es válido."]);
+                }
+                $idPres = filter_var($det['id_presentacion'] ?? null, FILTER_VALIDATE_INT);
+                if (!$idPres || $idPres <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "La presentación en la línea {$numLinea} no es válida."]);
+                }
+                $cantPres = filter_var($det['cantidad_presentaciones'] ?? null, FILTER_VALIDATE_INT);
+                if ($cantPres === false || $cantPres <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "La cantidad de presentaciones en la línea {$numLinea} debe ser un entero mayor a 0."]);
+                }
+                $equiv = filter_var($det['equivalencia_aplicada'] ?? null, FILTER_VALIDATE_INT);
+                if ($equiv === false || $equiv <= 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "La equivalencia aplicada en la línea {$numLinea} debe ser un entero mayor a 0."]);
+                }
+                $cantBase = $cantPres * $equiv;
+                $importeLinea = (float)($det['importe_final_linea'] ?? 0);
+                if ($importeLinea < 0) {
+                    throw InventarioException::validacion(["detalle_{$numLinea}" => "El importe en la línea {$numLinea} no puede ser negativo."]);
+                }
+
+                $totalCalculadoCentimos += (int)round($importeLinea * 100);
+                $idsProductosNuevos[] = (int)$idProd;
+                $unidadesNuevasPorProducto[(int)$idProd] = ($unidadesNuevasPorProducto[(int)$idProd] ?? 0) + $cantBase;
+
+                $detallesNormalizados[] = [
+                    'id_producto' => (int)$idProd,
+                    'id_presentacion' => (int)$idPres,
+                    'cantidad_presentaciones' => $cantPres,
+                    'equivalencia_aplicada' => $equiv,
+                    'cantidad_base' => $cantBase,
+                    'importe_final_linea' => $importeLinea,
+                    'numero_lote' => !empty($det['numero_lote']) ? trim((string)$det['numero_lote']) : null,
+                    'fecha_vencimiento' => !empty($det['fecha_vencimiento']) ? trim((string)$det['fecha_vencimiento']) : null,
+                ];
+            }
+
+            $totalDoc = isset($cabecera['total_documento']) ? (float)$cabecera['total_documento'] : ($totalCalculadoCentimos / 100);
+
+            return $this->movimientoService->ejecutarEnTransaccion(function (PDO $pdo) use (
+                $id_compra, $cabecera, $detallesNormalizados, $unidadesNuevasPorProducto,
+                $idProveedor, $idTipoComp, $serie, $numero, $totalDoc, $id_usuario, $motivo
+            ) {
+                // Bloquear cabecera de compra
+                $stmtLockCompra = $pdo->prepare('SELECT * FROM compra WHERE id_compra = ? FOR UPDATE');
+                $stmtLockCompra->execute([$id_compra]);
+                $compraActual = $stmtLockCompra->fetch(PDO::FETCH_ASSOC);
+
+                if (!$compraActual) {
+                    throw new Exception("Compra no encontrada ID: {$id_compra}.");
+                }
+                if ($compraActual['estado'] === 'Anulada') {
+                    throw new Exception("No se puede corregir una compra anulada.");
+                }
+
+                // Obtener detalles vigentes (es_vigente = 1)
+                $detallesVigentes = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra, true);
+                if (empty($detallesVigentes)) {
+                    throw new Exception("La compra no posee detalles vigentes para corregir.");
+                }
+
+                $unidadesVigentesPorProducto = [];
+                $idsProductosVigentes = [];
+                $mapaDetalleVigentePorProducto = [];
+                foreach ($detallesVigentes as $dv) {
+                    $idProd = (int)$dv['id_producto'];
+                    $idsProductosVigentes[] = $idProd;
+                    $unidadesVigentesPorProducto[$idProd] = ($unidadesVigentesPorProducto[$idProd] ?? 0) + (int)$dv['cantidad_base'];
+                    $mapaDetalleVigentePorProducto[$idProd] = (int)$dv['id_detalle_compra'];
+                }
+
+                // Unir todos los IDs de productos involucrados (vigentes + nuevos)
+                $todosIdsProductos = array_values(array_unique(array_merge($idsProductosVigentes, array_keys($unidadesNuevasPorProducto))));
+
+                // Bloquear todos los productos en orden ascendente
+                $productosBloqueados = $this->movimientoService->bloquearProductosOrdenados($todosIdsProductos);
+
+                // Calcular diferencia neta por producto: Δ(P) = U_nueva(P) - U_vigente(P)
+                $deltasPorProducto = [];
+                foreach ($todosIdsProductos as $idProd) {
+                    $uNueva = $unidadesNuevasPorProducto[$idProd] ?? 0;
+                    $uVigente = $unidadesVigentesPorProducto[$idProd] ?? 0;
+                    $delta = $uNueva - $uVigente;
+                    $deltasPorProducto[$idProd] = $delta;
+
+                    // Si la diferencia es negativa, verificar que el stock actual cubra la disminución
+                    if ($delta < 0) {
+                        $stockActual = (int)$productosBloqueados[$idProd]['stock_actual'];
+                        $unidadesARestar = abs($delta);
+                        if ($stockActual - $unidadesARestar < 0) {
+                            $nombre = $productosBloqueados[$idProd]['nombre'];
+                            throw InventarioException::stockInsuficiente(
+                                $idProd,
+                                $stockActual,
+                                $unidadesARestar,
+                                $nombre
+                            );
+                        }
+                    }
+                }
+
+                // Obtener versión máxima y calcular la nueva versión de detalle
+                $maxVersion = $this->detalleCompraModel->obtenerMaxVersion($id_compra);
+                $nuevaVersion = $maxVersion + 1;
+
+                // 1. Marcar detalles vigentes anteriores como reemplazados (es_vigente = 0)
+                $stmtReemplazar = $pdo->prepare('UPDATE detalle_compra SET es_vigente = 0, reemplazado_en = NOW() WHERE id_compra = ? AND es_vigente = 1');
+                $stmtReemplazar->execute([$id_compra]);
+
+                // 2. Insertar nuevos detalles con versión incrementada y enlace a versión anterior
+                $stmtNuevoDetalle = $pdo->prepare('INSERT INTO detalle_compra (id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea, numero_lote, fecha_vencimiento, version_detalle, es_vigente, id_detalle_origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)');
+
+                $mapaNuevoDetallePorProducto = [];
+                foreach ($detallesNormalizados as $det) {
+                    $idProd = $det['id_producto'];
+                    $idDetalleOrigen = $mapaDetalleVigentePorProducto[$idProd] ?? null;
+
+                    $stmtNuevoDetalle->execute([
+                        $id_compra,
+                        $idProd,
+                        $det['id_presentacion'],
+                        $det['cantidad_presentaciones'],
+                        $det['equivalencia_aplicada'],
+                        $det['cantidad_base'],
+                        $det['importe_final_linea'],
+                        $det['numero_lote'],
+                        $det['fecha_vencimiento'],
+                        $nuevaVersion,
+                        $idDetalleOrigen
+                    ]);
+                    $idNuevoDet = (int)$pdo->lastInsertId();
+                    if (!isset($mapaNuevoDetallePorProducto[$idProd])) {
+                        $mapaNuevoDetallePorProducto[$idProd] = $idNuevoDet;
+                    }
+                }
+
+                // 3. Aplicar movimientos en Kardex solo si Δ ≠ 0
+                foreach ($deltasPorProducto as $idProd => $delta) {
+                    if ($delta === 0) {
+                        // Cambio exclusivo de costo, lote o datos de cabecera: NO genera movimiento de stock
+                        continue;
+                    }
+
+                    $idDetalleReferencia = $mapaNuevoDetallePorProducto[$idProd]
+                        ?? $mapaDetalleVigentePorProducto[$idProd];
+
+                    if ($delta > 0) {
+                        // Entrada adicional por corrección
+                        $this->movimientoService->aplicarMovimiento([
+                            'id_producto' => $idProd,
+                            'id_usuario' => $id_usuario,
+                            'origen_operacion' => DefinicionMovimiento::ORIGEN_CORRECCION_COMPRA,
+                            'sentido_movimiento' => DefinicionMovimiento::SENTIDO_INCREMENTO,
+                            'cantidad' => $delta,
+                            'id_accion_compra' => $id_compra,
+                            'id_detalle_compra' => $idDetalleReferencia,
+                            'referencia_operacion' => "Corrección Compra #{$id_compra} v{$nuevaVersion} (+{$delta})",
+                            'justificacion' => $motivo,
+                            'exigir_producto_activo' => false
+                        ]);
+                    } else {
+                        // Salida por reducción en corrección
+                        $unidadesDisminuir = abs($delta);
+                        $this->movimientoService->aplicarMovimiento([
+                            'id_producto' => $idProd,
+                            'id_usuario' => $id_usuario,
+                            'origen_operacion' => DefinicionMovimiento::ORIGEN_CORRECCION_COMPRA,
+                            'sentido_movimiento' => DefinicionMovimiento::SENTIDO_DISMINUCION,
+                            'cantidad' => $unidadesDisminuir,
+                            'id_accion_compra' => $id_compra,
+                            'id_detalle_compra' => $idDetalleReferencia,
+                            'referencia_operacion' => "Corrección Compra #{$id_compra} v{$nuevaVersion} (-{$unidadesDisminuir})",
+                            'justificacion' => $motivo,
+                            'exigir_producto_activo' => false
+                        ]);
+                    }
+                }
+
+                // 4. Actualizar cabecera de la compra
+                $stmtUpdateCabecera = $pdo->prepare('UPDATE compra SET id_proveedor = ?, id_tipo_comprobante = ?, serie = ?, numero = ?, fecha_emision = ?, fecha_recepcion = ?, total_documento = ?, estado = ?, motivo_correccion = ?, fecha_correccion = NOW() WHERE id_compra = ?');
+                $stmtUpdateCabecera->execute([
+                    $idProveedor,
+                    $idTipoComp,
+                    $serie,
+                    $numero,
+                    $cabecera['fecha_emision'] ?? $compraActual['fecha_emision'],
+                    $cabecera['fecha_recepcion'] ?? $compraActual['fecha_recepcion'],
+                    $totalDoc,
+                    'Corregida',
+                    $motivo,
+                    $id_compra
+                ]);
+
+                // 5. Registrar en historial de auditoría
+                $this->compraModel->registrarHistorial($id_compra, $id_usuario, 'Correccion', $motivo, [
+                    'cabecera_anterior' => $compraActual,
+                    'detalles_anteriores' => $detallesVigentes,
+                    'version_generada' => $nuevaVersion,
+                    'deltas' => $deltasPorProducto
+                ]);
+
+                return [
+                    'status' => true,
+                    'message' => 'Compra corregida correctamente.',
+                    'id_compra' => $id_compra,
+                    'version' => $nuevaVersion
+                ];
+            });
+        };
+
+        if ($referencia_solicitud !== null && trim($referencia_solicitud) !== '') {
+            $payload = [
+                'id_compra' => $id_compra,
+                'cabecera' => $cabecera,
+                'detalles' => $nuevosDetalles,
+                'motivo' => $motivo
+            ];
+            $resIdemp = $this->controlSolicitudService->ejecutarConIdempotencia(
+                $id_usuario,
+                DefinicionMovimiento::SOLICITUD_CORRECCION_COMPRA,
+                $referencia_solicitud,
+                $payload,
+                function (PDO $pdo) use ($operacion, $id_compra) {
+                    $res = $operacion();
+                    return [
+                        'id_registro' => $id_compra,
+                        'response' => $res
+                    ];
+                }
+            );
+            return $resIdemp['response'];
         }
+
+        return $operacion();
+    }
+
+    /**
+     * Anula una compra, restando las existencias ingresadas mediante ANULACION_COMPRA (DISMINUCION),
+     * validando que ningún producto quede con stock negativo y previniendo anulaciones duplicadas.
+     */
+    public function anularCompra(int $id_compra, int $id_usuario, string $motivo = '', ?string $referencia_solicitud = null): array {
+        $motivo = trim($motivo);
+        if ($motivo === '') {
+            throw InventarioException::validacion(['motivo' => 'El motivo de anulación es obligatorio.']);
+        }
+
+        $operacion = function () use ($id_compra, $id_usuario, $motivo) {
+            // Exigir rol Administrador activo
+            $responsable = $this->movimientoService->verificarResponsableActivo($id_usuario, true);
+
+            return $this->movimientoService->ejecutarEnTransaccion(function (PDO $pdo) use ($id_compra, $id_usuario, $motivo) {
+                // Bloquear cabecera de la compra
+                $stmtLock = $pdo->prepare('SELECT * FROM compra WHERE id_compra = ? FOR UPDATE');
+                $stmtLock->execute([$id_compra]);
+                $compra = $stmtLock->fetch(PDO::FETCH_ASSOC);
+
+                if (!$compra) {
+                    throw new Exception("Compra no encontrada ID: {$id_compra}.");
+                }
+                if ($compra['estado'] === 'Anulada') {
+                    throw new Exception("La compra ya se encuentra anulada.");
+                }
+
+                // Obtener detalles vigentes
+                $detallesVigentes = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra, true);
+                if (empty($detallesVigentes)) {
+                    throw new Exception("La compra no tiene detalles vigentes para revertir.");
+                }
+
+                // Sumar unidades a revertir por producto y bloquear productos
+                $unidadesRevertirPorProducto = [];
+                $idsProductos = [];
+                foreach ($detallesVigentes as $dv) {
+                    $idProd = (int)$dv['id_producto'];
+                    $idsProductos[] = $idProd;
+                    $unidadesRevertirPorProducto[$idProd] = ($unidadesRevertirPorProducto[$idProd] ?? 0) + (int)$dv['cantidad_base'];
+                }
+                $idsProductos = array_values(array_unique($idsProductos));
+
+                // Bloquear productos en orden ascendente
+                $productosBloqueados = $this->movimientoService->bloquearProductosOrdenados($idsProductos);
+
+                // Verificar suficiencia de stock para todos los productos antes de alterar nada
+                foreach ($unidadesRevertirPorProducto as $idProd => $unidadesRevertir) {
+                    $stockActual = (int)$productosBloqueados[$idProd]['stock_actual'];
+                    if ($stockActual - $unidadesRevertir < 0) {
+                        $nombre = $productosBloqueados[$idProd]['nombre'];
+                        throw InventarioException::stockInsuficiente(
+                            $idProd,
+                            $stockActual,
+                            $unidadesRevertir,
+                            $nombre
+                        );
+                    }
+                }
+
+                // Aplicar movimiento de reversión canónica por cada detalle vigente
+                foreach ($detallesVigentes as $dv) {
+                    $cantBase = (int)$dv['cantidad_base'];
+                    $this->movimientoService->aplicarMovimiento([
+                        'id_producto' => (int)$dv['id_producto'],
+                        'id_usuario' => $id_usuario,
+                        'origen_operacion' => DefinicionMovimiento::ORIGEN_ANULACION_COMPRA,
+                        'sentido_movimiento' => DefinicionMovimiento::SENTIDO_DISMINUCION,
+                        'cantidad' => $cantBase,
+                        'id_accion_compra' => $id_compra,
+                        'id_detalle_compra' => (int)$dv['id_detalle_compra'],
+                        'referencia_operacion' => "Anulación Compra #{$id_compra}",
+                        'justificacion' => $motivo,
+                        'exigir_producto_activo' => false
+                    ]);
+                }
+
+                // Actualizar estado de la compra a Anulada
+                $stmtUpdate = $pdo->prepare('UPDATE compra SET estado = ?, motivo_anulacion = ?, fecha_anulacion = NOW() WHERE id_compra = ?');
+                $stmtUpdate->execute(['Anulada', $motivo, $id_compra]);
+
+                // Registrar en historial de auditoría
+                $this->compraModel->registrarHistorial($id_compra, $id_usuario, 'Anulacion', $motivo, [
+                    'estado_anterior' => $compra['estado'],
+                    'detalles_revertidos' => $detallesVigentes
+                ]);
+
+                return [
+                    'status' => true,
+                    'message' => 'Compra anulada correctamente.'
+                ];
+            });
+        };
+
+        if ($referencia_solicitud !== null && trim($referencia_solicitud) !== '') {
+            $payload = [
+                'id_compra' => $id_compra,
+                'motivo' => $motivo
+            ];
+            $resIdemp = $this->controlSolicitudService->ejecutarConIdempotencia(
+                $id_usuario,
+                DefinicionMovimiento::SOLICITUD_ANULACION_COMPRA,
+                $referencia_solicitud,
+                $payload,
+                function (PDO $pdo) use ($operacion, $id_compra) {
+                    $res = $operacion();
+                    return [
+                        'id_registro' => $id_compra,
+                        'response' => $res
+                    ];
+                }
+            );
+            return $resIdemp['response'];
+        }
+
+        return $operacion();
     }
 
     public function normalizarFiltrosCompras(array $filtros): array {
@@ -156,7 +680,7 @@ class CompraService {
             if ((!is_string($proveedor) && !is_int($proveedor)) || !filter_var($proveedor, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])) {
                 throw new \InvalidArgumentException('Selecciona un proveedor válido.');
             }
-            $registro = (new \Models\ProveedorModel())->find((int)$proveedor);
+            $registro = (new ProveedorModel())->find((int)$proveedor);
             if (!$registro) throw new \InvalidArgumentException('El proveedor seleccionado no existe.');
             $resultado['proveedor'] = (int)$proveedor;
             $resultado['proveedor_nombre'] = $registro['razon_social'];
@@ -194,20 +718,22 @@ class CompraService {
             $resultado['filtros'] = $filtros;
             if ($transaccionPropia) $pdo->commit();
             return $resultado;
-        } catch (\Throwable $error) {
+        } catch (Throwable $error) {
             if ($transaccionPropia && $pdo->inTransaction()) $pdo->rollBack();
             throw $error;
         }
     }
 
-    /** Datos comunes para PDF y Excel: importes originales y cantidades de los detalles actuales. */
+    /**
+     * Datos comunes para PDF y Excel: importes originales y cantidades de los detalles vigentes (es_vigente = 1).
+     */
     public function obtenerReporteCompras(array $filtros, int $id_usuario): array {
         $filtros = $this->normalizarFiltrosCompras($filtros);
         $pdo = $this->compraModel->conect();
         $transaccionPropia = !$pdo->inTransaction();
         try {
             if ($transaccionPropia) $pdo->beginTransaction();
-            $usuario = (new \Models\UsuarioModel())->find($id_usuario);
+            $usuario = (new UsuarioModel())->find($id_usuario);
             if (!$usuario) throw new \InvalidArgumentException('No se encontró el usuario que genera el reporte.');
             $resumen = $this->compraModel->obtenerResumenCompras('', $filtros);
             if ($resumen['compras_con_diferencias'] > 0) {
@@ -245,7 +771,7 @@ class CompraService {
             ];
             if ($transaccionPropia) $pdo->commit();
             return $resultado;
-        } catch (\Throwable $error) {
+        } catch (Throwable $error) {
             if ($transaccionPropia && $pdo->inTransaction()) $pdo->rollBack();
             throw $error;
         }
@@ -254,7 +780,7 @@ class CompraService {
     public function obtenerCompra($id_compra) {
         $compra = $this->compraModel->obtenerCompraPorId($id_compra);
         if ($compra) {
-            $compra['detalles'] = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra);
+            $compra['detalles'] = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra, true);
             $idsProducto = array_column($compra['detalles'], 'id_producto');
             $stocks = $this->productoModel->obtenerStocksPorIds($idsProducto);
             foreach ($compra['detalles'] as &$detalle) {
@@ -267,268 +793,16 @@ class CompraService {
         return $compra;
     }
 
-    /**
-     * Anula una compra, restando el stock ingresado y registrando el movimiento de anulación.
-     */
-    public function anularCompra($id_compra, $id_usuario, $motivo = '') {
-        $motivo = trim($motivo ?? '');
-        if (empty($motivo)) {
-            throw new Exception("El motivo de anulación es obligatorio.");
-        }
-
-        $pdo = $this->compraModel->conect();
-        
-        try {
-            $pdo->beginTransaction();
-
-            $compra = $this->compraModel->find($id_compra);
-            if (!$compra) {
-                throw new Exception("Compra no encontrada.");
-            }
-            if ($compra['estado'] === 'Anulada') {
-                throw new Exception("La compra ya se encuentra anulada.");
-            }
-
-            $detalles = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra);
-
-            foreach ($detalles as $detalle) {
-                $producto = $this->productoModel->find($detalle['id_producto']);
-                if (!$producto) {
-                    throw new Exception("Producto no encontrado ID: " . $detalle['id_producto']);
-                }
-
-                $stock_actual = (int) $producto['stock_actual'];
-                $cantidad_restar = (int) $detalle['cantidad_base'];
-
-                if ($stock_actual - $cantidad_restar < 0) {
-                    throw new Exception("No se puede anular la compra. El producto '" . $producto['nombre'] . "' quedaría con stock negativo.");
-                }
-
-                // Restar stock
-                if (!$this->productoModel->actualizarStock($detalle['id_producto'], $cantidad_restar, 'restar')) {
-                    throw new Exception("Error al restar el stock del producto ID: " . $detalle['id_producto']);
-                }
-
-                $stock_resultante = $stock_actual - $cantidad_restar;
-
-                // Registrar en Kardex
-                $datosKardex = [
-                    'id_producto' => $detalle['id_producto'],
-                    'id_usuario' => $id_usuario,
-                    'tipo_movimiento' => 'Anulacion',
-                    'cantidad' => $cantidad_restar,
-                    'stock_anterior' => $stock_actual,
-                    'stock_resultante' => $stock_resultante,
-                    'id_accion_compra' => $id_compra,
-                    'id_detalle_compra' => $detalle['id_detalle_compra']
-                ];
-
-                if (!$this->kardexModel->registrarMovimiento($datosKardex)) {
-                    throw new Exception("Error al registrar el movimiento de anulación en Kardex.");
-                }
-            }
-
-            // Cambiar estado a Anulada guardando motivo y fecha
-            if (!$this->compraModel->anularCompraConMotivo($id_compra, $motivo)) {
-                throw new Exception("Error al cambiar el estado de la compra.");
-            }
-
-            // Registrar en historial de auditoría
-            $this->compraModel->registrarHistorial($id_compra, $id_usuario, 'Anulacion', $motivo, [
-                'estado_anterior' => $compra['estado'],
-                'detalles' => $detalles
-            ]);
-
-            $pdo->commit();
-            return ['status' => true, 'message' => 'Compra anulada correctamente.'];
-
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            return ['status' => false, 'message' => $e->getMessage()];
-        }
-    }
-
-    /**
-     * Corrige una compra existente. Internamente anula los detalles anteriores y registra los nuevos.
-     */
-    public function corregirCompra($id_compra, array $cabecera, array $nuevosDetalles, $id_usuario, $motivo = '') {
-        $motivo = trim($motivo ?? '');
-        if (empty($motivo)) {
-            throw new Exception("El motivo de corrección es obligatorio.");
-        }
-
-        $pdo = $this->compraModel->conect();
-        
-        try {
-            $pdo->beginTransaction();
-            $this->validarProductosYLotes($nuevosDetalles);
-
-            $compra = $this->compraModel->find($id_compra);
-            if (!$compra) {
-                throw new Exception("Compra no encontrada.");
-            }
-            if ($compra['estado'] === 'Anulada') {
-                throw new Exception("No se puede corregir una compra anulada.");
-            }
-            if ($this->compraModel->existeComprobante(
-                $cabecera['id_proveedor'],
-                $cabecera['id_tipo_comprobante'],
-                $cabecera['serie'],
-                $cabecera['numero'],
-                $id_compra
-            )) {
-                throw new Exception("El comprobante ya se encuentra registrado para este proveedor.");
-            }
-
-            // 1. Revertir el stock de los detalles antiguos (Anulación parcial lógica)
-            $detallesAntiguos = $this->detalleCompraModel->obtenerDetallesPorCompra($id_compra);
-
-            $datosAnteriores = [
-                'cabecera' => [
-                    'id_proveedor' => $compra['id_proveedor'],
-                    'id_tipo_comprobante' => $compra['id_tipo_comprobante'],
-                    'serie' => $compra['serie'],
-                    'numero' => $compra['numero'],
-                    'fecha_emision' => $compra['fecha_emision'],
-                    'fecha_recepcion' => $compra['fecha_recepcion'],
-                    'total_documento' => $compra['total_documento'],
-                    'estado' => $compra['estado']
-                ],
-                'detalles' => $detallesAntiguos
-            ];
-            
-            foreach ($detallesAntiguos as $detalle) {
-                $producto = $this->productoModel->find($detalle['id_producto']);
-                if (!$producto) {
-                    throw new Exception("Producto antiguo no encontrado ID: " . $detalle['id_producto']);
-                }
-
-                $stock_actual = (int) $producto['stock_actual'];
-                $cantidad_restar = (int) $detalle['cantidad_base'];
-
-                if ($stock_actual - $cantidad_restar < 0) {
-                    throw new Exception("No se puede corregir la compra. Revertir el producto '" . $producto['nombre'] . "' dejaría el stock en negativo.");
-                }
-
-                if (!$this->productoModel->actualizarStock($detalle['id_producto'], $cantidad_restar, 'restar')) {
-                    throw new Exception("Error al revertir stock del producto ID: " . $detalle['id_producto']);
-                }
-
-                // Registrar salida por corrección
-                $datosKardex = [
-                    'id_producto' => $detalle['id_producto'],
-                    'id_usuario' => $id_usuario,
-                    'tipo_movimiento' => 'Correccion',
-                    'cantidad' => $cantidad_restar,
-                    'stock_anterior' => $stock_actual,
-                    'stock_resultante' => $stock_actual - $cantidad_restar,
-                    'id_accion_compra' => $id_compra,
-                    'id_detalle_compra' => $detalle['id_detalle_compra']
-                ];
-                if (!$this->kardexModel->registrarMovimiento($datosKardex)) {
-                    throw new Exception("Error al registrar reversión en Kardex.");
-                }
-
-                // Eliminar el detalle antiguo (o se podría hacer un soft delete, pero para mantener integridad limpia los borramos)
-                if (!$this->detalleCompraModel->delete($detalle['id_detalle_compra'])) {
-                    throw new Exception("Error al eliminar el detalle antiguo ID: " . $detalle['id_detalle_compra']);
-                }
-            }
-
-            // 2. Actualizar la cabecera
-            $datosCabeceraUpdate = [
-                'id_proveedor' => $cabecera['id_proveedor'],
-                'id_tipo_comprobante' => $cabecera['id_tipo_comprobante'],
-                'serie' => $cabecera['serie'],
-                'numero' => $cabecera['numero'],
-                'fecha_emision' => $cabecera['fecha_emision'],
-                'fecha_recepcion' => $cabecera['fecha_recepcion'] ?? $compra['fecha_recepcion'],
-                'total_documento' => $cabecera['total_documento'],
-                'estado' => 'Corregida',
-                'motivo_correccion' => $motivo,
-                'fecha_correccion' => date('Y-m-d H:i:s')
-            ];
-
-            if (!$this->compraModel->update($id_compra, $datosCabeceraUpdate)) {
-                throw new Exception("Error al actualizar la cabecera de la compra.");
-            }
-
-            // 3. Procesar e insertar los nuevos detalles
-            foreach ($nuevosDetalles as $detalle) {
-                $cantidad_presentaciones = $detalle['cantidad_presentaciones'];
-                $equivalencia = $detalle['equivalencia_aplicada'];
-                $cantidad_base = $cantidad_presentaciones * $equivalencia;
-
-                $datosDetalle = [
-                    'id_compra' => $id_compra,
-                    'id_producto' => $detalle['id_producto'],
-                    'id_presentacion' => $detalle['id_presentacion'],
-                    'cantidad_presentaciones' => $cantidad_presentaciones,
-                    'equivalencia_aplicada' => $equivalencia,
-                    'cantidad_base' => $cantidad_base,
-                    'importe_final_linea' => $detalle['importe_final_linea'],
-                    'numero_lote' => $detalle['numero_lote'] ?? null,
-                    'fecha_vencimiento' => $detalle['fecha_vencimiento'] ?? null
-                ];
-
-                if (!$this->detalleCompraModel->insert($datosDetalle)) {
-                    throw new Exception("Error al registrar el nuevo detalle del producto ID: " . $detalle['id_producto']);
-                }
-                
-                $id_detalle = $pdo->lastInsertId();
-
-                $producto = $this->productoModel->find($detalle['id_producto']);
-                if (!$producto) {
-                    throw new Exception("Producto nuevo no encontrado ID: " . $detalle['id_producto']);
-                }
-
-                $stock_anterior = (int) $producto['stock_actual'];
-                $stock_resultante = $stock_anterior + $cantidad_base;
-
-                if (!$this->productoModel->actualizarStock($detalle['id_producto'], $cantidad_base, 'sumar')) {
-                    throw new Exception("Error al sumar el stock del nuevo producto ID: " . $detalle['id_producto']);
-                }
-
-                // Registrar ingreso por corrección en Kardex
-                $datosKardex = [
-                    'id_producto' => $detalle['id_producto'],
-                    'id_usuario' => $id_usuario,
-                    'tipo_movimiento' => 'Correccion',
-                    'cantidad' => $cantidad_base,
-                    'stock_anterior' => $stock_anterior,
-                    'stock_resultante' => $stock_resultante,
-                    'id_accion_compra' => $id_compra,
-                    'id_detalle_compra' => $id_detalle
-                ];
-
-                if (!$this->kardexModel->registrarMovimiento($datosKardex)) {
-                    throw new Exception("Error al registrar el nuevo ingreso en Kardex.");
-                }
-            }
-
-            // 4. Registrar en historial de auditoría
-            $this->compraModel->registrarHistorial($id_compra, $id_usuario, 'Correccion', $motivo, $datosAnteriores);
-
-            $pdo->commit();
-            return ['status' => true, 'message' => 'Compra corregida correctamente.'];
-
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            return ['status' => false, 'message' => $e->getMessage()];
-        }
-    }
-
-    private function validarProductosYLotes(array $detalles) {
+    private function validarProductosYLotes(array $detalles): void {
         $lineasPorProductoYLote = [];
 
         foreach ($detalles as $indice => $detalle) {
             $fechaVencimiento = $detalle['fecha_vencimiento'] ?? null;
-            if (!is_string($fechaVencimiento) || $fechaVencimiento === '') {
-                throw new Exception('La fecha de vencimiento es obligatoria en la línea ' . ($indice + 1) . '.');
-            }
-            $fechaValidada = \DateTimeImmutable::createFromFormat('!Y-m-d', $fechaVencimiento);
-            if (!$fechaValidada || $fechaValidada->format('Y-m-d') !== $fechaVencimiento) {
-                throw new Exception('La fecha de vencimiento no es válida en la línea ' . ($indice + 1) . '.');
+            if ($fechaVencimiento !== null && $fechaVencimiento !== '') {
+                $fechaValidada = \DateTimeImmutable::createFromFormat('!Y-m-d', $fechaVencimiento);
+                if (!$fechaValidada || $fechaValidada->format('Y-m-d') !== $fechaVencimiento) {
+                    throw new Exception('La fecha de vencimiento no es válida en la línea ' . ($indice + 1) . '.');
+                }
             }
 
             $idProducto = filter_var($detalle['id_producto'] ?? null, FILTER_VALIDATE_INT);
