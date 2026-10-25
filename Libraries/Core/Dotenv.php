@@ -39,7 +39,9 @@ class Dotenv {
                 $_ENV[$key] = $value;
             }
 
-            putenv("$key=$value");
+            if (getenv($key) === false) {
+                putenv("$key=$value");
+            }
         }
     }
 }
