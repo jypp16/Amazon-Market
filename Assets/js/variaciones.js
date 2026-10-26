@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var productCountElement = document.getElementById('variation-product-count');
     var exportPdfBtn = document.querySelector('.kardex-export-pdf');
     var exportExcelBtn = document.querySelector('.kardex-export-excel');
+    var exportStatus = document.getElementById('kardex-export-status');
 
     var defaultStartDate = startDate.value;
     var defaultEndDate = endDate.value;
@@ -36,6 +37,15 @@ document.addEventListener('DOMContentLoaded', function() {
     var requestSequence = 0;
     var categoriesData = {};
     var categoryLoadError = '';
+
+    if (exportPdfBtn) exportPdfBtn.disabled = true;
+    if (exportExcelBtn) exportExcelBtn.disabled = true;
+
+    function setExportStatus(message, isError) {
+        if (!exportStatus) return;
+        exportStatus.textContent = message;
+        exportStatus.classList.toggle('is-error', Boolean(isError));
+    }
 
     function exportarVariacionesPdf() {
         if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
@@ -390,6 +400,10 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadVariaciones(page) {
         var requestSeq = ++requestSequence;
         page = page || 1;
+        if (exportPdfBtn) exportPdfBtn.disabled = true;
+        if (exportExcelBtn) exportExcelBtn.disabled = true;
+        isExportableCurrent = false;
+        setExportStatus('Consultando variaciones y preparando las exportaciones...', false);
 
         if (!appliedFilters) {
             appliedFilters = {
@@ -458,6 +472,8 @@ document.addEventListener('DOMContentLoaded', function() {
             var items = Array.isArray(data.items) ? data.items : [];
             var resumen = data.resumen || {};
             var paginationData = data.pagination || { total: items.length, page: page, limit: pageSize, pages: 1 };
+            var totalCount = Number(paginationData.total) || 0;
+            isExportableCurrent = Boolean(data.exportable) && totalCount > 0;
 
             renderRows(items);
             renderSummary(resumen);
@@ -465,6 +481,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (exportPdfBtn) exportPdfBtn.disabled = !isExportableCurrent;
             if (exportExcelBtn) exportExcelBtn.disabled = !isExportableCurrent;
+            if (isExportableCurrent) {
+                setExportStatus(totalCount + ' variaciones encontradas. Puedes exportar el reporte en PDF o Excel.', false);
+            } else if (totalCount === 0) {
+                setExportStatus('No hay variaciones para esta consulta. PDF y Excel se habilitarán cuando existan registros.', false);
+            } else {
+                setExportStatus('La consulta encontró variaciones, pero no se pudo habilitar la exportación. Vuelve a consultar.', true);
+            }
 
             setStatus(categoryLoadError, Boolean(categoryLoadError));
         } catch (error) {
@@ -482,6 +505,9 @@ document.addEventListener('DOMContentLoaded', function() {
             pagination.replaceChildren();
             if (exportPdfBtn) exportPdfBtn.disabled = true;
             if (exportExcelBtn) exportExcelBtn.disabled = true;
+            isExportableCurrent = false;
+            currentConsultaRef = null;
+            setExportStatus(error.message || 'No se pudo verificar la disponibilidad de exportación.', true);
             setStatus(error.message, true);
         }
     }

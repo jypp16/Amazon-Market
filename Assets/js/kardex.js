@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var guidance = document.getElementById('kardex-guidance');
     var exportPdfBtn = document.querySelector('.kardex-export-pdf');
     var exportExcelBtn = document.querySelector('.kardex-export-excel');
+    var exportStatus = document.getElementById('kardex-export-status');
 
     var selectedProduct = null;
     var searchSequence = 0;
@@ -32,6 +33,15 @@ document.addEventListener('DOMContentLoaded', function() {
     var currentConsultaRef = null;
     var appliedFilters = null;
     var isExportableCurrent = false;
+
+    if (exportPdfBtn) exportPdfBtn.disabled = true;
+    if (exportExcelBtn) exportExcelBtn.disabled = true;
+
+    function setExportStatus(message, isError) {
+        if (!exportStatus) return;
+        exportStatus.textContent = message;
+        exportStatus.classList.toggle('is-error', Boolean(isError));
+    }
 
     function exportarKardexPdf() {
         if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
@@ -328,6 +338,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadMovements() {
         var requestSequence = ++movementRequestSequence;
+        if (exportPdfBtn) exportPdfBtn.disabled = true;
+        if (exportExcelBtn) exportExcelBtn.disabled = true;
+        isExportableCurrent = false;
+        setExportStatus('Consultando movimientos y preparando las exportaciones...', false);
         var params = new URLSearchParams({
             page: String(currentPage),
             limit: '10'
@@ -394,6 +408,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (exportPdfBtn) exportPdfBtn.disabled = !isExportableCurrent;
             if (exportExcelBtn) exportExcelBtn.disabled = !isExportableCurrent;
+            if (isExportableCurrent) {
+                setExportStatus(totalCount + ' movimientos encontrados. Puedes exportar el reporte en PDF o Excel.', false);
+            } else if (totalCount === 0) {
+                setExportStatus('No hay movimientos para esta consulta. PDF y Excel se habilitarán cuando existan registros.', false);
+            } else {
+                setExportStatus('La consulta encontró movimientos, pero no se pudo habilitar la exportación. Vuelve a consultar.', true);
+            }
 
             setStatus(categoryLoadError, Boolean(categoryLoadError));
         } catch (error) {
@@ -412,6 +433,9 @@ document.addEventListener('DOMContentLoaded', function() {
             nextPageButton.disabled = true;
             if (exportPdfBtn) exportPdfBtn.disabled = true;
             if (exportExcelBtn) exportExcelBtn.disabled = true;
+            isExportableCurrent = false;
+            currentConsultaRef = null;
+            setExportStatus(error.message || 'No se pudo verificar la disponibilidad de exportación.', true);
             setStatus(error.message, true);
         }
     }
