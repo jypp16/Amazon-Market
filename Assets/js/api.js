@@ -91,6 +91,42 @@ const Api = (() => {
         }
     }
 
+    async function download(endpoint, fallbackFilename = 'reporte.pdf') {
+        const response = await fetch(BASE + '/' + endpoint, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/pdf, application/json' }
+        });
+        const contentType = response.headers.get('content-type') || '';
+
+        if (!response.ok || !contentType.includes('application/pdf')) {
+            let data = null;
+            if (contentType.includes('application/json')) {
+                try { data = await response.json(); } catch (_) {}
+            }
+            return {
+                ok: false,
+                status: response.status,
+                data: data || { message: 'El servidor no devolvió un PDF válido.' }
+            };
+        }
+
+        const disposition = response.headers.get('content-disposition') || '';
+        const filenameMatch = disposition.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
+        const filename = filenameMatch ? (filenameMatch[1] || filenameMatch[2]).trim() : fallbackFilename;
+        const objectUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+
+        return { ok: true, status: response.status, filename: filename };
+    }
+
     return {
         referenciaSolicitud: referenciaSolicitud,
         confirmarSolicitud: confirmarSolicitud,
@@ -99,6 +135,7 @@ const Api = (() => {
         post: function(endpoint, body) { return request(endpoint, { method: 'POST', body: body }); },
         put: function(endpoint, body) { return request(endpoint, { method: 'PUT', body: body }); },
         delete: function(endpoint) { return request(endpoint, { method: 'DELETE' }); },
+        download: download,
         cancelar: function() { Object.values(controllers).forEach(function(c) { c.abort(); }); }
     };
 })();

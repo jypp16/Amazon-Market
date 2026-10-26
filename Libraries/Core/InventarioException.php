@@ -183,4 +183,14 @@ class InventarioException extends \RuntimeException {
             ]
         );
     }
+
+    public static function exportacionVacia(string $tipoReporte): self {
+        return new self(
+            'No hay movimientos exportables para esta consulta. Ajuste los filtros y vuelva a consultar.',
+            'EMPTY_EXPORT_NOT_ALLOWED',
+            422,
+            [],
+            ['tipo_reporte' => $tipoReporte]
+        );
+    }
 }

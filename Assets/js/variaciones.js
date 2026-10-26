@@ -37,6 +37,55 @@ document.addEventListener('DOMContentLoaded', function() {
     var categoriesData = {};
     var categoryLoadError = '';
 
+    function exportarVariacionesPdf() {
+        if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
+            setStatus('Primero realiza una consulta exportable de Variaciones.', true);
+            return;
+        }
+
+        var params = new URLSearchParams({
+            tipo: 'variaciones',
+            referencia_consulta: currentConsultaRef,
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
+        });
+        ['q', 'id_categoria', 'id_subcategoria', 'tipo_variacion'].forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
+        if (appliedFilters.sentido) {
+            var sentido = 'TODOS';
+            if (['Incremento', 'INCREMENTO'].includes(appliedFilters.sentido)) sentido = 'INCREMENTO';
+            else if (['Disminución', 'DISMINUCION'].includes(appliedFilters.sentido)) sentido = 'DISMINUCION';
+            params.set('sentido', sentido);
+        }
+
+        exportPdfBtn.disabled = true;
+        setStatus('Generando el PDF de Variaciones…', false);
+        Api.download('reportes/exportar-pdf?' + params.toString(), 'Reporte_Variaciones.pdf')
+            .then(function(result) {
+                if (!result || !result.ok) {
+                    var errorData = (result && result.data) || {};
+                    if (['QUERY_REFERENCE_EXPIRED', 'QUERY_FILTERS_MISMATCH'].includes(errorData.code)) {
+                        currentConsultaRef = null;
+                        isExportableCurrent = false;
+                        if (exportExcelBtn) exportExcelBtn.disabled = true;
+                    }
+                    setStatus(errorData.message || 'No se pudo descargar el PDF de Variaciones.', true);
+                    return;
+                }
+                setStatus('El PDF de Variaciones se descargó correctamente.', false);
+            })
+            .catch(function() {
+                setStatus('No se pudo conectar con el servidor para descargar el PDF de Variaciones.', true);
+            })
+            .finally(function() {
+                exportPdfBtn.disabled = !isExportableCurrent;
+                if (exportExcelBtn && !isExportableCurrent) exportExcelBtn.disabled = true;
+            });
+    }
+
+    if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportarVariacionesPdf);
+
     function setStatus(message, isError) {
         status.textContent = message;
         status.classList.toggle('is-error', Boolean(isError));

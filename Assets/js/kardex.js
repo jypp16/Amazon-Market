@@ -33,10 +33,53 @@ document.addEventListener('DOMContentLoaded', function() {
     var appliedFilters = null;
     var isExportableCurrent = false;
 
+    function exportarKardexPdf() {
+        if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
+            setStatus('Primero realiza una consulta exportable de Kardex.', true);
+            return;
+        }
+
+        var params = new URLSearchParams({
+            tipo: 'kardex',
+            referencia_consulta: currentConsultaRef,
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
+        });
+        ['id_producto', 'id_categoria', 'id_subcategoria'].forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
+
+        exportPdfBtn.disabled = true;
+        setStatus('Generando el PDF del Kardex…', false);
+        Api.download('reportes/exportar-pdf?' + params.toString(), 'Reporte_Kardex.pdf')
+            .then(function(result) {
+                if (!result || !result.ok) {
+                    var errorData = (result && result.data) || {};
+                    if (['QUERY_REFERENCE_EXPIRED', 'QUERY_FILTERS_MISMATCH'].includes(errorData.code)) {
+                        currentConsultaRef = null;
+                        isExportableCurrent = false;
+                        if (exportExcelBtn) exportExcelBtn.disabled = true;
+                    }
+                    setStatus(errorData.message || 'No se pudo descargar el PDF del Kardex.', true);
+                    return;
+                }
+                setStatus('El PDF del Kardex se descargó correctamente.', false);
+            })
+            .catch(function() {
+                setStatus('No se pudo conectar con el servidor para descargar el PDF del Kardex.', true);
+            })
+            .finally(function() {
+                exportPdfBtn.disabled = !isExportableCurrent;
+                if (exportExcelBtn && !isExportableCurrent) exportExcelBtn.disabled = true;
+            });
+    }
+
     var defaultStartDate = startDate.value || (new Date().toISOString().slice(0, 7) + '-01');
     var defaultEndDate = endDate.value || new Date().toISOString().slice(0, 10);
     startDate.value = defaultStartDate;
     endDate.value = defaultEndDate;
+
+    if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportarKardexPdf);
 
     var numberFormat = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 2 });
 

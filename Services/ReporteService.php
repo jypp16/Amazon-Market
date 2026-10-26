@@ -526,6 +526,45 @@ class ReporteService {
         return $items;
     }
 
+    private function reporteCongeladoParaPdf(array $input, int $idUsuario, string $tipo): array {
+        $referencia = $input['referencia_consulta'] ?? null;
+        if (!is_string($referencia) || trim($referencia) === '') {
+            throw InventarioException::validacion(['referencia_consulta' => 'Debe consultar el reporte antes de exportarlo.']);
+        }
+
+        $consulta = $tipo === 'kardex'
+            ? $this->ejecutarReporteKardex($input, $idUsuario)
+            : $this->ejecutarReporteVariaciones($input, $idUsuario);
+
+        if (empty($consulta['exportable'])) {
+            throw InventarioException::exportacionVacia($tipo);
+        }
+
+        $kardexModel = new KardexModel();
+        $snapshot = $kardexModel->obtenerSnapshotPorReferencia(trim($referencia), $tipo);
+        if (!$snapshot) {
+            throw InventarioException::referenciaConsultaExpirada(trim($referencia));
+        }
+        $filas = $kardexModel->obtenerTodosItemsSnapshot((int)$snapshot['id_snapshot']);
+        $consulta['items'] = $tipo === 'kardex'
+            ? $this->formatearItemsKardex($filas)
+            : $this->formatearItemsVariaciones($filas);
+        $consulta['movimientos'] = $consulta['items'];
+        $consulta['exportable'] = true;
+        $consulta['generado_en'] = $kardexModel->obtenerFechaHoraServidor();
+        return $consulta;
+    }
+
+    /** Datos completos de la referencia autorizada para construir el PDF del Kardex. */
+    public function reporteKardexParaPdf(array $input, int $idUsuario): array {
+        return $this->reporteCongeladoParaPdf($input, $idUsuario, 'kardex');
+    }
+
+    /** Datos completos de la referencia autorizada para construir el PDF de Variaciones. */
+    public function reporteVariacionesParaPdf(array $input, int $idUsuario): array {
+        return $this->reporteCongeladoParaPdf($input, $idUsuario, 'variaciones');
+    }
+
     public function ejecutarReporteVariaciones(array $input, ?int $idUsuario = null): array {
         $this->validarTiposFiltrosReporte($input);
         return $this->consultaConsistente(fn() => $this->consultarReporteVariaciones($input, $idUsuario));

@@ -688,6 +688,17 @@ Excluye compras, ventas y sus correcciones o anulaciones.
    }
    ```
 
+#### C. Entrega PDF y conexión de los botones existentes (Fase 8)
+
+- Solicitud exitosa:
+  - `GET /api/reportes/exportar-pdf?tipo=kardex&referencia_consulta=...&fecha_inicio=...&fecha_fin=...`.
+  - `GET /api/reportes/exportar-pdf?tipo=variaciones&referencia_consulta=...&fecha_inicio=...&fecha_fin=...`.
+- El parámetro `tipo` nombra el formato solicitado. En Variaciones, el filtro de clasificación debe enviarse como `tipo_variacion`; ambos parámetros no se mezclan.
+- Se requiere sesión de Administrador activo con permisos de exportación y Kardex/Variaciones. El PDF se arma desde la instantánea asociada a la referencia, incluyendo todas sus filas aunque la consulta de pantalla esté paginada.
+- La respuesta exitosa es binaria `application/pdf`, con nombre `Reporte_Kardex_...pdf` o `Reporte_Variaciones_...pdf`, `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`. La interfaz usa `Api.download()` para guardar el archivo sin abandonar la pantalla y mostrar errores JSON en el estado accesible del reporte.
+- Una referencia de otro usuario conserva el error `403 QUERY_REFERENCE_FORBIDDEN`; una referencia expirada `410 QUERY_REFERENCE_EXPIRED`; filtros distintos `409 QUERY_FILTERS_MISMATCH`; referencia ausente o tipo inválido `422 VALIDATION_ERROR`; un reporte no exportable `422 EMPTY_EXPORT_NOT_ALLOWED`.
+- La marca de tiempo de generación y el nombre del archivo se toman de `CURRENT_TIMESTAMP()` de la base, para que coincidan con la zona horaria de las fechas registradas en los movimientos.
+
 
 ---
 

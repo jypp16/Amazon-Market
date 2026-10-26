@@ -4,6 +4,7 @@ require_once __DIR__ . '/fpdf.php';
 
 class ReportPDF extends FPDF {
 
+    private ?string $fechaGeneracion = null;
     private $empresa = 'AMAZON MARKET';
     private $colorPrimary = [212, 175, 55];
     private $colorDark = [30, 41, 59];
@@ -23,12 +24,25 @@ class ReportPDF extends FPDF {
         $this->empresa = $empresa;
     }
 
+    public function setFechaGeneracion(?string $fecha): void {
+        $this->fechaGeneracion = $fecha;
+    }
+
+    private function timestampGeneracion(): int {
+        if ($this->fechaGeneracion !== null) {
+            $timestamp = strtotime($this->fechaGeneracion);
+            if ($timestamp !== false) return $timestamp;
+        }
+        return time();
+    }
+
     public function Header(): void {
+        $pageWidth = $this->GetPageWidth();
         $this->SetFillColor(255, 255, 255);
-        $this->Rect(0, 0, 210, 297, 'F');
+        $this->Rect(0, 0, $pageWidth, $this->GetPageHeight(), 'F');
 
         $this->SetFillColor($this->colorPrimary[0], $this->colorPrimary[1], $this->colorPrimary[2]);
-        $this->Rect(0, 0, 210, 35, 'F');
+        $this->Rect(0, 0, $pageWidth, 35, 'F');
 
         $this->SetTextColor($this->colorDark[0], $this->colorDark[1], $this->colorDark[2]);
         $this->SetFont('Helvetica', 'B', 18);
@@ -38,7 +52,7 @@ class ReportPDF extends FPDF {
         $this->SetTextColor($this->colorWhite[0], $this->colorWhite[1], $this->colorWhite[2]);
         $this->SetFont('Helvetica', '', 10);
         $this->SetXY(15, 22);
-        $this->Cell(0, 8, date('d/m/Y H:i'), 0, 1, 'L');
+        $this->Cell(0, 8, date('d/m/Y H:i', $this->timestampGeneracion()), 0, 1, 'L');
 
         $this->SetY(42);
     }
@@ -46,13 +60,13 @@ class ReportPDF extends FPDF {
     public function Footer(): void {
         $this->SetY(-20);
         $this->SetDrawColor($this->colorPrimary[0], $this->colorPrimary[1], $this->colorPrimary[2]);
-        $this->Line(15, $this->GetY(), 195, $this->GetY());
+        $this->Line(15, $this->GetY(), $this->GetPageWidth() - 15, $this->GetY());
         $this->Ln(3);
 
         $this->SetFont('Helvetica', 'I', 8);
         $this->SetTextColor($this->colorGray[0], $this->colorGray[1], $this->colorGray[2]);
-        $this->Cell(0, 5, $this->empresa . ' | Reporte generado el ' . date('d/m/Y H:i:s'), 0, 0, 'L');
-        $this->Cell(0, 5, 'Pagina ' . $this->PageNo() . '/{nb}', 0, 0, 'R');
+        $this->Cell($this->GetPageWidth() - 75, 5, $this->empresa . ' | Reporte generado el ' . date('d/m/Y H:i:s', $this->timestampGeneracion()), 0, 0, 'L');
+        $this->Cell(45, 5, 'Pagina ' . $this->PageNo() . '/{nb}', 0, 0, 'R');
     }
 
     public function writeTitle(string $titulo): void {
@@ -85,7 +99,7 @@ class ReportPDF extends FPDF {
         $this->Ln(3);
         $this->SetDrawColor($this->colorLight[0], $this->colorLight[1], $this->colorLight[2]);
         $this->SetLineWidth(0.3);
-        $this->Line(15, $this->GetY(), 195, $this->GetY());
+        $this->Line(15, $this->GetY(), $this->GetPageWidth() - 15, $this->GetY());
         $this->Ln(5);
     }
 
@@ -120,11 +134,13 @@ class ReportPDF extends FPDF {
 
     public function writeKPIRow(array $kpis): void {
         $startX = 15;
-        $availableWidth = 180;
+        $availableWidth = $this->GetPageWidth() - 30;
         $numKpis = count($kpis);
         $gap = 3;
         $boxWidth = ($availableWidth - ($numKpis - 1) * $gap) / $numKpis;
-        $boxWidth = min($boxWidth, 55);
+        if ($this->GetPageWidth() <= 210) {
+            $boxWidth = min($boxWidth, 55);
+        }
 
         $this->SetX($startX);
         foreach ($kpis as $kpi) {
@@ -190,9 +206,13 @@ class ReportPDF extends FPDF {
 
     private function toLatin1(string $txt): string {
         if (mb_check_encoding($txt, 'UTF-8')) {
-            return mb_convert_encoding($txt, 'ISO-8859-1', 'UTF-8');
+            return mb_convert_encoding($txt, 'Windows-1252', 'UTF-8');
         }
         return $txt;
+    }
+
+    public function getUtf8StringWidth(string $s): float {
+        return parent::GetStringWidth($this->toLatin1((string)$s));
     }
 
     public function Cell($w, $h = 0, $txt = '', $border = 0, $ln = 0, $align = '', $fill = false, $link = '') {
@@ -205,10 +225,10 @@ class ReportPDF extends FPDF {
 
     public function fitText(string $txt, float $maxWidth): string {
         $txt = (string) $txt;
-        if ($this->GetStringWidth($txt) <= $maxWidth) {
+        if ($this->getUtf8StringWidth($txt) <= $maxWidth) {
             return $txt;
         }
-        while (mb_strlen($txt) > 0 && $this->GetStringWidth($txt . '...') > $maxWidth) {
+        while (mb_strlen($txt) > 0 && $this->getUtf8StringWidth($txt . '...') > $maxWidth) {
             $txt = mb_substr($txt, 0, -1);
         }
         return $txt . '...';
@@ -223,7 +243,7 @@ class ReportPDF extends FPDF {
         }
 
         $numCols = count($headers);
-        $totalWidth = 180;
+        $totalWidth = $this->GetPageWidth() - 30;
         if (empty($colWidths)) {
             $colWidth = $totalWidth / $numCols;
             $colWidths = array_fill(0, $numCols, $colWidth);
@@ -247,7 +267,7 @@ class ReportPDF extends FPDF {
         $this->SetFont('Helvetica', '', 8);
         $rowNum = 0;
         foreach ($rows as $row) {
-            if ($this->GetY() > 260) {
+            if ($this->GetY() > $this->GetPageHeight() - 37) {
                 $this->AddPage();
                 $this->writeTableHeader($headers, $colWidths);
             }

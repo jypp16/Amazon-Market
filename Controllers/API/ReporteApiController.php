@@ -80,7 +80,14 @@ class ReporteApiController extends ApiController {
                 break;
             case 'exportar-pdf':
                 $this->requirePermission('reportes.exportar');
-                $this->exportarPdf($input);
+                try {
+                    $this->exportarPdf($input);
+                } catch (InventarioException $error) {
+                    $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
+                } catch (\Throwable $error) {
+                    error_log('Error al generar PDF de inventario: ' . $error->getMessage());
+                    $this->sendJsonResponse(['status'=>false,'code'=>'PDF_GENERATION_FAILED','message'=>'No se pudo generar el reporte. Intente nuevamente.'],500);
+                }
                 break;
             case 'exportar-excel':
                 $this->requirePermission('reportes.exportar');
@@ -158,6 +165,31 @@ class ReporteApiController extends ApiController {
             $this->exportarPdfCompras($input);
             return;
         }
+        if (in_array($tipo, ['kardex','variaciones'], true)) {
+            $admin = $this->requireAdminActivo($tipo === 'kardex' ? 'reportes.kardex' : 'reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+            $reporteService = new ReporteService();
+            // "tipo" identifica el archivo solicitado en este endpoint. El tipo
+            // de variación, cuando se filtra, llega en "tipo_variacion".
+            unset($input['tipo']);
+            $datos = $tipo === 'kardex'
+                ? $reporteService->reporteKardexParaPdf($input, (int)$admin['id_usuario'])
+                : $reporteService->reporteVariacionesParaPdf($input, (int)$admin['id_usuario']);
+            if ($tipo === 'kardex') {
+                require_once __DIR__ . '/../../Libraries/PDF/ReporteKardexPDF.php';
+                $contenido = (new \ReporteKardexPDF())->generar($datos, (string)$admin['nombre']);
+            } else {
+                require_once __DIR__ . '/../../Libraries/PDF/ReporteVariacionesPDF.php';
+                $contenido = (new \ReporteVariacionesPDF())->generar($datos, (string)$admin['nombre']);
+            }
+            $fechaNombre = strtotime((string)($datos['generado_en'] ?? ''));
+            $nombre = 'Reporte_' . ucfirst($tipo) . '_' . date('Y-m-d_His', $fechaNombre !== false ? $fechaNombre : time()) . '.pdf';
+            $this->responderPdfInventario($contenido, $nombre);
+        }
+        $tiposAdmitidos = ['ventas','productos-mas-vendidos','productos-menos-vendidos','inventario','clientes','vendedores','categorias','comprobantes','metodos-pago','resumen'];
+        if (!in_array($tipo, $tiposAdmitidos, true)) {
+            throw InventarioException::validacion(['tipo'=>'El tipo de reporte PDF solicitado no es válido.']);
+        }
         $filename = 'Reporte_' . $tipo . '_' . date('Y-m-d_His') . '.pdf';
 
         $pdf = new \ReportPDF();
@@ -204,6 +236,17 @@ class ReporteApiController extends ApiController {
         }
 
         $pdf->Output('D', $filename);
+        exit;
+    }
+
+    protected function responderPdfInventario(string $contenido, string $nombre): void {
+        while (ob_get_level() > 0) ob_end_clean();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: ' . strlen($contenido));
+        echo $contenido;
         exit;
     }
 

@@ -280,6 +280,23 @@ class KardexModel extends Model {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** Recupera todo el orden congelado para la exportación de una consulta autorizada. */
+    public function obtenerTodosItemsSnapshot(int $idSnapshot): array {
+        $sql = "SELECT k.*, item.orden_posicion
+                  FROM reporte_consulta_snapshot_item item
+                  INNER JOIN kardex k ON k.id_kardex = item.id_kardex
+                 WHERE item.id_snapshot = :id_snapshot
+                 ORDER BY item.orden_posicion ASC";
+        $stmt = $this->conect()->prepare($sql);
+        $stmt->execute([':id_snapshot' => $idSnapshot]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Devuelve la marca de tiempo del mismo reloj de base usado por kardex. */
+    public function obtenerFechaHoraServidor(): string {
+        return (string)$this->conect->query('SELECT CURRENT_TIMESTAMP()')->fetchColumn();
+    }
+
     /**
      * Compatibilidad con llamadas legacy a obtenerMovimientos
      */

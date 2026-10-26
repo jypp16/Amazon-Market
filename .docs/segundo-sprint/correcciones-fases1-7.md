@@ -1,6 +1,6 @@
 # Correcciones de las fases 1 a 7
 
-Alcance autorizado: corregir los hallazgos de la auditoría en `amazon_market_sprint2_test`. No ejecutar la fase 10 ni modificar `.env` o la base habitual `amazon_market`. Las fases 8 y 9 siguen pendientes.
+Alcance de esta revisión: corregir los hallazgos de las fases 1–7 en `amazon_market_sprint2_test`. No ejecutar la fase 10 ni modificar `.env` o la base habitual `amazon_market`. La implementación PDF de la Fase 8 se realizó después y está registrada en [plan-fase8-pdf.md](plan-fase8-pdf.md); queda pendiente su revisión visual. La Fase 9 (Excel) y la Fase 10 siguen pendientes.
 
 ## Trabajo y evidencia
 

@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Cierre de Fase 7)
+**Última actualización:** 2026-10-25 (Implementación de Fase 8 PDF; revisión visual pendiente)
 
 ---
 
@@ -17,7 +17,7 @@
 | **Fase 5** | **Bajas y ajustes** | Registro transaccional de Bajas (`Baja por daño`, `Baja por vencimiento` con `justificacion` obligatoria en ambas y lote opcional) y Ajustes por conteo (`Ajuste positivo`, `Ajuste negativo` con `justificacion` obligatoria y validación de `saldo_anterior_esperado`), conectando `Views/Inventario/ajustes.php`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 7** | **Variaciones y nuevo selector de sentido** | Conexión real del Reporte de Variaciones reutilizando selector de sentido (`Todas`, `Entradas`, `Salidas`), consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y de producto único, exclusión de compras y ventas, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | **Completada** |
-| **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`; botones existentes conectados. | `amazon_market_sprint2_test` | **Implementación y 24 comprobaciones aprobadas; revisión visual pendiente** |
 | **Fase 9** | **Excel** | Generación y descarga de Excel para Kardex (incluyendo producto específico sin movimientos) y Variaciones, conservando estilos, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta` y PDF. | `amazon_market_sprint2_test` | Pendiente |
 | **Fase 10** | **Verificación integral y actualización controlada** | Pruebas integrales de extremo a extremo, concurrencia y rendimiento (1 000 movimientos y 5 usuarios simultáneos) sobre `amazon_market_sprint2_test`, seguidas de respaldo, archivado de operaciones antiguas de prueba y sincronización controlada en `amazon_market`. | `amazon_market_sprint2_test` y `amazon_market` | Pendiente |
 
@@ -360,12 +360,14 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 Se corrigieron los saldos con filtros históricos, las validaciones de reportes, las referencias obligatorias y estables de compras/ventas y la paginación del Kardex. La prueba de restricción SQL de la fase 2 ahora verifica el error real de la restricción; antes podía aprobar por columnas inexistentes.
 
-La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La base habitual no se migró. Las fases 8, 9 y 10 continúan pendientes.
+La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La base habitual no se migró. La implementación funcional de la Fase 8 está realizada y probada; su inspección visual final queda pendiente por indisponibilidad del renderizador local. Las fases 9 y 10 continúan pendientes.
 
-## 10. Dependencias para la Fase 8 (PDF)
+## 10. Evidencias y pendiente visual de la Fase 8 (PDF)
 
-- Implementar generación y descarga binaria de PDF en `ReporteApiController::get('exportar-pdf')` para `tipo=kardex` y `tipo=variaciones`.
-- Reutilizar la biblioteca institucional existente (`Libraries/PDF/ReportPDF.php` / `fpdf.php`), respetando colores, márgenes y tipografías del sistema.
-- Validar y leer los datos congelados en `reporte_consulta_snapshot` a través del parámetro obligatorio `referencia_consulta`.
-- Soportar exportación de Kardex para producto específico sin movimientos en el período (`exportable = true`, mostrando saldo inicial real y saldo final de cierre).
-- Bloquear exportación con `422 EMPTY_EXPORT_NOT_ALLOWED` cuando la consulta no tenga resultados en Kardex general o Variaciones (`exportable = false`).
+- `ReporteApiController::get('exportar-pdf')` genera Kardex y Variaciones con autorización Admin y respuestas JSON para referencias/filtros inválidos.
+- `ReporteKardexPDF` y `ReporteVariacionesPDF` reutilizan `ReportPDF`/FPDF, incluyen resumen ejecutivo, filtros, responsable, lotes y detalle de la instantánea.
+- `Assets/js/kardex.js` y `Assets/js/variaciones.js` conectan los botones existentes; `Assets/js/api.js` descarga el binario y reporta los errores API.
+- `tests/sprint2/fase8_pdf_test.php`: **21 PASS / 0 FAIL** sobre `amazon_market_sprint2_test`, incluyendo permiso, propiedad, vencimiento, filtros alterados, congelación, caso individual sin movimientos, bloqueos 422 para consultas generales vacías y compatibilidad de un PDF A4 vertical existente.
+- `tests/sprint2/fase8_frontend_download_test.js`: **3 PASS / 0 FAIL**, comprobando la acción de ambos botones, el nombre/descarga del binario y el manejo de error JSON.
+- El PDF toma fecha y hora de la base de datos para que el encabezado y nombre de archivo coincidan con el reloj local de los movimientos.
+- Pendiente: renderizar y revisar visualmente ambos PDF. El entorno no tiene renderizador disponible y el canal nativo de Windows Computer Use falló al iniciarse; sí se validaron binario, cabeceras y extracción de texto.
