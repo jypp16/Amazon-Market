@@ -526,7 +526,7 @@ class ReporteService {
         return $items;
     }
 
-    private function reporteCongeladoParaPdf(array $input, int $idUsuario, string $tipo): array {
+    private function reporteCongeladoParaExportacion(array $input, int $idUsuario, string $tipo): array {
         $referencia = $input['referencia_consulta'] ?? null;
         if (!is_string($referencia) || trim($referencia) === '') {
             throw InventarioException::validacion(['referencia_consulta' => 'Debe consultar el reporte antes de exportarlo.']);
@@ -557,12 +557,22 @@ class ReporteService {
 
     /** Datos completos de la referencia autorizada para construir el PDF del Kardex. */
     public function reporteKardexParaPdf(array $input, int $idUsuario): array {
-        return $this->reporteCongeladoParaPdf($input, $idUsuario, 'kardex');
+        return $this->reporteCongeladoParaExportacion($input, $idUsuario, 'kardex');
     }
 
     /** Datos completos de la referencia autorizada para construir el PDF de Variaciones. */
     public function reporteVariacionesParaPdf(array $input, int $idUsuario): array {
-        return $this->reporteCongeladoParaPdf($input, $idUsuario, 'variaciones');
+        return $this->reporteCongeladoParaExportacion($input, $idUsuario, 'variaciones');
+    }
+
+    /** Datos completos de la referencia autorizada para construir el Excel del Kardex. */
+    public function reporteKardexParaExcel(array $input, int $idUsuario): array {
+        return $this->reporteCongeladoParaExportacion($input, $idUsuario, 'kardex');
+    }
+
+    /** Datos completos de la referencia autorizada para construir el Excel de Variaciones. */
+    public function reporteVariacionesParaExcel(array $input, int $idUsuario): array {
+        return $this->reporteCongeladoParaExportacion($input, $idUsuario, 'variaciones');
     }
 
     public function ejecutarReporteVariaciones(array $input, ?int $idUsuario = null): array {

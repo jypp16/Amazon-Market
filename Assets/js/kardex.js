@@ -74,12 +74,54 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     }
 
+    function exportarKardexExcel() {
+        if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
+            setStatus('Primero realiza una consulta exportable de Kardex.', true);
+            return;
+        }
+
+        var params = new URLSearchParams({
+            tipo: 'kardex',
+            referencia_consulta: currentConsultaRef,
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
+        });
+        ['id_producto', 'id_categoria', 'id_subcategoria'].forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
+
+        exportExcelBtn.disabled = true;
+        setStatus('Generando el Excel del Kardex…', false);
+        Api.downloadExcel('reportes/exportar-excel?' + params.toString(), 'Reporte_Kardex.xlsx')
+            .then(function(result) {
+                if (!result || !result.ok) {
+                    var errorData = (result && result.data) || {};
+                    if (['QUERY_REFERENCE_EXPIRED', 'QUERY_FILTERS_MISMATCH'].includes(errorData.code)) {
+                        currentConsultaRef = null;
+                        isExportableCurrent = false;
+                        if (exportPdfBtn) exportPdfBtn.disabled = true;
+                    }
+                    setStatus(errorData.message || 'No se pudo descargar el Excel del Kardex.', true);
+                    return;
+                }
+                setStatus('El Excel del Kardex se descargó correctamente.', false);
+            })
+            .catch(function() {
+                setStatus('No se pudo conectar con el servidor para descargar el Excel del Kardex.', true);
+            })
+            .finally(function() {
+                exportExcelBtn.disabled = !isExportableCurrent;
+                if (exportPdfBtn && !isExportableCurrent) exportPdfBtn.disabled = true;
+            });
+    }
+
     var defaultStartDate = startDate.value || (new Date().toISOString().slice(0, 7) + '-01');
     var defaultEndDate = endDate.value || new Date().toISOString().slice(0, 10);
     startDate.value = defaultStartDate;
     endDate.value = defaultEndDate;
 
     if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportarKardexPdf);
+    if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportarKardexExcel);
 
     var numberFormat = new Intl.NumberFormat('es-PE', { maximumFractionDigits: 2 });
 

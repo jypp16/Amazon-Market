@@ -1,6 +1,6 @@
 # Correcciones de las fases 1 a 7
 
-Alcance de esta revisión: corregir los hallazgos de las fases 1–7 en `amazon_market_sprint2_test`. No ejecutar la fase 10 ni modificar `.env` o la base habitual `amazon_market`. La implementación PDF de la Fase 8 se realizó después y está registrada en [plan-fase8-pdf.md](plan-fase8-pdf.md); queda pendiente su revisión visual. La Fase 9 (Excel) y la Fase 10 siguen pendientes.
+Alcance de esta revisión: corregir los hallazgos de las fases 1–7 en `amazon_market_sprint2_test`. No ejecutar la fase 10 ni modificar `.env` o la base habitual `amazon_market`. La implementación PDF de la Fase 8 se realizó después y está registrada en [plan-fase8-pdf.md](plan-fase8-pdf.md); queda pendiente su revisión visual. La Fase 9 (Excel) se completó y documentó en [plan-fase9-excel.md](plan-fase9-excel.md); la Fase 10 sigue pendiente.
 
 ## Trabajo y evidencia
 

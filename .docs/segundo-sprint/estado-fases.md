@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Implementación de Fase 8 PDF; revisión visual pendiente)
+**Última actualización:** 2026-10-25 (Fase 9 Excel implementada y verificada)
 
 ---
 
@@ -18,7 +18,7 @@
 | **Fase 6** | **Kardex** | Consulta paginada de todos los orígenes que afectan existencias, cálculo de `resumen_producto`, clasificación histórica, consistencia mediante `referencia_consulta` y conexión de `Views/Reporte/kardex.php`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 7** | **Variaciones y nuevo selector de sentido** | Conexión real del Reporte de Variaciones reutilizando selector de sentido (`Todas`, `Entradas`, `Salidas`), consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y de producto único, exclusión de compras y ventas, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`; botones existentes conectados. | `amazon_market_sprint2_test` | **Implementación y 24 comprobaciones aprobadas; revisión visual pendiente** |
-| **Fase 9** | **Excel** | Generación y descarga de Excel para Kardex (incluyendo producto específico sin movimientos) y Variaciones, conservando estilos, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta` y PDF. | `amazon_market_sprint2_test` | Pendiente |
+| **Fase 9** | **Excel** | Generación y descarga de Excel para Kardex (incluyendo producto específico sin movimientos) y Variaciones, conservando estilos, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta` y PDF. | `amazon_market_sprint2_test` | **Implementación y 24 comprobaciones aprobadas; revisión visual en Excel pendiente** |
 | **Fase 10** | **Verificación integral y actualización controlada** | Pruebas integrales de extremo a extremo, concurrencia y rendimiento (1 000 movimientos y 5 usuarios simultáneos) sobre `amazon_market_sprint2_test`, seguidas de respaldo, archivado de operaciones antiguas de prueba y sincronización controlada en `amazon_market`. | `amazon_market_sprint2_test` y `amazon_market` | Pendiente |
 
 ---
@@ -360,7 +360,7 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 Se corrigieron los saldos con filtros históricos, las validaciones de reportes, las referencias obligatorias y estables de compras/ventas y la paginación del Kardex. La prueba de restricción SQL de la fase 2 ahora verifica el error real de la restricción; antes podía aprobar por columnas inexistentes.
 
-La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La base habitual no se migró. La implementación funcional de la Fase 8 está realizada y probada; su inspección visual final queda pendiente por indisponibilidad del renderizador local. Las fases 9 y 10 continúan pendientes.
+La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La base habitual no se migró. La implementación funcional de la Fase 8 está realizada y probada; su inspección visual final queda pendiente por indisponibilidad del renderizador local. La Fase 9 se implementó y verificó el 25/10/2026; la Fase 10 continúa pendiente.
 
 ## 10. Evidencias y pendiente visual de la Fase 8 (PDF)
 
@@ -371,3 +371,14 @@ La verificación y los comandos del entorno web aislado están en [correcciones-
 - `tests/sprint2/fase8_frontend_download_test.js`: **3 PASS / 0 FAIL**, comprobando la acción de ambos botones, el nombre/descarga del binario y el manejo de error JSON.
 - El PDF toma fecha y hora de la base de datos para que el encabezado y nombre de archivo coincidan con el reloj local de los movimientos.
 - Pendiente: renderizar y revisar visualmente ambos PDF. El entorno no tiene renderizador disponible y el canal nativo de Windows Computer Use falló al iniciarse; sí se validaron binario, cabeceras y extracción de texto.
+
+## 11. Evidencias de cierre de la Fase 9 (Excel)
+
+- `ReporteApiController::get('exportar-excel')` atiende Kardex y Variaciones con permisos de Administrador activo, validación de referencia y respuestas JSON para errores.
+- `ReporteService` entrega todos los elementos de la instantánea congelada. `ReporteKardexExcel` y `ReporteVariacionesExcel` crean dos hojas ordenadas: Resumen ejecutivo y Detalle, con colores institucionales azul marino/dorado.
+- Los botones Excel ya existentes en `Views/Reporte/kardex.php` y `Views/Reporte/variaciones.php` envían los filtros aplicados y la referencia actual; `Assets/js/api.js` valida MIME, firma ZIP y entradas OOXML mínimas antes de descargar.
+- `tests/sprint2/fase9_excel_test.php`: **20 PASS / 0 FAIL** sobre `amazon_market_sprint2_test`, incluyendo más de una página de movimientos, instantánea inmune a movimientos posteriores, producto sin actividad, desglose por unidades, igualdad de cifras/detalle con PDF, filtros, permisos y errores 403/409/410/422.
+- `tests/sprint2/fase9_frontend_download_test.js`: **4 PASS / 0 FAIL**, verificando filtros y referencia, descarga, errores JSON, archivo inválido y deshabilitación tras vencer o no coincidir la consulta.
+- Regresiones ejecutadas: Fases 2–7 **105 PASS / 0 FAIL**; Fase 8 **24 PASS / 0 FAIL**; HTTP **22**, reportes **11**, referencias **12** e interfaz **2**, todas sin fallos.
+- Aislamiento comprobado después de las suites: `amazon_market` sigue con 107 productos, 106 con stock, 98 ventas, 4 compras y 26 movimientos; `amazon_market_sprint2_test` quedó con 107 productos, stock en cero, sin ventas/compras/movimientos y sin productos de prueba F9.
+- No se cambió esquema ni se creó script SQL. La Fase 10 sigue pendiente; la base habitual no fue modificada.

@@ -337,6 +337,10 @@ class ReporteApiController extends ApiController {
             $this->requireAdminActivo('reportes.variaciones');
             $this->requireAdminActivo('reportes.exportar');
         }
+        if (in_array($tipo, ['kardex','variaciones'], true)) {
+            $this->exportarExcelInventario($tipo, $input);
+            return;
+        }
         if ($tipo === 'compras') {
             $this->exportarExcelCompras($input);
             return;
@@ -401,6 +405,44 @@ class ReporteApiController extends ApiController {
         header('Cache-Control: no-cache, must-revalidate');
         readfile($file);
         unlink($file);
+        exit;
+    }
+
+    private function exportarExcelInventario(string $tipo, array $input): void {
+        $admin=$this->requireAdminActivo($tipo==='kardex'?'reportes.kardex':'reportes.variaciones');
+        $this->requireAdminActivo('reportes.exportar');
+        try {
+            unset($input['tipo']);
+            $service=new ReporteService();
+            $datos=$tipo==='kardex'
+                ? $service->reporteKardexParaExcel($input,(int)$admin['id_usuario'])
+                : $service->reporteVariacionesParaExcel($input,(int)$admin['id_usuario']);
+            if ($tipo==='kardex') {
+                require_once __DIR__.'/../../Libraries/Excel/ReporteKardexExcel.php';
+                $contenido=(new \ReporteKardexExcel())->generar($datos,(string)$admin['nombre']);
+            } else {
+                require_once __DIR__.'/../../Libraries/Excel/ReporteVariacionesExcel.php';
+                $contenido=(new \ReporteVariacionesExcel())->generar($datos,(string)$admin['nombre']);
+            }
+            $fecha=strtotime((string)($datos['generado_en']??''));
+            $nombre='Reporte_'.ucfirst($tipo).'_'.date('Y-m-d_His',$fecha!==false?$fecha:time()).'.xlsx';
+            $this->responderExcelInventario($contenido,$nombre);
+        } catch (InventarioException $error) {
+            $this->sendJsonResponse($error->toApiResponse(),$error->getHttpStatus());
+        } catch (\Throwable $error) {
+            error_log('Excel de '.$tipo.' de inventario: '.$error->getMessage());
+            $this->sendJsonResponse(['status'=>false,'code'=>'EXCEL_GENERATION_FAILED','message'=>'No se pudo generar el reporte Excel. Intente nuevamente.'],500);
+        }
+    }
+
+    protected function responderExcelInventario(string $contenido, string $nombre): void {
+        while (ob_get_level()>0) ob_end_clean();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="'.$nombre.'"');
+        header('Cache-Control: private, no-store, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: '.strlen($contenido));
+        echo $contenido;
         exit;
     }
 

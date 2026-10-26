@@ -127,6 +127,63 @@ const Api = (() => {
         return { ok: true, status: response.status, filename: filename };
     }
 
+    async function downloadExcel(endpoint, fallbackFilename = 'reporte.xlsx') {
+        const expectedType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        const response = await fetch(BASE + '/' + endpoint, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'Accept': expectedType + ', application/json' }
+        });
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+        if (!response.ok || !contentType.includes(expectedType)) {
+            let data = null;
+            if (contentType.includes('application/json')) {
+                try { data = await response.json(); } catch (_) {}
+            }
+            return {
+                ok: false,
+                status: response.status,
+                data: data || { message: 'El servidor no devolvió un Excel válido.' }
+            };
+        }
+
+        const blob = await response.blob();
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const contieneTexto = function(texto) {
+            const esperado = Array.from(texto, caracter => caracter.charCodeAt(0));
+            for (let i = 0; i <= bytes.length - esperado.length; i++) {
+                let coincide = true;
+                for (let j = 0; j < esperado.length; j++) {
+                    if (bytes[i + j] !== esperado[j]) { coincide = false; break; }
+                }
+                if (coincide) return true;
+            }
+            return false;
+        };
+        const zipValido = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b
+            && contieneTexto('[Content_Types].xml') && contieneTexto('xl/workbook.xml');
+        if (!zipValido) {
+            return { ok: false, status: response.status, data: { code: 'INVALID_XLSX', message: 'El archivo recibido no es un libro Excel válido.' } };
+        }
+
+        const disposition = response.headers.get('content-disposition') || '';
+        const filenameMatch = disposition.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
+        const rawFilename = filenameMatch ? (filenameMatch[1] || filenameMatch[2]).trim() : fallbackFilename;
+        const filename = rawFilename.replace(/[\\/\r\n]/g, '_');
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+
+        return { ok: true, status: response.status, filename: filename };
+    }
+
     return {
         referenciaSolicitud: referenciaSolicitud,
         confirmarSolicitud: confirmarSolicitud,
@@ -136,6 +193,7 @@ const Api = (() => {
         put: function(endpoint, body) { return request(endpoint, { method: 'PUT', body: body }); },
         delete: function(endpoint) { return request(endpoint, { method: 'DELETE' }); },
         download: download,
+        downloadExcel: downloadExcel,
         cancelar: function() { Object.values(controllers).forEach(function(c) { c.abort(); }); }
     };
 })();

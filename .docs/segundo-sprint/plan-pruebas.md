@@ -87,8 +87,8 @@
 | **CP-HU09-03** | Fase 6 | `Acuerdo 15` | Consulta de Kardex general (sin seleccionar un producto específico). | Lista los movimientos paginados de todos los productos, oculta `#kardex-product-summary` (`resumen_producto.aplicable = false`) y **no suma existencias de productos diferentes** como un saldo global. | **Aprobado en Fase 6** (`F6-GEN-01`) |
 | **CP-HU09-04** | Fase 6 | `Acuerdo 14` / `RF-09.2` | Verificación de orígenes incluidos en Kardex. | Incluye compras, anulaciones/correcciones de compra, ventas, anulaciones de venta, bajas por daño/vencimiento y ajustes positivos/negativos. | **Aprobado en Fase 6** (`F6-SALDO-01`) |
 | **CP-HU09-05** | Fase 6 | `Acuerdo 10` / `CA-09.6` | Se registra movimiento de un producto bajo Categoría A / Subcategoría A1; luego se cambia en catálogo a Categoría B / Subcategoría B1 y se desactiva (`estado = 0`). | Al filtrar en Kardex por Categoría A / Subcategoría A1 aparece el movimiento con su clasificación histórica A/A1; al filtrar por B/B1 no aparece ese movimiento previo; el producto inactivo es buscable en `GET /api/productos?modo=reporte`. | **Aprobado en Fase 6** (`F6-HIST-CAT-01`, `F6-INACT-01`) |
-| **CP-HU09-06** | Fases 6, 8 y 9 | **Exportación Kardex individual sin movimientos** | Producto específico (`id_producto = 12`) tiene `saldo_inicial = 25` al inicio del período y **0 movimientos** en el rango de fechas consultado; se solicita exportar PDF y Excel. | `exportable = true`; tanto `exportar-pdf?tipo=kardex` como `exportar-excel?tipo=kardex` generan el archivo (`200 OK`) mostrando el resumen del producto con `Saldo inicial = 25`, `Entradas = 0`, `Salidas = 0` y `Saldo final (cierre) = 25`. | API aprobada en Fase 6; **PDF aprobado en Fase 8** (`F8-PDF-17`); Excel pendiente Fase 9 |
-| **CP-HU09-07** | Fases 6, 8 y 9 | **Exportación Kardex general sin resultados** | Consulta de Kardex general (sin `id_producto`) en un rango donde `total = 0`; se intenta exportar PDF o Excel. | `exportable = false`; los endpoints de exportación devuelven `422 Unprocessable Entity` (`EMPTY_EXPORT_NOT_ALLOWED`). | API aprobada en Fase 6; **PDF aprobado en Fase 8** (`F8-PDF-18`); Excel pendiente Fase 9 |
+| **CP-HU09-06** | Fases 6, 8 y 9 | **Exportación Kardex individual sin movimientos** | Producto específico (`id_producto = 12`) tiene `saldo_inicial = 25` al inicio del período y **0 movimientos** en el rango de fechas consultado; se solicita exportar PDF y Excel. | `exportable = true`; tanto `exportar-pdf?tipo=kardex` como `exportar-excel?tipo=kardex` generan el archivo (`200 OK`) mostrando el resumen del producto con `Saldo inicial = 25`, `Entradas = 0`, `Salidas = 0` y `Saldo final (cierre) = 25`. | **Aprobado**: API Fase 6, PDF Fase 8 (`F8-PDF-17`) y Excel Fase 9 (`F9-18`) |
+| **CP-HU09-07** | Fases 6, 8 y 9 | **Exportación Kardex general sin resultados** | Consulta de Kardex general (sin `id_producto`) en un rango donde `total = 0`; se intenta exportar PDF o Excel. | `exportable = false`; los endpoints de exportación devuelven `422 Unprocessable Entity` (`EMPTY_EXPORT_NOT_ALLOWED`). | **Aprobado**: API Fase 6, PDF Fase 8 (`F8-PDF-18`) y Excel Fase 9 (`F9-19`) |
 
 ---
 
@@ -101,7 +101,7 @@
 | **CP-HU10-03** | Fase 7 | **Combinaciones de `tipo_variacion` y `sentido` (`AND`)** | Se prueban combinaciones: 1) `tipo_variacion = "Ajuste positivo"` + `sentido = "INCREMENTO"` (devuelve ajustes positivos); 2) `tipo_variacion = "Baja por vencimiento"` + `sentido = "INCREMENTO"` (`Entradas`). | En la combinación 2 (`Baja por vencimiento` + `Entradas`), el servidor aplica `AND`, devuelve conjunto vacío (`items: []`, `total_operaciones: 0`, `exportable: false`) y **no modifica automáticamente ningún filtro**. | **Aprobado en Fase 7** (`F7-AND-COMB-01`, `F7-AND-EMPTY-01`) |
 | **CP-HU10-04** | Fase 7 | **Resúmenes reales de la vista `variaciones.php`** | 1) Consulta con múltiples productos; 2) Consulta filtrada a un único producto. | En vista general puebla `Total de operaciones` (`#variation-total-operations`), `Productos con variaciones` (`#variation-product-count`) y la tabla desplegable `#variation-product-breakdown` (`Producto`, `Operaciones`, `Incrementos`, `Disminuciones`). En vista de producto único muestra `#variation-single-product-summary` con `Total de operaciones`, `Incrementos` (`+N`) y `Disminuciones` (`−N`). | **Aprobado en Fase 7** (`F7-RESUMEN-MULTI-01`, `F7-RESUMEN-SINGLE-01`) |
 | **CP-HU10-05** | Fase 7 | **Conservación de filtros al paginar** | Consulta en Variaciones con `tipo_variacion = "Baja por daño"`, `sentido = "DISMINUCION"`, categoría histórica y fechas que producen 3 páginas; el usuario navega a las páginas 2 y 3. | Al cambiar de página se conservan todos los filtros activos (`tipo_variacion`, `sentido`, fechas, clasificación histórica, búsqueda) y la misma `referencia_consulta`. | **Aprobado en Fase 7** (`F7-PAGE-CONSIST-01`) |
-| **CP-HU10-06** | Fases 7, 8 y 9 | **Exportación Variaciones sin resultados** | Consulta de Variaciones sin coincidencias (`total_operaciones = 0`) e intento de exportar PDF o Excel. | `exportable = false`; la solicitud de exportación responde `422 Unprocessable Entity` (`EMPTY_EXPORT_NOT_ALLOWED`). | API aprobada en Fase 7; **PDF aprobado en Fase 8** (`F8-PDF-19`); Excel pendiente Fase 9 |
+| **CP-HU10-06** | Fases 7, 8 y 9 | **Exportación Variaciones sin resultados** | Consulta de Variaciones sin coincidencias (`total_operaciones = 0`) e intento de exportar PDF o Excel. | `exportable = false`; la solicitud de exportación responde `422 Unprocessable Entity` (`EMPTY_EXPORT_NOT_ALLOWED`). | **Aprobado**: API Fase 7, PDF Fase 8 (`F8-PDF-19`) y Excel Fase 9 (`F9-20`) |
 
 ---
 
@@ -109,10 +109,10 @@
 
 | ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
 |---|---|---|---|---|---|
-| **CP-CONS-01** | Fases 6–9 | **Consulta consistente frente a confirmaciones concurrentes** | Administrador A ejecuta `Consultar` en Kardex o Variaciones (obtiene `referencia_consulta` con 15 filas en 2 páginas). Inmediatamente después, Administrador B confirma una nueva baja o venta que entraría en el mismo rango de fechas. Administrador A pasa a la página 2 y luego exporta PDF y Excel. | La página 2, el resumen, el PDF y el Excel de Administrador A contienen **exactamente las mismas 15 filas y los mismos totales** congelados en su `referencia_consulta`, sin incluir la operación posterior de Administrador B. | **Aprobado en Fases 6 y 7** (`F6-SNAP-IMMUN-01`, `F7-SNAP-IMMUN-01`) |
-| **CP-CONS-02** | Fases 6–9 | **Imposibilidad de alterar filtros conservando la misma `referencia_consulta`** | El cliente envía una petición de página 2 o de exportación PDF/Excel reutilizando una `referencia_consulta` previa pero cambiando `sentido`, `tipo_variacion`, `id_producto` o `fecha_inicio`. | `409 Conflict` (`QUERY_FILTERS_MISMATCH`) rechazando la petición e indicando que debe ejecutarse una nueva consulta. | **Aprobado en Fases 6–8** (`F6-REF-MISMATCH-01`, `F7-SNAP-MISMATCH-01`, `F8-PDF-15`); Excel pendiente |
-| **CP-CONS-03** | Fases 6–9 | **Propiedad de usuario y expiración de `referencia_consulta`** | 1) Otro administrador intenta usar la `referencia_consulta` de un usuario distinto; 2) Se intenta paginar o exportar con una `referencia_consulta` cuyo `expira_en` ya venció. | 1) `403 Forbidden` (`QUERY_REFERENCE_FORBIDDEN`); 2) `410 Gone` (`QUERY_REFERENCE_EXPIRED`). | **Aprobado en Fases 6–8** (`F6-REF-EXPIRE-01`, `F6-REF-FORBID-01`, `F7-SNAP-EXPIRE-01`, `F7-SNAP-FORBID-01`, `F8-PDF-09/16`); Excel pendiente |
-| **CP-CONS-04** | Fases 8 y 9 | **Igualdad exacta entre consulta, resumen, PDF y Excel** | Se consulta Kardex y Variaciones con filtros de `tipo_variacion`, `sentido`, clasificación histórica y fechas, y se exporta a PDF y Excel. | Los filtros mostrados en el encabezado, las cifras del resumen ejecutivo y todas las filas del detalle coinciden al 100 % entre la consulta web, el archivo PDF y el archivo Excel. | PDF: instantánea, resumen y detalles comprobados con Fase 8 (`F8-PDF-06/13`); comparación completa y Excel pendientes |
+| **CP-CONS-01** | Fases 6–9 | **Consulta consistente frente a confirmaciones concurrentes** | Administrador A ejecuta `Consultar` en Kardex o Variaciones (obtiene `referencia_consulta` con 15 filas en 2 páginas). Inmediatamente después, Administrador B confirma una nueva baja o venta que entraría en el mismo rango de fechas. Administrador A pasa a la página 2 y luego exporta PDF y Excel. | La página 2, el resumen, el PDF y el Excel de Administrador A contienen **exactamente las mismas 15 filas y los mismos totales** congelados en su `referencia_consulta`, sin incluir la operación posterior de Administrador B. | **Aprobado** en Fases 6–7 (`F6-SNAP-IMMUN-01`, `F7-SNAP-IMMUN-01`), Fase 8 PDF (`F8-PDF-06/13`) y Fase 9 Excel (`F9-02/05`). |
+| **CP-CONS-02** | Fases 6–9 | **Imposibilidad de alterar filtros conservando la misma `referencia_consulta`** | El cliente envía una petición de página 2 o de exportación PDF/Excel reutilizando una `referencia_consulta` previa pero cambiando `sentido`, `tipo_variacion`, `id_producto` o `fecha_inicio`. | `409 Conflict` (`QUERY_FILTERS_MISMATCH`) rechazando la petición e indicando que debe ejecutarse una nueva consulta. | **Aprobado en Fases 6–8** (`F6-REF-MISMATCH-01`, `F7-SNAP-MISMATCH-01`, `F8-PDF-15`) y Fase 9 (`F9-16`). |
+| **CP-CONS-03** | Fases 6–9 | **Propiedad de usuario y expiración de `referencia_consulta`** | 1) Otro administrador intenta usar la `referencia_consulta` de un usuario distinto; 2) Se intenta paginar o exportar con una `referencia_consulta` cuyo `expira_en` ya venció. | 1) `403 Forbidden` (`QUERY_REFERENCE_FORBIDDEN`); 2) `410 Gone` (`QUERY_REFERENCE_EXPIRED`). | **Aprobado en Fases 6–8** (`F6-REF-EXPIRE-01`, `F6-REF-FORBID-01`, `F7-SNAP-EXPIRE-01`, `F7-SNAP-FORBID-01`, `F8-PDF-09/16`) y Fase 9 (`F9-13/14/17`). |
+| **CP-CONS-04** | Fases 8 y 9 | **Igualdad exacta entre consulta, resumen, PDF y Excel** | Se consulta Kardex y Variaciones con filtros de `tipo_variacion`, `sentido`, clasificación histórica y fechas, y se exporta a PDF y Excel. | Los filtros mostrados en el encabezado, las cifras del resumen ejecutivo y todas las filas del detalle coinciden al 100 % entre la consulta web, el archivo PDF y el archivo Excel. | **Aprobado para los casos ejecutados**: PDF Fase 8 (`F8-PDF-06/13`); Fase 9 compara resumen y filas de Kardex/Variaciones con consulta y PDF (`F9-07/10`), además del filtro combinado (`F9-12`). |
 
 ---
 
@@ -272,3 +272,41 @@
 | `F6-RBAC-01` | Seguridad RBAC: rol Administrador posee permiso `reportes.kardex`; rol Vendedor es rechazado. | **PASS** |
 | `F6-CLEAN-01` | Limpieza final en base de pruebas: registros temporales eliminados y stock en 0. | **PASS** |
 | `F6-ISO-01` | Aislamiento verificado: Base principal `amazon_market` no sufrió modificaciones (20 tablas, 106 productos con stock > 0, 98 ventas, 4 compras, 26 kardex). | **PASS** |
+
+---
+
+## 8. Resultados Ejecutados en Fase 9 (`tests/sprint2/fase9_excel_test.php`)
+
+- **Comando ejecutado:** `C:\xampp\php\php.exe tests\sprint2\fase9_excel_test.php`
+- **Base de datos utilizada:** `amazon_market_sprint2_test`
+- **Resultado global:** **20 PASS / 0 FAIL**.
+- **Frontend:** `node tests/sprint2/fase9_frontend_download_test.js` — **4 PASS / 0 FAIL**.
+
+| Código | Verificación Ejecutada | Resultado |
+|---|---|---|
+| `F9-01` | Las consultas de Kardex y Variaciones emiten referencias antes de exportar. | **PASS** |
+| `F9-02` | Variaciones exporta todas las filas congeladas aunque la consulta de pantalla solo pidió una fila; el snapshot conserva 12. | **PASS** |
+| `F9-03` | Kardex general separa los productos y sus distintas unidades; no presenta un total de existencias mezcladas. | **PASS** |
+| `F9-04` | Respuesta XLSX válida con hojas `Resumen ejecutivo` y `Detalle`, en ese orden. | **PASS** |
+| `F9-05` | Kardex Excel mantiene el saldo/resumen del snapshot y excluye un movimiento confirmado después de consultar. | **PASS** |
+| `F9-06` | El libro conserva período, producto, lote, referencia y tipo de movimiento. | **PASS** |
+| `F9-07` | Saldo, tipos y filas del Excel de Kardex coinciden con la consulta y el PDF de la misma referencia. | **PASS** |
+| `F9-08` | Variaciones XLSX incluye resumen, detalle y contenido de la referencia consultada. | **PASS** |
+| `F9-09` | Variaciones conserva sentido, responsable y lote. | **PASS** |
+| `F9-10` | Resumen y tipos del Excel de Variaciones coinciden con consulta y PDF. | **PASS** |
+| `F9-11` | Ambos libros contienen los colores institucionales azul marino y dorado. | **PASS** |
+| `F9-12` | Excel respeta filtros combinados de tipo, sentido y clasificación histórica. | **PASS** |
+| `F9-13` | El rol Vendedor no puede descargar Excel de Kardex (`403`). | **PASS** |
+| `F9-14` | Otro Administrador no puede usar la referencia del usuario propietario (`403 QUERY_REFERENCE_FORBIDDEN`). | **PASS** |
+| `F9-15` | No se exporta sin `referencia_consulta` (`422`). | **PASS** |
+| `F9-16` | Alterar filtros con la misma referencia responde `409 QUERY_FILTERS_MISMATCH`. | **PASS** |
+| `F9-17` | Referencia vencida responde `410 QUERY_REFERENCE_EXPIRED`. | **PASS** |
+| `F9-18` | Kardex de producto sin movimientos en el rango sigue exportable y conserva saldo inicial/cierre. | **PASS** |
+| `F9-19` | Kardex general vacío responde `422 EMPTY_EXPORT_NOT_ALLOWED`. | **PASS** |
+| `F9-20` | Variaciones sin resultados respeta los filtros y responde `422 EMPTY_EXPORT_NOT_ALLOWED`. | **PASS** |
+
+### 8.1 Regresiones y aislamiento posterior
+
+- Fases 2–7: **105 PASS / 0 FAIL**; Fase 8 PDF + frontend: **24 PASS / 0 FAIL**.
+- Regresiones cruzadas HTTP, reportes, referencias e interfaz: **47 PASS / 0 FAIL**.
+- Tras las pruebas: `amazon_market` conserva 107 productos, 106 con stock, 98 ventas, 4 compras y 26 movimientos. `amazon_market_sprint2_test` conserva 107 productos, stock en cero y ninguna compra, venta, movimiento ni producto temporal de Fase 9.

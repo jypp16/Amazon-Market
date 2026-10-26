@@ -699,6 +699,18 @@ Excluye compras, ventas y sus correcciones o anulaciones.
 - Una referencia de otro usuario conserva el error `403 QUERY_REFERENCE_FORBIDDEN`; una referencia expirada `410 QUERY_REFERENCE_EXPIRED`; filtros distintos `409 QUERY_FILTERS_MISMATCH`; referencia ausente o tipo inválido `422 VALIDATION_ERROR`; un reporte no exportable `422 EMPTY_EXPORT_NOT_ALLOWED`.
 - La marca de tiempo de generación y el nombre del archivo se toman de `CURRENT_TIMESTAMP()` de la base, para que coincidan con la zona horaria de las fechas registradas en los movimientos.
 
+#### D. Entrega Excel y conexión de los botones existentes (Fase 9)
+
+- Solicitud exitosa:
+  - `GET /api/reportes/exportar-excel?tipo=kardex&referencia_consulta=...&fecha_inicio=...&fecha_fin=...`.
+  - `GET /api/reportes/exportar-excel?tipo=variaciones&referencia_consulta=...&fecha_inicio=...&fecha_fin=...`.
+- En Variaciones, enviar los filtros aplicados como `q`, `id_categoria`, `id_subcategoria`, `tipo_variacion` y `sentido`; en Kardex, `id_producto`, `id_categoria` e `id_subcategoria`. El `tipo` del endpoint selecciona el reporte y no reemplaza `tipo_variacion`.
+- Se requiere Administrador activo con `reportes.exportar` y el permiso del reporte (`reportes.kardex` o `reportes.variaciones`). El libro usa exactamente la referencia del usuario y contiene todas sus filas congeladas aunque la pantalla esté paginada.
+- La respuesta exitosa es binaria `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, con `Content-Disposition: attachment`, nombre `Reporte_Kardex_...xlsx` o `Reporte_Variaciones_...xlsx`, `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
+- El libro incluye primero la hoja `Resumen ejecutivo` y luego `Detalle`. El resumen general desglosa cantidades por producto y unidad, sin sumar existencias entre unidades; no calcula pérdidas monetarias de Variaciones. El Kardex individual puede exportarse con cero movimientos, mostrando saldo inicial y final iguales.
+- La interfaz usa `Api.downloadExcel()` y conserva filtros y referencia. Comprueba el MIME, la firma ZIP y entradas OOXML mínimas antes de descargar. Las referencias ajenas, vencidas o alteradas conservan respectivamente `403 QUERY_REFERENCE_FORBIDDEN`, `410 QUERY_REFERENCE_EXPIRED` y `409 QUERY_FILTERS_MISMATCH`; referencia ausente responde `422 VALIDATION_ERROR` y consulta vacía `422 EMPTY_EXPORT_NOT_ALLOWED`.
+- El generador crea archivos temporales en carpeta privada y los elimina antes de responder. No se agregó ni modificó esquema, por lo que esta fase no requiere script SQL.
+
 
 ---
 

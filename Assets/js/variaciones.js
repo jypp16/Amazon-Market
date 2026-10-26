@@ -84,7 +84,55 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     }
 
+    function exportarVariacionesExcel() {
+        if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
+            setStatus('Primero realiza una consulta exportable de Variaciones.', true);
+            return;
+        }
+
+        var params = new URLSearchParams({
+            tipo: 'variaciones',
+            referencia_consulta: currentConsultaRef,
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
+        });
+        ['q', 'id_categoria', 'id_subcategoria', 'tipo_variacion'].forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
+        if (appliedFilters.sentido) {
+            var sentido = 'TODOS';
+            if (['Incremento', 'INCREMENTO'].includes(appliedFilters.sentido)) sentido = 'INCREMENTO';
+            else if (['Disminución', 'DISMINUCION'].includes(appliedFilters.sentido)) sentido = 'DISMINUCION';
+            params.set('sentido', sentido);
+        }
+
+        exportExcelBtn.disabled = true;
+        setStatus('Generando el Excel de Variaciones…', false);
+        Api.downloadExcel('reportes/exportar-excel?' + params.toString(), 'Reporte_Variaciones.xlsx')
+            .then(function(result) {
+                if (!result || !result.ok) {
+                    var errorData = (result && result.data) || {};
+                    if (['QUERY_REFERENCE_EXPIRED', 'QUERY_FILTERS_MISMATCH'].includes(errorData.code)) {
+                        currentConsultaRef = null;
+                        isExportableCurrent = false;
+                        if (exportPdfBtn) exportPdfBtn.disabled = true;
+                    }
+                    setStatus(errorData.message || 'No se pudo descargar el Excel de Variaciones.', true);
+                    return;
+                }
+                setStatus('El Excel de Variaciones se descargó correctamente.', false);
+            })
+            .catch(function() {
+                setStatus('No se pudo conectar con el servidor para descargar el Excel de Variaciones.', true);
+            })
+            .finally(function() {
+                exportExcelBtn.disabled = !isExportableCurrent;
+                if (exportPdfBtn && !isExportableCurrent) exportPdfBtn.disabled = true;
+            });
+    }
+
     if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportarVariacionesPdf);
+    if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportarVariacionesExcel);
 
     function setStatus(message, isError) {
         status.textContent = message;
