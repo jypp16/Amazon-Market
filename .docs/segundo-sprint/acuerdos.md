@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama de trabajo:** `feature/inventario`  
-**Fase actual:** Fase 1 — Preparación y contratos  
+**Fase actual:** Fase 10 — Verificación integral y actualización controlada completada
 
 ---
 
@@ -34,6 +34,8 @@ El desarrollo y verificación del Sprint 2 se organiza en **10 fases secuenciale
 | **Fase 8** | PDF | `amazon_market_sprint2_test` |
 | **Fase 9** | Excel | `amazon_market_sprint2_test` |
 | **Fase 10** | Verificación integral y actualización controlada | `amazon_market_sprint2_test` y actualización final en `amazon_market` |
+
+La ejecución de la Fase 10 está completada; los resultados, el respaldo y la limitación del servidor HTTP de prueba están en [estado-fases.md](estado-fases.md) y [plan-fase10-verificacion-integral.md](plan-fase10-verificacion-integral.md).
 
 ---
 
@@ -134,4 +136,4 @@ El desarrollo y verificación del Sprint 2 se organiza en **10 fases secuenciale
 2. **Aislamiento verificado (Fases 1 a 9):**
    - Base habitual: `amazon_market` (**intacta durante las Fases 1 a 9**).
    - Base aislada de pruebas: `amazon_market_sprint2_test` (con escenario limpio ya aplicado en Fase 1: catálogo íntegro de 107 productos con `stock_actual = 0` y sin operaciones antiguas de prueba).
-3. **Actualización controlada en la base actual (Fase 10):** Se ejecutará exclusivamente en la Fase 10 tras completar la verificación integral de las Fases 1 a 9.
+3. **Actualización controlada en la base actual (Fase 10):** Se ejecutó exclusivamente en la Fase 10 después de completar las verificaciones de las fases 1 a 9; el respaldo, archivado, sincronización y resultados quedaron registrados en [plan-fase10-verificacion-integral.md](plan-fase10-verificacion-integral.md).

@@ -3,7 +3,8 @@
 -- SPRINT: 2 - Fase 2 (Estructura de datos, seguridad e infraestructura de movimientos)
 -- TIPO: Configuración y preparación de catálogos base (DML y triggers de subcategoría)
 -- ORDEN DE EJECUCIÓN: 02 (Posterior a 01_estructura_inventario_sprint2.sql)
--- BASE DE DATOS DE DESTINO: amazon_market_sprint2_test (EXCLUSIVAMENTE EN FASES 1–9)
+-- BASE DE PRUEBAS: amazon_market_sprint2_test. En producción solo puede ser
+--   invocado por 10_archivado_y_preparacion_produccion.sql con su guardia.
 --
 -- PROPÓSITO:
 --   1. Crear la subcategoría base "General" para cada categoría existente en
@@ -17,7 +18,8 @@
 --      asignarlos exclusivamente al rol Administrador (`id_rol = 1`).
 --
 -- PRECONDICIONES:
---   - Base activa: `amazon_market_sprint2_test`.
+--   - Haber ejecutado `01_estructura_inventario_sprint2.sql` en la base de
+--     pruebas o mediante el script 10 en `amazon_market` con su marca autorizada.
 --   - Haberse ejecutado previamente `01_estructura_inventario_sprint2.sql`.
 -- =============================================================================
 
@@ -27,9 +29,12 @@ BEGIN NOT ATOMIC
     DECLARE v_db_actual VARCHAR(128);
     SET v_db_actual = DATABASE();
 
-    IF v_db_actual IS NULL OR v_db_actual <> 'amazon_market_sprint2_test' THEN
+    IF v_db_actual IS NULL OR NOT (
+        v_db_actual = 'amazon_market_sprint2_test'
+        OR (v_db_actual = 'amazon_market' AND COALESCE(@SPRINT2_FASE10_AUTORIZADA, '') = 'EJECUTAR_FASE10')
+    ) THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'PROTECCION ACTIVA: 02_configuracion_permisos_sprint2.sql solo puede ejecutarse sobre amazon_market_sprint2_test.';
+            SET MESSAGE_TEXT = 'PROTECCION ACTIVA: 02 solo admite amazon_market_sprint2_test o la ejecución autorizada desde el script 10 en amazon_market.';
     END IF;
 
     START TRANSACTION;

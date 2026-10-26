@@ -2,7 +2,7 @@
 
 **Proyecto:** Amazon-Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama activa:** `feature/inventario`  
-**Última actualización:** 2026-10-25 (Fase 9 Excel implementada y verificada)
+**Última actualización:** 2026-10-25 (Fase 10 verificada y sincronizada)
 
 ---
 
@@ -19,7 +19,7 @@
 | **Fase 7** | **Variaciones y nuevo selector de sentido** | Conexión real del Reporte de Variaciones reutilizando selector de sentido (`Todas`, `Entradas`, `Salidas`), consulta con `tipo_variacion` y `sentido` combinados por `AND`, resúmenes general y de producto único, exclusión de compras y ventas, y consistencia mediante `referencia_consulta`. | `amazon_market_sprint2_test` | **Completada** |
 | **Fase 8** | **PDF** | Generación y descarga de PDF para Kardex (incluyendo producto específico sin movimientos con saldo inicial y cierre igual al inicial) y Variaciones, conservando colores institucionales, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta`; botones existentes conectados. | `amazon_market_sprint2_test` | **Implementación y 24 comprobaciones aprobadas; revisión visual pendiente** |
 | **Fase 9** | **Excel** | Generación y descarga de Excel para Kardex (incluyendo producto específico sin movimientos) y Variaciones, conservando estilos, resumen ejecutivo previo al detalle e igualdad con `referencia_consulta` y PDF. | `amazon_market_sprint2_test` | **Implementación y 24 comprobaciones aprobadas; revisión visual en Excel pendiente** |
-| **Fase 10** | **Verificación integral y actualización controlada** | Pruebas integrales de extremo a extremo, concurrencia y rendimiento (1 000 movimientos y 5 usuarios simultáneos) sobre `amazon_market_sprint2_test`, seguidas de respaldo, archivado de operaciones antiguas de prueba y sincronización controlada en `amazon_market`. | `amazon_market_sprint2_test` y `amazon_market` | Pendiente |
+| **Fase 10** | **Verificación integral y actualización controlada** | Pruebas integrales de extremo a extremo, concurrencia y rendimiento (1 000 movimientos y 5 sesiones) sobre `amazon_market_sprint2_test`, seguidas de respaldo, archivado y sincronización controlada en `amazon_market`. | `amazon_market_sprint2_test` y `amazon_market` | **Completada; 8/8 carga/concurrencia y actualización verificada** |
 
 ---
 
@@ -360,7 +360,7 @@ Los respaldos se encuentran almacenados fuera del directorio público del sitio 
 
 Se corrigieron los saldos con filtros históricos, las validaciones de reportes, las referencias obligatorias y estables de compras/ventas y la paginación del Kardex. La prueba de restricción SQL de la fase 2 ahora verifica el error real de la restricción; antes podía aprobar por columnas inexistentes.
 
-La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La base habitual no se migró. La implementación funcional de la Fase 8 está realizada y probada; su inspección visual final queda pendiente por indisponibilidad del renderizador local. La Fase 9 se implementó y verificó el 25/10/2026; la Fase 10 continúa pendiente.
+La verificación y los comandos del entorno web aislado están en [correcciones-fases1-7.md](correcciones-fases1-7.md). La inspección visual final de PDF y Excel continúa pendiente por indisponibilidad del renderizador local. La Fase 9 se implementó y verificó el 25/10/2026; la Fase 10 se ejecutó después en esa misma fecha y está documentada abajo.
 
 ## 10. Evidencias y pendiente visual de la Fase 8 (PDF)
 
@@ -380,5 +380,17 @@ La verificación y los comandos del entorno web aislado están en [correcciones-
 - `tests/sprint2/fase9_excel_test.php`: **20 PASS / 0 FAIL** sobre `amazon_market_sprint2_test`, incluyendo más de una página de movimientos, instantánea inmune a movimientos posteriores, producto sin actividad, desglose por unidades, igualdad de cifras/detalle con PDF, filtros, permisos y errores 403/409/410/422.
 - `tests/sprint2/fase9_frontend_download_test.js`: **4 PASS / 0 FAIL**, verificando filtros y referencia, descarga, errores JSON, archivo inválido y deshabilitación tras vencer o no coincidir la consulta.
 - Regresiones ejecutadas: Fases 2–7 **105 PASS / 0 FAIL**; Fase 8 **24 PASS / 0 FAIL**; HTTP **22**, reportes **11**, referencias **12** e interfaz **2**, todas sin fallos.
-- Aislamiento comprobado después de las suites: `amazon_market` sigue con 107 productos, 106 con stock, 98 ventas, 4 compras y 26 movimientos; `amazon_market_sprint2_test` quedó con 107 productos, stock en cero, sin ventas/compras/movimientos y sin productos de prueba F9.
-- No se cambió esquema ni se creó script SQL. La Fase 10 sigue pendiente; la base habitual no fue modificada.
+- Aislamiento comprobado después de las suites de Fase 9: `amazon_market` seguía con 107 productos, 106 con stock, 98 ventas, 4 compras y 26 movimientos; la Fase 10 se ejecutó posteriormente y consta en la sección siguiente.
+- La Fase 9 no requirió cambiar esquema ni crear script SQL.
+
+## 12. Evidencias de cierre de la Fase 10
+
+- **Plan y archivos:** [plan-fase10-verificacion-integral.md](plan-fase10-verificacion-integral.md), [`database/segundo_sprint/10_archivado_y_preparacion_produccion.sql`](../../database/segundo_sprint/10_archivado_y_preparacion_produccion.sql) y [`tests/sprint2/fase10_carga_concurrencia_test.php`](../../tests/sprint2/fase10_carga_concurrencia_test.php).
+- **Respaldo previo a la aplicación:** `C:\xampp\backups\amazon_market\amazon_market_pre_sprint2_fase10_apply.sql`, 62 679 bytes, SHA-256 `26F5A03125B1B1057A48367B6FBD68E9523A03299AB88519B41ADF6468B19BCD`. El respaldo se restauró en la base de ensayo y se compararon los conteos originales antes de ejecutar el script 10 allí.
+- **Archivo de operaciones legado:** en ambas etapas (ensayo y base habitual) se archivaron 98 ventas, 377 detalles de venta, 4 compras, 4 detalles de compra, 3 registros de historial de compra y 26 movimientos de Kardex. Los detalles conservan sus IDs y referencias históricas en `sprint2_archivo_*`; no quedan mezclados con el nuevo Kardex.
+- **Carga y concurrencia:** [`fase10_carga_concurrencia_test.php`](../../tests/sprint2/fase10_carga_concurrencia_test.php) completó **8 PASS / 0 FAIL** en `amazon_market_sprint2_test`: 1 000 movimientos base, cinco cuentas temporales distintas de Administrador con sesiones HTTP, cinco escritores concurrentes que añadieron 50 movimientos, 10 consultas, cinco exportaciones PDF/XLSX, 0 deadlocks, 0 discrepancias stock/Kardex y 10 snapshots consistentes. Máxima consulta paginada: **418.9 ms**; máxima exportación: **2 137.1 ms**. Las exportaciones Excel incluyeron 1 050 filas de movimiento más encabezado; las cinco cuentas temporales se eliminaron al terminar.
+- **Regresión posterior a la migración de ensayo:** fases 2–9 y regresiones HTTP/reportes/referencias/interfaz: **200 PASS / 0 FAIL**; después la carga de Fase 10: **8 PASS / 0 FAIL**. La carga eliminó sus productos, movimientos, solicitudes idempotentes, referencias e instantáneas temporales al finalizar.
+- **Ajuste por deadlock observado:** InnoDB mostró que lecturas `SELECT ... FOR UPDATE` de referencias de solicitud nuevas bloqueaban el espacio vacío de un índice único y causaban deadlock al insertar referencias distintas. `ControlSolicitudService` ahora conserva `GET_LOCK` por referencia y usa una lectura normal para buscar la fila; la prueba concurrente posterior terminó sin deadlocks.
+- **Estado final de `amazon_market`:** control `COMPLETADA`; 107 productos con los mismos IDs y atributos de catálogo que el escenario de ensayo; 0 productos con stock distinto de cero; subcategorías completas; 0 ventas, compras, detalles operativos y movimientos activos. Los datos anteriores están archivados y el respaldo completo permanece fuera del sitio.
+- **Seguridad de permisos:** los cuatro permisos Sprint 2 (`inventario.ajustes`, `reportes.kardex`, `reportes.variaciones`, `reportes.exportar`) quedaron asignados al Administrador; la consulta verificó cero asignaciones a otros roles.
+- **Límite de la evidencia:** el servidor PHP de prueba en Windows recibe solicitudes de cinco sesiones a la vez, pero atiende una petición HTTP por proceso; los cinco escritores de base fueron procesos independientes y sí trabajaron en paralelo. La revisión visual final de PDF/Excel de las fases 8–9 sigue pendiente. Un chequeo HTTP adicional contra el servidor temporal de la base habitual no finalizó porque la revisión automática de permisos excedió su tiempo; esto no afectó la migración ni las verificaciones SQL y de pruebas aisladas.

@@ -3,7 +3,8 @@
 -- SPRINT: 2 - Fase 1 (Definición verificable y preparación del entorno)
 -- TIPO: Preparación de datos (Escenario operativo limpio en copia de pruebas)
 -- ORDEN DE EJECUCIÓN: 00 (Posterior a restaurar la copia desde el respaldo base)
--- BASE DE DATOS DE DESTINO: amazon_market_sprint2_test (EXCLUSIVAMENTE)
+-- BASE HABITUAL: amazon_market_sprint2_test. En producción solo se admite
+--   invocado por 10_archivado_y_preparacion_produccion.sql con su guardia.
 --
 -- PROPÓSITO:
 --   Preparar en la base de pruebas aislada (amazon_market_sprint2_test) un
@@ -26,10 +27,9 @@
 --   - Existencia del esquema base restaurado desde el respaldo de `amazon_market`.
 --
 -- PROTECCIÓN CONTRA EJECUCIÓN ACCIDENTAL:
---   - El bloque compuesto valida `DATABASE() = 'amazon_market_sprint2_test'`.
---   - Si la base activa es `amazon_market` o cualquier otra distinta de la
---     copia de pruebas, lanza `SIGNAL SQLSTATE '45000'` y aborta sin ejecutar
---     ninguna sentencia DML.
+--   - El bloque compuesto valida la base de pruebas o, exclusivamente durante
+--     Fase 10, la marca de sesión que instala el script 10 en `amazon_market`.
+--   - Cualquier otra base activa lanza `SIGNAL SQLSTATE '45000'` y aborta.
 -- =============================================================================
 
 DELIMITER $$
@@ -38,9 +38,12 @@ BEGIN NOT ATOMIC
     DECLARE v_db_actual VARCHAR(128);
     SET v_db_actual = DATABASE();
 
-    IF v_db_actual IS NULL OR v_db_actual <> 'amazon_market_sprint2_test' THEN
+    IF v_db_actual IS NULL OR NOT (
+        v_db_actual = 'amazon_market_sprint2_test'
+        OR (v_db_actual = 'amazon_market' AND COALESCE(@SPRINT2_FASE10_AUTORIZADA, '') = 'EJECUTAR_FASE10')
+    ) THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'PROTECCION ACTIVA: 00_preparacion_escenario_limpio_pruebas.sql solo puede ejecutarse sobre amazon_market_sprint2_test.';
+            SET MESSAGE_TEXT = 'PROTECCION ACTIVA: 00 solo admite amazon_market_sprint2_test o la ejecución autorizada desde el script 10 en amazon_market.';
     END IF;
 
     START TRANSACTION;

@@ -3,7 +3,8 @@
 -- SPRINT: 2 - Fase 2 (Estructura de datos, seguridad e infraestructura de movimientos)
 -- TIPO: Migración estructural (DDL y restricciones de integridad)
 -- ORDEN DE EJECUCIÓN: 01 (Posterior a 00_preparacion_escenario_limpio_pruebas.sql)
--- BASE DE DATOS DE DESTINO: amazon_market_sprint2_test (EXCLUSIVAMENTE EN FASES 1–9)
+-- BASE DE PRUEBAS: amazon_market_sprint2_test. En producción solo puede ser
+--   invocado por 10_archivado_y_preparacion_produccion.sql con su guardia.
 --
 -- PROPÓSITO:
 --   Implementar el esquema de datos y las restricciones de integridad del Sprint 2:
@@ -30,7 +31,8 @@
 --        para respaldar `referencia_consulta` administrada por el servidor.
 --
 -- PRECONDICIONES:
---   - Base activa: `amazon_market_sprint2_test`.
+--   - Base activa: `amazon_market_sprint2_test`, o ejecución invocada por el
+--     script 10 en `amazon_market` con la marca de sesión autorizada.
 --   - Inexistencia de valores decimales o negativos en `producto.stock_actual`
 --     y `producto.stock_minimo` (verificado antes de ejecutar DDL).
 --
@@ -50,9 +52,12 @@ BEGIN NOT ATOMIC
 
     SET v_db_actual = DATABASE();
 
-    IF v_db_actual IS NULL OR v_db_actual <> 'amazon_market_sprint2_test' THEN
+    IF v_db_actual IS NULL OR NOT (
+        v_db_actual = 'amazon_market_sprint2_test'
+        OR (v_db_actual = 'amazon_market' AND COALESCE(@SPRINT2_FASE10_AUTORIZADA, '') = 'EJECUTAR_FASE10')
+    ) THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'PROTECCION ACTIVA: 01_estructura_inventario_sprint2.sql solo puede ejecutarse sobre amazon_market_sprint2_test.';
+            SET MESSAGE_TEXT = 'PROTECCION ACTIVA: 01 solo admite amazon_market_sprint2_test o la ejecución autorizada desde el script 10 en amazon_market.';
     END IF;
 
     SELECT COUNT(*) INTO v_registros_incompatibles

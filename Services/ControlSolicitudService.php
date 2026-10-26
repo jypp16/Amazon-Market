@@ -128,8 +128,11 @@ class ControlSolicitudService {
                             FROM control_solicitud_idempotencia
                            WHERE id_usuario = :id_usuario
                              AND tipo_operacion = :tipo_operacion
-                             AND referencia_solicitud = :referencia_solicitud
-                           FOR UPDATE';
+                             AND referencia_solicitud = :referencia_solicitud';
+            // GET_LOCK above serializes the exact (user, operation, reference) key.
+            // A locking read for a missing key takes a gap lock under InnoDB
+            // REPEATABLE READ; concurrent requests with different new references
+            // can then deadlock while inserting into the same unique-index gap.
             $stmtSelect = $this->pdo->prepare($sqlSelect);
             $stmtSelect->execute([
                 ':id_usuario' => $idUsuario,

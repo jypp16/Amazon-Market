@@ -132,7 +132,7 @@
 
 | ID Prueba | Fase | Req. / Criterio | Escenario / Condición de Entrada | Resultado Esperado | Estado |
 |---|---|---|---|---|---|
-| **CP-REND-01** | Fase 10 | `RNF` (1 000 movimientos y 5 usuarios simultáneos) | En `amazon_market_sprint2_test` con un historial de **1 000 movimientos en `kardex`**, **5 sesiones simultáneas** ejecutan consultas y exportaciones de Kardex/Variaciones combinadas con registros concurrentes de operaciones de inventario. | Tiempos de respuesta dentro de los umbrales operativos ($\le 2\text{ s}$ en consultas paginadas, $\le 5\text{ s}$ en exportaciones PDF/Excel de 1 000 filas), 0 interbloqueos no controlados (*deadlocks*), 0 discrepancias entre `producto.stock_actual` y el último `saldo_resultante` en `kardex`, y consistencia intacta en cada `referencia_consulta`. | Pendiente |
+| **CP-REND-01** | Fase 10 | `RNF` (1 000 movimientos y 5 usuarios simultáneos) | En `amazon_market_sprint2_test`, 1 000 movimientos base en `kardex`, cinco Administradores temporales con sesiones HTTP consultan Kardex/Variaciones y exportan PDF/Excel mientras cinco procesos DB registran otros 50 movimientos concurrentes. | **PASS:** 8/8; consultas paginadas ≤ 418.9 ms, exportación más lenta ≤ 2 137.1 ms, 0 deadlocks, 0 discrepancias entre stock y último saldo, 10 referencias de consulta consistentes, cinco exportaciones válidas con 1 000+ filas. | Completada |
 
 
 ---

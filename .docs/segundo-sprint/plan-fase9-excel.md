@@ -42,4 +42,4 @@ Conectar los botones Excel ya presentes en Reportes → Kardex y Reportes → Va
 - Regresiones Fases 2–8 y suites cruzadas: todas aprobadas; detalles en [estado-fases.md](estado-fases.md) y [plan-pruebas.md](plan-pruebas.md).
 - `amazon_market` no se modificó; la copia de pruebas quedó en el escenario limpio. No hubo cambios de esquema ni script SQL.
 - La inspección de estructura, contenido y estilos se realizó sobre el OOXML generado; la revisión visual en Excel de escritorio queda pendiente.
-- Solo resta la Fase 10 (carga, respaldo/archivado y sincronización controlada a la base habitual). La inspección visual pendiente de la Fase 8 PDF también permanece documentada.
+- En el momento de cierre de la Fase 9 restaba la Fase 10; se completó después y sus resultados están en [plan-fase10-verificacion-integral.md](plan-fase10-verificacion-integral.md). La inspección visual pendiente de PDF y Excel permanece documentada.
