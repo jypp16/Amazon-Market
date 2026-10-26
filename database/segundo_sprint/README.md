@@ -2,6 +2,12 @@
 
 Este directorio contiene exclusivamente los scripts SQL correspondientes al **Sprint 2** (Control de Inventario: Bajas, Ajustes por Conteo, Kardex, Reporte de Variaciones e Integridad de Existencias).
 
+## Compañeros que necesitan conservar sus datos
+
+**No ejecutar todos los archivos por orden numérico.** Existen dos alternativas excluyentes: el **10** archiva y limpia operaciones para comenzar con stock cero; el **11** conserva operaciones y stock de una base anterior al Sprint 2. Para conservar los datos, compartir el proyecto actualizado y ejecutar **únicamente** `11_migracion_sprint2_sin_perdida_de_datos.sql`, siguiendo [la guía de conservación](LEEME_11_conservar_datos.md). Es autónomo y no requiere ejecutar 00/01/02/10. No se aplica sobre una base que ya recibió la Fase 10.
+
+El 11 conserva el Kardex anterior en `kardex_legado_sprint2` y abre el nuevo Kardex con saldos de migración explícitos, sin modificar existencias. Requiere respaldo propio verificado, mantenimiento y ensayo sobre una copia. Sus pruebas utilizan bases temporales con prefijo `amazon_market_s2_keep_test_`, distintas de la base habitual de pruebas. Las instrucciones de escenario limpio que siguen no corresponden a esta alternativa.
+
 ## Reglas de Organización y Seguridad
 
 1. **Separación estricta de responsabilidades**:
@@ -28,8 +34,9 @@ Este directorio contiene exclusivamente los scripts SQL correspondientes al **Sp
 | `01` | `01_estructura_inventario_sprint2.sql` | Estructura (`DDL`) | **Fase 2** | `00_preparacion_escenario_limpio_pruebas.sql` aplicado; 0 productos con stock negativo o fraccionario. | `amazon_market_sprint2_test` | Crea `subcategoria`, convierte `producto.stock_actual` y `stock_minimo` a `INT(11)` con `chk_producto_stock_entero_no_negativo` y FK compuesta `(id_subcategoria, id_categoria)`, agrega versionado a `detalle_compra`, crea `operacion_inventario`, amplía `kardex` con `origen_operacion`, `sentido_movimiento`, FKs `RESTRICT`, columnas snapshot históricas e inmutabilidad por trigger, y crea `control_solicitud_idempotencia`, `reporte_consulta_snapshot` y `reporte_consulta_snapshot_item`. | **Ejecutado (Fase 2)** |
 | `02` | `02_configuracion_permisos_sprint2.sql` | Configuración (`DML` + Triggers catálogo) | **Fase 2** | `01_estructura_inventario_sprint2.sql` ejecutado satisfactoriamente. | `amazon_market_sprint2_test` | Crea la subcategoría predeterminada `"General"` por cada categoría existente, vincula los 107 productos a la subcategoría `"General"` de su categoría, registra los permisos `inventario.ajustes`, `reportes.kardex`, `reportes.variaciones` y `reportes.exportar` asignándolos exclusivamente al rol Administrador (`id_rol = 1`), e instala triggers para mantener la correspondencia categoría-subcategoría. | **Ejecutado (Fase 2)** |
 | `10` | `10_archivado_y_preparacion_produccion.sql` | Actualización controlada | **Fase 10** | Respaldo externo identificado por ruta y SHA-256; precondiciones de Fase 10 completas. | `amazon_market` (o base test en modo explícito de validación) | Copia las tablas históricas de venta, compra, sus detalles e historial y Kardex a `sprint2_archivo_*`; limpia operaciones activas, conserva catálogo/IDs/correlativos, deja stock en cero, aplica `00/01/02` y registra el resultado en `sprint2_fase10_control`. Bloquea reejecuciones completadas. | **Ejecutado y verificado (Fase 10)** |
+| `11` | `11_migracion_sprint2_sin_perdida_de_datos.sql` | Alternativa de conservación (`DDL` + configuración + saldos iniciales) | **Entrega a compañeros con esquema anterior** | Respaldo propio verificado, mantenimiento, esquema anterior compatible y base confirmada. | Base propia anterior, seleccionada explícitamente | Mantiene operaciones, catálogo, stock y correlativos; conserva Kardex legado, instala estructura/permisos y crea saldo inicial identificado. No ejecutar junto con 00/01/02/10. | **Verificado en copias temporales; no aplicado a la base habitual** |
 
-## Procedimiento de Ejecución en Entorno de Pruebas
+## Procedimiento de Ejecución en Entorno de Pruebas (escenario limpio)
 
 ```powershell
 # 1. Restaurar respaldo base en la copia de pruebas (únicamente cuando se requiera reiniciar desde el respaldo original)

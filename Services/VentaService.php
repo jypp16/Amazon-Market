@@ -338,6 +338,23 @@ class VentaService {
             $stmtDet->execute([$id_venta]);
             $detalles = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
+            // El historial anterior puede contener ventas fraccionarias. No
+            // truncar esas cantidades al restituir stock en el Sprint 2.
+            foreach ($detalles as $det) {
+                $cantidadHistorica = (float)$det['cantidad'];
+                if (!is_finite($cantidadHistorica) || $cantidadHistorica < 1
+                    || $cantidadHistorica > 2147483647
+                    || floor($cantidadHistorica) !== $cantidadHistorica) {
+                    throw new InventarioException(
+                        'Esta venta contiene cantidades históricas incompatibles con unidades enteras. Se conserva sin cambios; su anulación requiere revisar el historial sin redondear cantidades.',
+                        'LEGACY_FRACTIONAL_QUANTITY',
+                        409,
+                        [],
+                        ['id_venta' => $id_venta, 'id_detalle_venta' => (int)$det['id_detalle_venta']]
+                    );
+                }
+            }
+
             $idsProductos = array_values(array_unique(array_column($detalles, 'id_producto')));
             $this->movimientoService->bloquearProductosOrdenados($idsProductos);
 
