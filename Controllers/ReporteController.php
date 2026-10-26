@@ -70,11 +70,33 @@ class ReporteController extends Controller {
     }
 
     public function kardex() {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (empty($_SESSION['login'])) {
+            header('Location: ' . BASE_URL . '/Auth');
+            exit;
+        }
+        if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+            header('Location: ' . BASE_URL . '/Home');
+            exit;
+        }
         $data = ['page_title' => 'Kardex de inventario - Amazon Market'];
         $this->views->render($this, "kardex", $data);
     }
 
     public function variaciones() {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (empty($_SESSION['login'])) {
+            header('Location: ' . BASE_URL . '/Auth');
+            exit;
+        }
+        if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+            header('Location: ' . BASE_URL . '/Home');
+            exit;
+        }
         $data = ['page_title' => 'Reporte de variaciones - Amazon Market'];
         $this->views->render($this, "variaciones", $data);
     }

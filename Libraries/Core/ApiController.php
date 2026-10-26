@@ -2,6 +2,10 @@
 
 namespace Libraries\Core;
 
+use Libraries\Middleware\AuthMiddleware;
+use Libraries\Middleware\CSRFMiddleware;
+use Libraries\Middleware\RBACMiddleware;
+
 abstract class ApiController {
 
     protected $model;
@@ -9,13 +13,15 @@ abstract class ApiController {
     public string $requestMethod;
     protected ?array $requestBody = null;
     protected ?int $authenticatedUserId = null;
+    protected ?array $authenticatedUser = null;
 
     public function __construct() {
-        $this->requestMethod = $_SERVER['REQUEST_METHOD'];
-        $this->requestHeaders = getallheaders();
+        $this->requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        $this->requestHeaders = function_exists('getallheaders') ? (getallheaders() ?: []) : [];
         $this->parseIncomingRequest();
         $this->loadModel();
         $this->enforceAuthentication();
+        $this->enforceCsrfOnStateChange();
     }
 
     private function loadModel(): void {
@@ -30,22 +36,24 @@ abstract class ApiController {
     }
 
     private function parseIncomingRequest(): void {
-        if (in_array($this->requestMethod, ['POST', 'PUT', 'PATCH', 'DELETE'])) {
-            $contentType = $this->requestHeaders['Content-Type'] ?? $this->requestHeaders['content-type'] ?? '';
+        if (in_array($this->requestMethod, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            $contentType = $this->requestHeaders['Content-Type']
+                ?? $this->requestHeaders['content-type']
+                ?? ($_SERVER['CONTENT_TYPE'] ?? '');
 
             if (str_contains($contentType, 'application/json')) {
                 $rawInput = file_get_contents('php://input');
                 $decoded = json_decode($rawInput, true);
 
                 if (json_last_error() === JSON_ERROR_NONE) {
-                    $this->requestBody = $decoded;
+                    $this->requestBody = is_array($decoded) ? $decoded : [];
                 } else {
                     $this->sendJsonResponse(['status' => false, 'message' => 'La sintaxis JSON de la petición es inválida'], 400);
                 }
             } elseif (str_contains($contentType, 'multipart/form-data')) {
                 $this->requestBody = $_POST;
                 $methodOverride = $_POST['_method'] ?? null;
-                if ($methodOverride && in_array(strtoupper($methodOverride), ['PUT', 'PATCH', 'DELETE'])) {
+                if ($methodOverride && in_array(strtoupper($methodOverride), ['PUT', 'PATCH', 'DELETE'], true)) {
                     $this->requestMethod = strtoupper($methodOverride);
                 }
             } elseif ($this->requestMethod !== 'DELETE') {
@@ -55,19 +63,87 @@ abstract class ApiController {
     }
 
     private function enforceAuthentication(): void {
-        if (empty($_SESSION['login'])) {
-            $this->sendJsonResponse(['status' => false, 'message' => 'No autenticado.'], 401);
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'AUTH_REQUIRED',
+                'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'data' => null,
+            ], 401);
         }
-        $this->authenticatedUserId = $_SESSION['idUser'] ?? null;
+        $this->authenticatedUser = $usuario;
+        $this->authenticatedUserId = (int)$usuario['id_usuario'];
+    }
+
+    private function enforceCsrfOnStateChange(): void {
+        if (in_array($this->requestMethod, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            if (!CSRFMiddleware::validate()) {
+                $this->sendJsonResponse([
+                    'status' => false,
+                    'code' => 'CSRF_INVALID',
+                    'message' => 'Token CSRF inválido. Recargue la página e intente de nuevo.',
+                    'data' => null,
+                ], 403);
+            }
+        }
     }
 
     protected function requirePermission(string $slug): void {
-        $rol = $_SESSION['rol'] ?? 0;
-        if ($rol != 1) {
-            if (!\Libraries\Middleware\RBACMiddleware::tienePermiso($rol, $slug)) {
-                $this->sendJsonResponse(['status' => false, 'message' => 'No tienes permisos para acceder a este recurso.'], 403);
-            }
+        $rol = (int)($this->authenticatedUser['id_rol'] ?? ($_SESSION['rol'] ?? 0));
+        if (!RBACMiddleware::tienePermiso($rol, $slug)) {
+            $code = ($rol !== 1 && RBACMiddleware::esSlugExclusivoAdminSprint2($slug))
+                ? 'FORBIDDEN_ADMIN_ONLY'
+                : 'FORBIDDEN';
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => $code,
+                'message' => 'No tienes permisos para acceder a este recurso.',
+                'data' => null,
+            ], 403);
         }
+    }
+
+    /**
+     * Exige que el usuario autenticado esté activo en BD, tenga rol Administrador (id_rol = 1)
+     * y posea el permiso RBAC indicado. Devuelve los datos del responsable obtenidos del servidor.
+     */
+    protected function requireAdminActivo(?string $slug = null): array {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'AUTH_REQUIRED',
+                'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'data' => null,
+            ], 401);
+        }
+
+        if ((int)$usuario['id_rol'] !== 1) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN_ADMIN_ONLY',
+                'message' => 'Acceso denegado. Esta operación está reservada exclusivamente a usuarios con rol Administrador.',
+                'data' => null,
+            ], 403);
+        }
+
+        if ($slug !== null && !RBACMiddleware::tienePermiso(1, $slug)) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN_ADMIN_ONLY',
+                'message' => 'No tienes permisos para ejecutar esta operación.',
+                'data' => null,
+            ], 403);
+        }
+
+        $this->authenticatedUser = $usuario;
+        $this->authenticatedUserId = (int)$usuario['id_usuario'];
+        return $usuario;
+    }
+
+    protected function getAuthenticatedUser(): array {
+        return $this->authenticatedUser ?? [];
     }
 
     protected function sendJsonResponse(array $data, int $statusCode = 200): void {

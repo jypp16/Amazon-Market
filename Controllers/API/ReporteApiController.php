@@ -4,6 +4,7 @@ namespace Controllers\API;
 
 use Libraries\Core\ApiController;
 use Services\ReporteService;
+use Libraries\Core\InventarioException;
 use Services\MailService;
 
 require_once __DIR__ . '/../../Libraries/PDF/ReportPDF.php';
@@ -18,6 +19,9 @@ class ReporteApiController extends ApiController {
     }
 
     public function get(?string $params = ""): void {
+        if (in_array($params, ['kardex', 'variaciones'], true)) {
+            $this->requireAdminActivo();
+        }
         $this->requirePermission('reportes.ver');
 
         $tipo = $params ?? '';
@@ -37,10 +41,23 @@ class ReporteApiController extends ApiController {
                 $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteInventario()]);
                 break;
             case 'kardex':
+                $admin = $this->requireAdminActivo('reportes.kardex');
                 try {
-                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteKardex($input)]);
+                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteKardex($input, (int)$admin['id_usuario'])]);
+                } catch (InventarioException $error) {
+                    $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
                 } catch (\InvalidArgumentException $error) {
-                    $this->sendJsonResponse(['status' => false, 'message' => $error->getMessage()], 422);
+                    $this->sendJsonResponse(['status' => false, 'code' => 'VALIDATION_ERROR', 'message' => $error->getMessage()], 422);
+                }
+                break;
+            case 'variaciones':
+                $admin = $this->requireAdminActivo('reportes.variaciones');
+                try {
+                    $this->sendJsonResponse(['status' => true, 'data' => $this->service->reporteVariaciones($input, (int)$admin['id_usuario'])]);
+                } catch (InventarioException $error) {
+                    $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
+                } catch (\InvalidArgumentException $error) {
+                    $this->sendJsonResponse(['status' => false, 'code' => 'VALIDATION_ERROR', 'message' => $error->getMessage()], 422);
                 }
                 break;
             case 'clientes':
@@ -63,7 +80,14 @@ class ReporteApiController extends ApiController {
                 break;
             case 'exportar-pdf':
                 $this->requirePermission('reportes.exportar');
-                $this->exportarPdf($input);
+                try {
+                    $this->exportarPdf($input);
+                } catch (InventarioException $error) {
+                    $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
+                } catch (\Throwable $error) {
+                    error_log('Error al generar PDF de inventario: ' . $error->getMessage());
+                    $this->sendJsonResponse(['status'=>false,'code'=>'PDF_GENERATION_FAILED','message'=>'No se pudo generar el reporte. Intente nuevamente.'],500);
+                }
                 break;
             case 'exportar-excel':
                 $this->requirePermission('reportes.exportar');
@@ -80,6 +104,14 @@ class ReporteApiController extends ApiController {
         $input = $this->getInput();
         $tipo = $input['tipo'] ?? '';
         $email = $input['email'] ?? '';
+
+        if ($tipo === 'kardex') {
+            $this->requireAdminActivo('reportes.kardex');
+            $this->requireAdminActivo('reportes.exportar');
+        } elseif ($tipo === 'variaciones') {
+            $this->requireAdminActivo('reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+        }
 
         if (empty($tipo) || empty($email)) {
             $this->sendJsonResponse(['status' => false, 'message' => 'Faltan parámetros: tipo y email son requeridos.'], 400);
@@ -122,9 +154,41 @@ class ReporteApiController extends ApiController {
 
     private function exportarPdf(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'kardex') {
+            $this->requireAdminActivo('reportes.kardex');
+            $this->requireAdminActivo('reportes.exportar');
+        } elseif ($tipo === 'variaciones') {
+            $this->requireAdminActivo('reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+        }
         if ($tipo === 'compras') {
             $this->exportarPdfCompras($input);
             return;
+        }
+        if (in_array($tipo, ['kardex','variaciones'], true)) {
+            $admin = $this->requireAdminActivo($tipo === 'kardex' ? 'reportes.kardex' : 'reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+            $reporteService = new ReporteService();
+            // "tipo" identifica el archivo solicitado en este endpoint. El tipo
+            // de variación, cuando se filtra, llega en "tipo_variacion".
+            unset($input['tipo']);
+            $datos = $tipo === 'kardex'
+                ? $reporteService->reporteKardexParaPdf($input, (int)$admin['id_usuario'])
+                : $reporteService->reporteVariacionesParaPdf($input, (int)$admin['id_usuario']);
+            if ($tipo === 'kardex') {
+                require_once __DIR__ . '/../../Libraries/PDF/ReporteKardexPDF.php';
+                $contenido = (new \ReporteKardexPDF())->generar($datos, (string)$admin['nombre']);
+            } else {
+                require_once __DIR__ . '/../../Libraries/PDF/ReporteVariacionesPDF.php';
+                $contenido = (new \ReporteVariacionesPDF())->generar($datos, (string)$admin['nombre']);
+            }
+            $fechaNombre = strtotime((string)($datos['generado_en'] ?? ''));
+            $nombre = 'Reporte_' . ucfirst($tipo) . '_' . date('Y-m-d_His', $fechaNombre !== false ? $fechaNombre : time()) . '.pdf';
+            $this->responderPdfInventario($contenido, $nombre);
+        }
+        $tiposAdmitidos = ['ventas','productos-mas-vendidos','productos-menos-vendidos','inventario','clientes','vendedores','categorias','comprobantes','metodos-pago','resumen'];
+        if (!in_array($tipo, $tiposAdmitidos, true)) {
+            throw InventarioException::validacion(['tipo'=>'El tipo de reporte PDF solicitado no es válido.']);
         }
         $filename = 'Reporte_' . $tipo . '_' . date('Y-m-d_His') . '.pdf';
 
@@ -172,6 +236,17 @@ class ReporteApiController extends ApiController {
         }
 
         $pdf->Output('D', $filename);
+        exit;
+    }
+
+    protected function responderPdfInventario(string $contenido, string $nombre): void {
+        while (ob_get_level() > 0) ob_end_clean();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: ' . strlen($contenido));
+        echo $contenido;
         exit;
     }
 
@@ -255,6 +330,17 @@ class ReporteApiController extends ApiController {
 
     private function exportarExcel(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'kardex') {
+            $this->requireAdminActivo('reportes.kardex');
+            $this->requireAdminActivo('reportes.exportar');
+        } elseif ($tipo === 'variaciones') {
+            $this->requireAdminActivo('reportes.variaciones');
+            $this->requireAdminActivo('reportes.exportar');
+        }
+        if (in_array($tipo, ['kardex','variaciones'], true)) {
+            $this->exportarExcelInventario($tipo, $input);
+            return;
+        }
         if ($tipo === 'compras') {
             $this->exportarExcelCompras($input);
             return;
@@ -319,6 +405,44 @@ class ReporteApiController extends ApiController {
         header('Cache-Control: no-cache, must-revalidate');
         readfile($file);
         unlink($file);
+        exit;
+    }
+
+    private function exportarExcelInventario(string $tipo, array $input): void {
+        $admin=$this->requireAdminActivo($tipo==='kardex'?'reportes.kardex':'reportes.variaciones');
+        $this->requireAdminActivo('reportes.exportar');
+        try {
+            unset($input['tipo']);
+            $service=new ReporteService();
+            $datos=$tipo==='kardex'
+                ? $service->reporteKardexParaExcel($input,(int)$admin['id_usuario'])
+                : $service->reporteVariacionesParaExcel($input,(int)$admin['id_usuario']);
+            if ($tipo==='kardex') {
+                require_once __DIR__.'/../../Libraries/Excel/ReporteKardexExcel.php';
+                $contenido=(new \ReporteKardexExcel())->generar($datos,(string)$admin['nombre']);
+            } else {
+                require_once __DIR__.'/../../Libraries/Excel/ReporteVariacionesExcel.php';
+                $contenido=(new \ReporteVariacionesExcel())->generar($datos,(string)$admin['nombre']);
+            }
+            $fecha=strtotime((string)($datos['generado_en']??''));
+            $nombre='Reporte_'.ucfirst($tipo).'_'.date('Y-m-d_His',$fecha!==false?$fecha:time()).'.xlsx';
+            $this->responderExcelInventario($contenido,$nombre);
+        } catch (InventarioException $error) {
+            $this->sendJsonResponse($error->toApiResponse(),$error->getHttpStatus());
+        } catch (\Throwable $error) {
+            error_log('Excel de '.$tipo.' de inventario: '.$error->getMessage());
+            $this->sendJsonResponse(['status'=>false,'code'=>'EXCEL_GENERATION_FAILED','message'=>'No se pudo generar el reporte Excel. Intente nuevamente.'],500);
+        }
+    }
+
+    protected function responderExcelInventario(string $contenido, string $nombre): void {
+        while (ob_get_level()>0) ob_end_clean();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="'.$nombre.'"');
+        header('Cache-Control: private, no-store, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: '.strlen($contenido));
+        echo $contenido;
         exit;
     }
 

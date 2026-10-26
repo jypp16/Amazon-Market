@@ -163,7 +163,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const stock = parseFloat(prod.stock_actual);
             const minimo = parseFloat(prod.stock_minimo);
             stockBadge.className = stock <= minimo ? 'stock-badge stock-low' : 'stock-badge stock-normal';
-            stockBadge.textContent = stock.toFixed(2) + ' ' + prod.unidad + (stock <= minimo ? ' (Bajo)' : '');
+            const stockEntero = Math.round(stock);
+            stockBadge.textContent = stockEntero + ' ' + prod.unidad + (stock <= minimo ? ' (Bajo)' : '');
             celdaStock.appendChild(stockBadge);
 
             const celdaPrecio = document.createElement('td');
@@ -229,38 +230,62 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { /* ignore */ }
     }
 
-    function getUnidadesDecimales() {
-        return ['KG', 'LTR', 'LT', 'ML', 'G', 'OZ', 'LB', 'GAL', 'M', 'CM'];
-    }
-
-    function getUnidadById(id) {
-        return unidades.find(u => u.id_unidad == id);
-    }
-
-    function unidadesPermitenDecimales(idUnidad) {
-        const u = getUnidadById(idUnidad);
-        if (!u) return false;
-        return getUnidadesDecimales().includes(u.abreviatura.toUpperCase());
-    }
-
     function aplicarRestriccionStock(form) {
-        const selUnidad = form.querySelector('[name="id_unidad"]');
         const inpStock = form.querySelector('[name="stock_actual"]');
         const inpMinimo = form.querySelector('[name="stock_minimo"]');
-        if (!selUnidad || !inpStock || !inpMinimo) return;
+        const selCat = form.querySelector('[name="id_categoria"]');
+        const selSubcat = form.querySelector('[name="id_subcategoria"]');
 
-        function actualizar() {
-            const decimales = unidadesPermitenDecimales(selUnidad.value);
-            inpStock.step = decimales ? '0.01' : '1';
-            inpStock.min = '0';
-            inpStock.placeholder = decimales ? '0.00' : '0';
-            inpMinimo.step = decimales ? '0.01' : '1';
+        if (inpMinimo) {
+            inpMinimo.step = '1';
             inpMinimo.min = '0';
-            inpMinimo.placeholder = decimales ? '0.00' : '1';
+            inpMinimo.placeholder = '0';
         }
 
-        selUnidad.addEventListener('change', actualizar);
-        actualizar();
+        if (inpStock) {
+            inpStock.step = '1';
+            inpStock.min = '0';
+            inpStock.readOnly = true;
+            inpStock.placeholder = '0';
+        }
+
+        if (selCat && selSubcat) {
+            function refrescarSubcat(idSubcatSeleccionada = null) {
+                const idCat = parseInt(selCat.value, 10);
+                selSubcat.innerHTML = '';
+                const optDef = document.createElement('option');
+                optDef.value = '';
+                optDef.textContent = '-- Seleccionar Subcategoría --';
+                selSubcat.appendChild(optDef);
+                if (!idCat) return;
+
+                const catObj = categorias.find(c => parseInt(c.id_categoria, 10) === idCat);
+                const subcats = (catObj && Array.isArray(catObj.subcategorias)) ? catObj.subcategorias : [];
+
+                let seleccionada = false;
+                subcats.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.id_subcategoria;
+                    opt.textContent = s.nombre;
+                    if (idSubcatSeleccionada && parseInt(idSubcatSeleccionada, 10) === parseInt(s.id_subcategoria, 10)) {
+                        opt.selected = true;
+                        seleccionada = true;
+                    }
+                    selSubcat.appendChild(opt);
+                });
+
+                if (!seleccionada && !idSubcatSeleccionada && subcats.length > 0) {
+                    const general = subcats.find(s => (s.nombre || '').toLowerCase() === 'general');
+                    if (general) {
+                        selSubcat.value = general.id_subcategoria;
+                    }
+                }
+            }
+
+            const subcatActual = selSubcat.dataset.selected || selSubcat.value || null;
+            refrescarSubcat(subcatActual);
+            selCat.addEventListener('change', () => refrescarSubcat());
+        }
     }
 
     function abrirModalCrear() {
@@ -279,11 +304,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 { name: 'descripcion', label: 'Descripción', type: 'textarea', col: 'col-12', placeholder: 'Detalles del producto...' },
                 { name: 'id_categoria', label: 'Categoría', type: 'select', col: 'col-6', required: true,
                     options: categorias.map(c => ({ value: c.id_categoria, label: c.nombre })) },
+                { name: 'id_subcategoria', label: 'Subcategoría', type: 'select', col: 'col-6', required: false,
+                    options: [] },
                 { name: 'id_unidad', label: 'Unidad de Medida', type: 'select', col: 'col-6', required: true,
                     options: unidades.map(u => ({ value: u.id_unidad, label: u.nombre + ' (' + u.abreviatura + ')' })) },
                 { name: 'precio_venta', label: 'Precio de Venta (S/.)', type: 'number', col: 'col-4', required: true, step: '0.01', min: '0', placeholder: '0.00' },
-                { name: 'stock_actual', label: 'Stock Inicial', type: 'number', col: 'col-4', required: true, step: '1', min: '0', placeholder: '0' },
-                { name: 'stock_minimo', label: 'Stock Mínimo', type: 'number', col: 'col-4', required: true, step: '1', min: '0', placeholder: '1' }
+                { name: 'stock_actual', label: 'Stock Inicial', type: 'number', col: 'col-4', required: true, step: '1', min: '0', value: '0', placeholder: '0' },
+                { name: 'stock_minimo', label: 'Stock Mínimo', type: 'number', col: 'col-4', required: true, step: '1', min: '0', value: '0', placeholder: '0' }
             ]
         });
     }
@@ -306,12 +333,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 { name: 'id_categoria', label: 'Categoría', type: 'select', col: 'col-6', required: true,
                     options: categorias.map(c => ({ value: c.id_categoria, label: c.nombre })),
                     value: prod.id_categoria },
+                { name: 'id_subcategoria', label: 'Subcategoría', type: 'select', col: 'col-6', required: false,
+                    options: [],
+                    value: prod.id_subcategoria },
                 { name: 'id_unidad', label: 'Unidad de Medida', type: 'select', col: 'col-6', required: true,
                     options: unidades.map(u => ({ value: u.id_unidad, label: u.nombre + ' (' + u.abreviatura + ')' })),
                     value: prod.id_unidad },
                 { name: 'precio_venta', label: 'Precio de Venta (S/.)', type: 'number', col: 'col-4', required: true, step: '0.01', min: '0', value: prod.precio_venta },
-                { name: 'stock_actual', label: 'Stock Actual', type: 'number', col: 'col-4', required: true, step: '0.01', min: '0', value: prod.stock_actual },
-                { name: 'stock_minimo', label: 'Stock Mínimo', type: 'number', col: 'col-4', required: true, step: '0.01', min: '0', value: prod.stock_minimo }
+                { name: 'stock_actual', label: 'Stock Actual (Solo lectura)', type: 'number', col: 'col-4', required: false, step: '1', min: '0', value: Math.round(parseFloat(prod.stock_actual)) },
+                { name: 'stock_minimo', label: 'Stock Mínimo', type: 'number', col: 'col-4', required: true, step: '1', min: '0', value: Math.round(parseFloat(prod.stock_minimo)) }
             ]
         });
     }

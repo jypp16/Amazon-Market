@@ -3,11 +3,17 @@
 namespace Controllers\API;
 
 use Libraries\Core\ApiController;
+use Models\SubcategoriaModel;
 
 class CategoriaApiController extends ApiController {
 
     public function get(?string $params = ""): void {
-        $this->requirePermission('productos.listar');
+        $modo = $this->getParam('modo', '');
+        if ($modo === 'reporte') {
+            $this->requireAdminActivo('reportes.ver');
+        } else {
+            $this->requirePermission('productos.listar');
+        }
         $this->getCategorias($params);
     }
 
@@ -24,19 +30,31 @@ class CategoriaApiController extends ApiController {
     }
 
     private function getCategorias(?string $id): void {
+        $modo = $this->getParam('modo', '');
+        $subcategoriaModel = new SubcategoriaModel();
+        $soloActivas = ($modo !== 'reporte');
+
         if (!empty($id)) {
             $idVal = intval($id);
             $categoria = $this->model->find($idVal);
 
-            if (!$categoria || $categoria['estado'] != 1) {
+            if (!$categoria || ($soloActivas && $categoria['estado'] != 1)) {
                 $this->sendJsonResponse(['status' => false, 'message' => 'La categoría solicitada no existe'], 404);
             }
+            $categoria['subcategorias'] = $subcategoriaModel->obtenerPorCategoria($idVal, $soloActivas);
             $this->sendJsonResponse(['status' => true, 'data' => $categoria]);
         } else {
-            $categorias = $this->model
-                ->where(['estado = 1'])
-                ->orderBy('nombre', 'ASC')
-                ->get();
+            $query = $this->model;
+            if ($soloActivas) {
+                $query = $query->where(['estado = 1']);
+            }
+            $categorias = $query->orderBy('nombre', 'ASC')->get();
+            $agrupadas = $subcategoriaModel->obtenerTodasAgrupadasPorCategoria($soloActivas);
+            foreach ($categorias as &$cat) {
+                $idCat = (int)($cat['id_categoria'] ?? 0);
+                $cat['subcategorias'] = $agrupadas[$idCat] ?? [];
+            }
+            unset($cat);
             $this->sendJsonResponse(['status' => true, 'data' => $categorias]);
         }
     }

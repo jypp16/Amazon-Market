@@ -6,7 +6,7 @@
         <a href="<?= BASE_URL ?>/Producto" class="btn btn-secondary"><i class="fa-solid fa-arrow-left-long"></i> Volver</a>
     </div>
     
-    <form action="<?= BASE_URL ?>/Producto/actualizar/<?= $data['producto']['id_producto'] ?>" method="POST" class="form-grid">
+    <form action="<?= BASE_URL ?>/Producto/actualizar/<?= $data['producto']['id_producto'] ?>" method="POST" class="form-grid" id="form_producto_editar">
         <?php csrf_field(); ?>
         <div class="form-group col-6">
             <label for="codigo_barra">Código de Barra <span class="required">*</span></label>
@@ -33,6 +33,15 @@
         </div>
 
         <div class="form-group col-6">
+            <label for="id_subcategoria">Subcategoría <span class="required">*</span></label>
+            <select id="id_subcategoria" name="id_subcategoria" required>
+                <?php foreach($data['subcategorias'] as $subcat): ?>
+                    <option value="<?= $subcat['id_subcategoria'] ?>" <?= ($subcat['id_subcategoria'] == $data['producto']['id_subcategoria']) ? 'selected' : '' ?>><?= e($subcat['nombre']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div class="form-group col-6">
             <label for="id_unidad">Unidad de Medida <span class="required">*</span></label>
             <select id="id_unidad" name="id_unidad" required>
                 <?php foreach($data['unidades'] as $un): ?>
@@ -41,19 +50,20 @@
             </select>
         </div>
 
-        <div class="form-group col-4">
+        <div class="form-group col-6">
             <label for="precio_venta">Precio de Venta (S/.) <span class="required">*</span></label>
             <input type="number" id="precio_venta" name="precio_venta" value="<?= $data['producto']['precio_venta'] ?>" step="0.01" min="0" required>
         </div>
 
-        <div class="form-group col-4">
-            <label for="stock_actual">Stock Actual <span class="required">*</span></label>
-            <input type="number" id="stock_actual" name="stock_actual" value="<?= $data['producto']['stock_actual'] ?>" step="0.01" min="0" required>
+        <div class="form-group col-6">
+            <label for="stock_actual_display">Stock Actual</label>
+            <input type="text" id="stock_actual_display" value="<?= e($data['producto']['stock_actual']) ?> unidades" readonly disabled class="form-control-disabled">
+            <small style="color: #666;">El stock se explica por operaciones (Compras, Ventas, Bajas y Ajustes) y no es editable directamente.</small>
         </div>
 
-        <div class="form-group col-4">
+        <div class="form-group col-6">
             <label for="stock_minimo">Stock Mínimo <span class="required">*</span></label>
-            <input type="number" id="stock_minimo" name="stock_minimo" value="<?= $data['producto']['stock_minimo'] ?>" step="0.01" min="0" required>
+            <input type="number" id="stock_minimo" name="stock_minimo" value="<?= $data['producto']['stock_minimo'] ?>" step="1" min="0" required>
         </div>
 
         <div class="form-actions col-12">
@@ -63,6 +73,10 @@
     </form>
 </div>
 
+<script>
+window.SUBCATEGORIAS_DATA = <?= json_encode($data['todas_subcategorias'] ?? [], JSON_UNESCAPED_UNICODE) ?>;
+window.PRODUCTO_SUBCATEGORIA_ACTUAL = <?= (int)($data['producto']['id_subcategoria'] ?? 0) ?>;
+</script>
 <script src="<?= BASE_URL ?>/Assets/js/producto.js"></script>
 
 <?php require_once "Views/Footer.php"; ?>

@@ -198,8 +198,8 @@ function renderProductos(query) {
     }
 
     lista.forEach(function(p) {
-        var stock = parseFloat(p.stock_actual) || 0;
-        var minStock = parseFloat(p.stock_minimo) || 0;
+        var stock = parseInt(p.stock_actual, 10) || 0;
+        var minStock = parseInt(p.stock_minimo, 10) || 0;
         var agotado = stock <= 0;
         var bajo = stock <= minStock;
         var safeCode = String(p.codigo_barra || '').replace(/[^a-zA-Z0-9_\-]/g, '_');
@@ -236,7 +236,7 @@ function renderProductos(query) {
         body.className = 'pos-item-body';
         body.innerHTML =
             '<div class="pos-item-name">' + esc(p.nombre) + '</div>' +
-            '<div class="pos-item-meta">Stock ' + stock.toFixed(2) + ' ' + esc(p.unidad || '') + '</div>' +
+            '<div class="pos-item-meta">Stock ' + stock + ' ' + esc(p.unidad || '') + '</div>' +
             '<div class="pos-item-price">S/. ' + (parseFloat(p.precio_venta) || 0).toFixed(2) + '</div>';
 
         var add = document.createElement('button');
@@ -254,11 +254,11 @@ function renderProductos(query) {
 }
 
 function agregarProducto(p) {
-    var stock = parseFloat(p.stock_actual) || 0;
+    var stock = parseInt(p.stock_actual, 10) || 0;
     if (stock <= 0) { Modal.warning('Sin stock', 'No hay stock de "' + p.nombre + '".'); return; }
     var idx = carrito.findIndex(function(i) { return i.id_producto == p.id_producto; });
     if (idx >= 0) {
-        if (carrito[idx].cantidad + 1 > stock) { Modal.warning('Stock insuficiente', 'Solo quedan ' + stock.toFixed(2)); return; }
+        if (carrito[idx].cantidad + 1 > stock) { Modal.warning('Stock insuficiente', 'Solo quedan ' + stock); return; }
         carrito[idx].cantidad += 1;
         carrito[idx].subtotal = carrito[idx].cantidad * carrito[idx].precio;
     } else {
@@ -269,12 +269,12 @@ function agregarProducto(p) {
 }
 
 function setQty(i, val) {
-    var c = parseFloat(val);
+    var c = parseInt(val, 10);
     if (isNaN(c) || c <= 0) { removeItem(i); return; }
     var item = carrito[i];
     var prod = productosLista.find(function(p) { return p.id_producto == item.id_producto; });
-    var stock = prod ? (parseFloat(prod.stock_actual) || 0) : item.cantidad;
-    if (c > stock) { Modal.warning('Stock insuficiente', 'Stock: ' + stock.toFixed(2)); renderCarrito(); return; }
+    var stock = prod ? (parseInt(prod.stock_actual, 10) || 0) : item.cantidad;
+    if (c > stock) { Modal.warning('Stock insuficiente', 'Stock disponible: ' + stock); renderCarrito(); return; }
     item.cantidad = c;
     item.subtotal = c * item.precio;
     renderCarrito();
@@ -346,18 +346,17 @@ function renderCarrito() {
         var minus = document.createElement('button');
         minus.type = 'button';
         minus.innerHTML = '<i class="fa-solid fa-minus"></i>';
-        minus.addEventListener('click', function() { setQty(idx, parseFloat(item.cantidad) - 1); });
+        minus.addEventListener('click', function() { setQty(idx, item.cantidad - 1); });
         var inp = document.createElement('input');
         inp.type = 'number';
         inp.value = item.cantidad;
-        var esDecimal = isDecimalUnit(item.unidad);
-        inp.min = esDecimal ? '0.01' : '1';
-        inp.step = esDecimal ? '0.01' : '1';
+        inp.min = '1';
+        inp.step = '1';
         inp.addEventListener('change', function() { setQty(idx, inp.value); });
         var plus = document.createElement('button');
         plus.type = 'button';
         plus.innerHTML = '<i class="fa-solid fa-plus"></i>';
-        plus.addEventListener('click', function() { setQty(idx, parseFloat(item.cantidad) + 1); });
+        plus.addEventListener('click', function() { setQty(idx, item.cantidad + 1); });
         step.appendChild(minus);
         step.appendChild(inp);
         step.appendChild(plus);
@@ -480,7 +479,6 @@ function initPaydoc() {
     var wrap = document.getElementById('pos_paydoc');
     if (!wrap) return;
 
-    // Set default select values based on active buttons
     wrap.querySelectorAll('.pos-paydoc-btn.active').forEach(function(btn) {
         var target = btn.getAttribute('data-target');
         var key = btn.getAttribute('data-key');
@@ -499,7 +497,6 @@ function initPaydoc() {
         var sel = document.getElementById(target);
         if (sel) sel.value = val;
 
-        // For comprobante, only one active between boleta/factura
         if (target === 'id_tipo_comprobante') {
             wrap.querySelectorAll('.pos-paydoc-btn[data-target="id_tipo_comprobante"]').forEach(function(b) { b.classList.remove('active'); });
         }
@@ -537,7 +534,7 @@ async function guardarNuevoCliente() {
     var err = document.getElementById('cli_form_error');
     err.style.display = 'none';
     var payload = {
-        id_tipo_documento: parseInt(document.getElementById('nc_id_tipo_documento').value) || 0,
+        id_tipo_documento: parseInt(document.getElementById('nc_id_tipo_documento').value, 10) || 0,
         nro_documento: document.getElementById('nc_nro_documento').value.trim(),
         nombre: document.getElementById('nc_nombre').value.trim(),
         telefono: document.getElementById('nc_telefono').value.trim(),
@@ -556,7 +553,7 @@ async function guardarNuevoCliente() {
             return;
         }
         await cargarClientes();
-        var tdId = parseInt(document.getElementById('nc_id_tipo_documento').value) || 0;
+        var tdId = parseInt(document.getElementById('nc_id_tipo_documento').value, 10) || 0;
         var td = tiposDocumentoLista.find(function(t) { return String(t.id_tipo_documento) === String(tdId); });
         selectClient({
             id_cliente: r.data.data.id_cliente,
@@ -585,27 +582,35 @@ async function procesarVenta() {
     if (!carrito.length) { Modal.warning('Carrito vacío', 'Agregue al menos un producto.'); return; }
 
     var ok = await Modal.confirm('Procesar venta', '¿Confirmar venta por S/. ' + totalCarrito().toFixed(2) + '?', 'warning');
-    if (!ok) return;
+    if (!ok || btn.disabled) return;
 
     document.getElementById('loader_overlay').style.display = 'flex';
     btn.disabled = true;
     try {
-        var res = await Api.post('ventas', {
-            id_cliente: parseInt(id_cliente),
-            id_tipo_comprobante: parseInt(id_tc),
-            id_metodo_pago: parseInt(id_mp),
-            productos: carrito.map(function(i) { return { id_producto: i.id_producto, cantidad: i.cantidad }; })
-        });
+        var payload = {
+            id_cliente: parseInt(id_cliente, 10),
+            id_tipo_comprobante: parseInt(id_tc, 10),
+            id_metodo_pago: parseInt(id_mp, 10),
+            productos: carrito.map(function(i) { return { id_producto: parseInt(i.id_producto, 10), cantidad: parseInt(i.cantidad, 10) }; })
+        };
+        payload.referencia_solicitud = await Api.referenciaSolicitud('venta-procesar', payload);
+        var res = await Api.post('ventas', payload);
         document.getElementById('loader_overlay').style.display = 'none';
         if (res && res.ok && res.data.status) {
             var d = res.data.data;
+            // La operación ya está confirmada: liberar el carrito antes de
+            // imprimir o recargar catálogos (esos pasos también pueden fallar).
+            var itemsConfirmados = carrito;
+            carrito = [];
+            Api.confirmarSolicitud('venta-procesar');
+            renderCarrito();
             var tipoComprobante = document.getElementById('id_tipo_comprobante');
             var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex] ? tipoComprobante.options[tipoComprobante.selectedIndex].text : 'Boleta';
             var metodoPago = document.getElementById('id_metodo_pago');
             var mpNombre = metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '';
             imprimirTicket(
                 { serie: d.serie, numero: d.numero, total: d.total, tipo: tipoNombre },
-                carrito,
+                itemsConfirmados,
                 clienteSeleccionado ? clienteSeleccionado.nombre : 'Cliente general',
                 mpNombre
             );
@@ -645,7 +650,7 @@ function imprimirTicket(venta, items, cliente, metodoPago) {
     var filas = items.map(function(it) {
         return '<tr>' +
             '<td>' + esc(it.nombre) + '</td>' +
-            '<td class="r">' + parseFloat(it.cantidad).toFixed(2) + '</td>' +
+            '<td class="r">' + parseInt(it.cantidad, 10) + '</td>' +
             '<td class="r">S/. ' + parseFloat(it.precio).toFixed(2) + '</td>' +
             '<td class="r">S/. ' + parseFloat(it.subtotal).toFixed(2) + '</td>' +
             '</tr>';
@@ -675,7 +680,7 @@ function imprimirTicket(venta, items, cliente, metodoPago) {
         '<div>Serie: ' + venta.serie + ' | N°: ' + venta.numero + '</div>' +
         '<div>Fecha: ' + fecha + '</div>' +
         '<div>Cliente: ' + esc(cliente) + '</div>' +
-        '<div>Vendedor: ' + esc(VENDEDOR_NOMBRE) + '</div>' +
+        '<div>Vendedor: ' + esc(typeof VENDEDOR_NOMBRE !== 'undefined' ? VENDEDOR_NOMBRE : 'Vendedor') + '</div>' +
         '<div>Pago: ' + esc(metodoPago) + '</div>' +
         '<div class="hr"></div>' +
         '<table><thead><tr><th>Producto</th><th class="r">Cant</th><th class="r">P.U.</th><th class="r">Subt.</th></tr></thead>' +

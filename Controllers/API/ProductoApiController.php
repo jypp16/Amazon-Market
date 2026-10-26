@@ -4,12 +4,25 @@ namespace Controllers\API;
 
 use Libraries\Core\ApiController;
 use Models\CategoriaModel;
+use Models\SubcategoriaModel;
 use Models\UnidadMedidaModel;
 
 class ProductoApiController extends ApiController {
 
+    private SubcategoriaModel $subcategoriaModel;
+
+    public function __construct() {
+        parent::__construct();
+        $this->subcategoriaModel = new SubcategoriaModel();
+    }
+
     public function get(?string $params = ""): void {
-        $this->requirePermission('productos.listar');
+        $modo = $this->getParam('modo', '');
+        if ($modo === 'reporte') {
+            $this->requireAdminActivo('reportes.ver');
+        } else {
+            $this->requirePermission('productos.listar');
+        }
         $this->getProductos($params);
     }
 
@@ -30,14 +43,28 @@ class ProductoApiController extends ApiController {
     }
 
     private function getProductos(?string $id): void {
+        $modo = $this->getParam('modo', '');
         if (!empty($id)) {
             $idVal = intval($id);
-            $producto = $this->model
-                ->select(['producto.*', 'categoria.nombre as categoria', 'unidad_medida.abreviatura as unidad'])
+            $query = $this->model
+                ->select([
+                    'producto.*',
+                    'categoria.nombre as categoria',
+                    'subcategoria.nombre as subcategoria',
+                    'unidad_medida.abreviatura as unidad'
+                ])
                 ->join('categoria', 'producto.id_categoria = categoria.id_categoria', 'INNER')
+                ->join('subcategoria', 'producto.id_subcategoria = subcategoria.id_subcategoria', 'LEFT')
                 ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER')
-                ->where(['producto.id_producto' => $idVal, 'producto.estado = 1'])
-                ->first();
+                ->where(['producto.id_producto' => $idVal]);
+
+            if ($modo === 'reporte') {
+                $query->where(['(producto.estado = 1 OR EXISTS (SELECT 1 FROM kardex k WHERE k.id_producto = producto.id_producto))']);
+            } else {
+                $query->where(['producto.estado = 1']);
+            }
+
+            $producto = $query->first();
 
             if (!$producto) {
                 $this->sendJsonResponse(['status' => false, 'message' => 'El producto solicitado no existe'], 404);
@@ -46,15 +73,27 @@ class ProductoApiController extends ApiController {
         } else {
             $search = $this->getParam('q', '');
             $categoria = $this->getParam('categoria', '');
+            $subcategoria = $this->getParam('subcategoria', '');
             $stock = $this->getParam('stock', '');
             $page = max(1, intval($this->getParam('page', 1)));
             $limit = min(500, max(1, intval($this->getParam('limit', 10))));
 
             $query = $this->model
-                ->select(['producto.*', 'categoria.nombre as categoria', 'unidad_medida.abreviatura as unidad'])
+                ->select([
+                    'producto.*',
+                    'categoria.nombre as categoria',
+                    'subcategoria.nombre as subcategoria',
+                    'unidad_medida.abreviatura as unidad'
+                ])
                 ->join('categoria', 'producto.id_categoria = categoria.id_categoria', 'INNER')
-                ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER')
-                ->where(['producto.estado = 1']);
+                ->join('subcategoria', 'producto.id_subcategoria = subcategoria.id_subcategoria', 'LEFT')
+                ->join('unidad_medida', 'producto.id_unidad = unidad_medida.id_unidad', 'INNER');
+
+            if ($modo === 'reporte') {
+                $query->where(['(producto.estado = 1 OR EXISTS (SELECT 1 FROM kardex k WHERE k.id_producto = producto.id_producto))']);
+            } else {
+                $query->where(['producto.estado = 1']);
+            }
 
             if (!empty($search)) {
                 $query->orLikeWhere([
@@ -64,6 +103,9 @@ class ProductoApiController extends ApiController {
             }
             if (!empty($categoria)) {
                 $query->where(['producto.id_categoria' => intval($categoria)]);
+            }
+            if (!empty($subcategoria)) {
+                $query->where(['producto.id_subcategoria' => intval($subcategoria)]);
             }
             if ($stock === 'bajo') {
                 $query->where(['producto.stock_actual <= producto.stock_minimo']);
@@ -111,29 +153,45 @@ class ProductoApiController extends ApiController {
             $this->sendJsonResponse(['status' => false, 'message' => 'Error de validación', 'errors' => $validator->errors()], 422);
         }
 
-        $unidadesDecimales = ['KG', 'LTR', 'LT', 'ML', 'G', 'OZ', 'LB', 'GAL', 'M', 'CM'];
-        $unidadModel = new \Models\UnidadMedidaModel();
-        $unidad = $unidadModel->find(intval($data['id_unidad'] ?? 1));
-        $abrev = strtoupper(trim($unidad['abreviatura'] ?? ''));
-        $aceptaDecimales = in_array($abrev, $unidadesDecimales);
+        $idCategoria = intval($data['id_categoria'] ?? 1);
+        $idSubcategoria = isset($data['id_subcategoria']) && $data['id_subcategoria'] !== ''
+            ? intval($data['id_subcategoria'])
+            : null;
 
-        if (!$aceptaDecimales) {
-            $stock = floatval($data['stock_actual'] ?? 0);
-            $minimo = floatval($data['stock_minimo'] ?? 1);
-            if ($stock != intval($stock) || $minimo != intval($minimo)) {
-                $this->sendJsonResponse(['status' => false, 'message' => 'La unidad "' . ($unidad['nombre'] ?? '') . '" no acepta cantidades decimales. Use valores enteros.'], 422);
+        // Validar correspondencia estricta entre subcategoría y categoría
+        if ($idSubcategoria !== null) {
+            if (!$this->subcategoriaModel->perteneceACategoria($idSubcategoria, $idCategoria)) {
+                $this->sendJsonResponse([
+                    'status' => false,
+                    'message' => 'La subcategoría seleccionada no pertenece a la categoría elegida.',
+                    'errors' => ['id_subcategoria' => 'La subcategoría no corresponde a la categoría.']
+                ], 422);
+            }
+        } else {
+            // Asignar automáticamente la subcategoría General de la categoría
+            $subcats = $this->subcategoriaModel->obtenerPorCategoria($idCategoria, true);
+            if (!empty($subcats)) {
+                $idSubcategoria = (int)$subcats[0]['id_subcategoria'];
             }
         }
 
+        $stockMinimo = isset($data['stock_minimo']) ? intval($data['stock_minimo']) : 1;
+        if ($stockMinimo < 0) {
+            $this->sendJsonResponse(['status' => false, 'message' => 'El stock mínimo debe ser un número entero mayor o igual a cero.'], 422);
+        }
+
+        // REGLA FUNDAMENTAL DEL SPRINT 2:
+        // Los productos nuevos comienzan estrictamente con stock cero.
         $productoData = [
             'codigo_barra' => trim($data['codigo_barra']),
             'nombre' => trim($data['nombre']),
             'descripcion' => trim($data['descripcion'] ?? ''),
-            'id_categoria' => intval($data['id_categoria'] ?? 1),
+            'id_categoria' => $idCategoria,
+            'id_subcategoria' => $idSubcategoria,
             'id_unidad' => intval($data['id_unidad'] ?? 1),
             'precio_venta' => floatval($data['precio_venta']),
-            'stock_actual' => floatval($data['stock_actual'] ?? 0),
-            'stock_minimo' => floatval($data['stock_minimo'] ?? 1),
+            'stock_actual' => 0, // Siempre cero en creación
+            'stock_minimo' => $stockMinimo,
             'estado' => 1
         ];
 
@@ -173,10 +231,14 @@ class ProductoApiController extends ApiController {
         if (isset($data['codigo_barra'])) $datosActualizar['codigo_barra'] = trim($data['codigo_barra']);
         if (isset($data['descripcion'])) $datosActualizar['descripcion'] = trim($data['descripcion']);
         if (isset($data['id_categoria'])) $datosActualizar['id_categoria'] = intval($data['id_categoria']);
+        if (isset($data['id_subcategoria'])) $datosActualizar['id_subcategoria'] = intval($data['id_subcategoria']);
         if (isset($data['id_unidad'])) $datosActualizar['id_unidad'] = intval($data['id_unidad']);
         if (isset($data['precio_venta'])) $datosActualizar['precio_venta'] = floatval($data['precio_venta']);
-        if (isset($data['stock_actual'])) $datosActualizar['stock_actual'] = floatval($data['stock_actual']);
-        if (isset($data['stock_minimo'])) $datosActualizar['stock_minimo'] = floatval($data['stock_minimo']);
+        if (isset($data['stock_minimo'])) $datosActualizar['stock_minimo'] = intval($data['stock_minimo']);
+
+        // REGLA FUNDAMENTAL DEL SPRINT 2:
+        // No se permite modificar el stock_actual desde la edición del catálogo.
+        // Se ignora intencionalmente $data['stock_actual'].
 
         if (empty($datosActualizar)) {
             $this->sendJsonResponse(['status' => false, 'message' => 'No se proporcionaron datos para actualizar'], 400);
@@ -196,9 +258,6 @@ class ProductoApiController extends ApiController {
         if (isset($datosActualizar['precio_venta'])) {
             $validator->positiveNumber('precio_venta');
         }
-        if (isset($datosActualizar['stock_actual'])) {
-            $validator->nonNegativeNumber('stock_actual');
-        }
         if (isset($datosActualizar['stock_minimo'])) {
             $validator->nonNegativeNumber('stock_minimo');
         }
@@ -207,20 +266,20 @@ class ProductoApiController extends ApiController {
             $this->sendJsonResponse(['status' => false, 'message' => 'Error de validación', 'errors' => $validator->errors()], 422);
         }
 
-        if (isset($datosActualizar['id_unidad']) || isset($datosActualizar['stock_actual']) || isset($datosActualizar['stock_minimo'])) {
-            $unidadesDecimales = ['KG', 'LTR', 'LT', 'ML', 'G', 'OZ', 'LB', 'GAL', 'M', 'CM'];
-            $unidadId = intval($data['id_unidad'] ?? $productoExistente['id_unidad']);
-            $unidadModel = new \Models\UnidadMedidaModel();
-            $unidad = $unidadModel->find($unidadId);
-            $abrev = strtoupper(trim($unidad['abreviatura'] ?? ''));
-            $aceptaDecimales = in_array($abrev, $unidadesDecimales);
-
-            if (!$aceptaDecimales) {
-                $stock = floatval($data['stock_actual'] ?? $productoExistente['stock_actual']);
-                $minimo = floatval($data['stock_minimo'] ?? $productoExistente['stock_minimo']);
-                if ($stock != intval($stock) || $minimo != intval($minimo)) {
-                    $this->sendJsonResponse(['status' => false, 'message' => 'La unidad "' . ($unidad['nombre'] ?? '') . '" no acepta cantidades decimales. Use valores enteros.'], 422);
-                }
+        $catEfectiva = $datosActualizar['id_categoria'] ?? intval($productoExistente['id_categoria']);
+        if (isset($datosActualizar['id_subcategoria']) && $datosActualizar['id_subcategoria'] > 0) {
+            if (!$this->subcategoriaModel->perteneceACategoria($datosActualizar['id_subcategoria'], $catEfectiva)) {
+                $this->sendJsonResponse([
+                    'status' => false,
+                    'message' => 'La subcategoría no corresponde a la categoría seleccionada.',
+                    'errors' => ['id_subcategoria' => 'La subcategoría no pertenece a la categoría.']
+                ], 422);
+            }
+        } elseif (isset($datosActualizar['id_categoria']) && $datosActualizar['id_categoria'] !== intval($productoExistente['id_categoria'])) {
+            // Si cambió la categoría pero no se envió subcategoría, asignar General de la nueva
+            $subcats = $this->subcategoriaModel->obtenerPorCategoria($catEfectiva, true);
+            if (!empty($subcats)) {
+                $datosActualizar['id_subcategoria'] = (int)$subcats[0]['id_subcategoria'];
             }
         }
 

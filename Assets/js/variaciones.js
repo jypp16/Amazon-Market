@@ -2,34 +2,6 @@ document.addEventListener('DOMContentLoaded', function() {
     var rowsElement = document.getElementById('variation-rows');
     if (!rowsElement) return;
 
-    var pageSize = 4;
-    var currentPage = 1;
-    var filteredRows = [];
-    var products = [
-        { name: 'Arroz Extra BELL’S Bolsa 750g', code: '200000000005', category: 'Abarrotes', subcategory: 'Arroz', unit: 'unidad' },
-        { name: 'Leche evaporada 400 g', code: '077500000001', category: 'Lácteos', subcategory: 'Leches', unit: 'unidad' },
-        { name: 'Aceite Vegetal PRIMOR Clásico Botella 1.8L', code: '7750243059381', category: 'Abarrotes', subcategory: 'Aceites', unit: 'unidad' },
-        { name: 'Agua San Luis 500 ml', code: '7750182003049', category: 'Bebidas', subcategory: 'Agua', unit: 'unidad' },
-        { name: 'Detergente Bolívar 800 g', code: '7750000000456', category: 'Limpieza', subcategory: 'Detergentes', unit: 'unidad' },
-        { name: 'Shampoo Sedal 340 ml', code: '7750000000789', category: 'Cuidado Personal', subcategory: 'Shampoo', unit: 'unidad' }
-    ];
-    var variations = [
-        { date: '2026-10-08 10:30', product: 0, type: 'Ajuste negativo', direction: 'Disminución', quantity: 2, reason: 'Diferencia en conteo físico', before: 50, after: 48 },
-        { date: '2026-10-12 11:05', product: 1, type: 'Baja por daño', direction: 'Disminución', quantity: 2, reason: 'Latas golpeadas al descargar', before: 18, after: 16 },
-        { date: '2026-10-15 16:20', product: 1, type: 'Ajuste positivo', direction: 'Incremento', quantity: 1, reason: 'Diferencia en conteo físico', before: 16, after: 17 },
-        { date: '2026-10-18 09:50', product: 0, type: 'Baja por vencimiento', direction: 'Disminución', quantity: 1, reason: 'Producto vencido en góndola', before: 48, after: 47 },
-        { date: '2026-10-19 12:15', product: 2, type: 'Ajuste negativo', direction: 'Disminución', quantity: 3, reason: 'Diferencia en conteo físico', before: 34, after: 31 },
-        { date: '2026-10-19 14:40', product: 3, type: 'Baja por daño', direction: 'Disminución', quantity: 1, reason: 'Botella con fuga', before: 26, after: 25 },
-        { date: '2026-10-19 16:05', product: 4, type: 'Ajuste positivo', direction: 'Incremento', quantity: 2, reason: 'Regularización de inventario', before: 12, after: 14 },
-        { date: '2026-10-20 08:20', product: 5, type: 'Baja por vencimiento', direction: 'Disminución', quantity: 1, reason: 'Producto vencido en almacén', before: 20, after: 19 },
-        { date: '2026-10-20 09:10', product: 2, type: 'Baja por daño', direction: 'Disminución', quantity: 1, reason: 'Envase deformado', before: 31, after: 30 },
-        { date: '2026-10-20 10:25', product: 0, type: 'Ajuste positivo', direction: 'Incremento', quantity: 2, reason: 'Diferencia en conteo físico', before: 47, after: 49 },
-        { date: '2026-10-20 11:40', product: 3, type: 'Ajuste negativo', direction: 'Disminución', quantity: 2, reason: 'Unidades faltantes en conteo', before: 25, after: 23 },
-        { date: '2026-10-20 13:00', product: 1, type: 'Baja por daño', direction: 'Disminución', quantity: 1, reason: 'Empaque dañado', before: 17, after: 16 },
-        { date: '2026-10-20 14:15', product: 4, type: 'Ajuste negativo', direction: 'Disminución', quantity: 1, reason: 'Diferencia en conteo físico', before: 14, after: 13 },
-        { date: '2026-10-20 15:30', product: 5, type: 'Ajuste positivo', direction: 'Incremento', quantity: 1, reason: 'Regularización de inventario', before: 19, after: 20 }
-    ];
-
     var productInput = document.getElementById('variation-product');
     var categorySelect = document.getElementById('variation-category');
     var subcategorySelect = document.getElementById('variation-subcategory');
@@ -39,57 +11,200 @@ document.addEventListener('DOMContentLoaded', function() {
     var directionSelect = document.getElementById('variation-direction');
     var status = document.getElementById('variation-filter-status');
     var pagination = document.getElementById('variation-pagination');
+    var pageStatus = document.getElementById('variation-page-status');
     var summaryToggle = document.getElementById('variation-summary-toggle');
     var productBreakdown = document.getElementById('variation-product-breakdown');
     var allProductsSummary = document.getElementById('variation-all-products-summary');
     var singleProductSummary = document.getElementById('variation-single-product-summary');
     var singleProductTitle = document.getElementById('variation-single-product-title');
+    var singleProductOperations = document.getElementById('variation-single-product-operations');
+    var singleProductIncreases = document.getElementById('variation-single-product-increases');
+    var singleProductDecreases = document.getElementById('variation-single-product-decreases');
+    var totalOperationsElement = document.getElementById('variation-total-operations');
+    var productCountElement = document.getElementById('variation-product-count');
+    var exportPdfBtn = document.querySelector('.kardex-export-pdf');
+    var exportExcelBtn = document.querySelector('.kardex-export-excel');
+    var exportStatus = document.getElementById('kardex-export-status');
+
     var defaultStartDate = startDate.value;
     var defaultEndDate = endDate.value;
+    var pageSize = 10;
+    var currentPage = 1;
+    var totalPages = 1;
+    var currentConsultaRef = null;
+    var appliedFilters = null;
+    var isExportableCurrent = false;
+    var requestSequence = 0;
+    var categoriesData = {};
+    var categoryLoadError = '';
 
-    function initializeFilterOptions() {
-        var categories = Array.from(new Set(products.map(function(product) { return product.category; })));
-        categories.forEach(function(category) {
-            var option = document.createElement('option');
-            option.value = category;
-            option.textContent = category;
-            categorySelect.appendChild(option);
-        });
-        updateSubcategories();
+    if (exportPdfBtn) exportPdfBtn.disabled = true;
+    if (exportExcelBtn) exportExcelBtn.disabled = true;
+
+    function setExportStatus(message, isError) {
+        if (!exportStatus) return;
+        exportStatus.textContent = message;
+        exportStatus.classList.toggle('is-error', Boolean(isError));
     }
 
-    function updateSubcategories() {
-        var currentValue = subcategorySelect.value;
-        subcategorySelect.replaceChildren(new Option('Todas', ''));
-        var subcategories = products
-            .filter(function(product) { return !categorySelect.value || product.category === categorySelect.value; })
-            .map(function(product) { return product.subcategory; });
-        Array.from(new Set(subcategories)).forEach(function(subcategory) {
-            subcategorySelect.add(new Option(subcategory, subcategory));
+    function exportarVariacionesPdf() {
+        if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
+            setStatus('Primero realiza una consulta exportable de Variaciones.', true);
+            return;
+        }
+
+        var params = new URLSearchParams({
+            tipo: 'variaciones',
+            referencia_consulta: currentConsultaRef,
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
         });
-        if (subcategories.includes(currentValue)) subcategorySelect.value = currentValue;
+        ['q', 'id_categoria', 'id_subcategoria', 'tipo_variacion'].forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
+        if (appliedFilters.sentido) {
+            var sentido = 'TODOS';
+            if (['Incremento', 'INCREMENTO'].includes(appliedFilters.sentido)) sentido = 'INCREMENTO';
+            else if (['Disminución', 'DISMINUCION'].includes(appliedFilters.sentido)) sentido = 'DISMINUCION';
+            params.set('sentido', sentido);
+        }
+
+        exportPdfBtn.disabled = true;
+        setStatus('Generando el PDF de Variaciones…', false);
+        Api.download('reportes/exportar-pdf?' + params.toString(), 'Reporte_Variaciones.pdf')
+            .then(function(result) {
+                if (!result || !result.ok) {
+                    var errorData = (result && result.data) || {};
+                    if (['QUERY_REFERENCE_EXPIRED', 'QUERY_FILTERS_MISMATCH'].includes(errorData.code)) {
+                        currentConsultaRef = null;
+                        isExportableCurrent = false;
+                        if (exportExcelBtn) exportExcelBtn.disabled = true;
+                    }
+                    setStatus(errorData.message || 'No se pudo descargar el PDF de Variaciones.', true);
+                    return;
+                }
+                setStatus('El PDF de Variaciones se descargó correctamente.', false);
+            })
+            .catch(function() {
+                setStatus('No se pudo conectar con el servidor para descargar el PDF de Variaciones.', true);
+            })
+            .finally(function() {
+                exportPdfBtn.disabled = !isExportableCurrent;
+                if (exportExcelBtn && !isExportableCurrent) exportExcelBtn.disabled = true;
+            });
     }
 
-    function getFilteredRows() {
-        var query = productInput.value.trim().toLocaleLowerCase();
-        return variations.filter(function(row) {
-            var product = products[row.product];
-            var date = row.date.slice(0, 10);
-            var matchesProduct = !query || product.name.toLocaleLowerCase().includes(query) || product.code.toLocaleLowerCase().includes(query);
-            var matchesCategory = !categorySelect.value || product.category === categorySelect.value;
-            var matchesSubcategory = !subcategorySelect.value || product.subcategory === subcategorySelect.value;
-            var matchesStart = !startDate.value || date >= startDate.value;
-            var matchesEnd = !endDate.value || date <= endDate.value;
-            var matchesType = !typeSelect.value || row.type === typeSelect.value;
-            var matchesDirection = !directionSelect.value || row.direction === directionSelect.value;
-            return matchesProduct && matchesCategory && matchesSubcategory && matchesStart && matchesEnd && matchesType && matchesDirection;
+    function exportarVariacionesExcel() {
+        if (!isExportableCurrent || !currentConsultaRef || !appliedFilters) {
+            setStatus('Primero realiza una consulta exportable de Variaciones.', true);
+            return;
+        }
+
+        var params = new URLSearchParams({
+            tipo: 'variaciones',
+            referencia_consulta: currentConsultaRef,
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
+        });
+        ['q', 'id_categoria', 'id_subcategoria', 'tipo_variacion'].forEach(function(key) {
+            if (appliedFilters[key]) params.set(key, appliedFilters[key]);
+        });
+        if (appliedFilters.sentido) {
+            var sentido = 'TODOS';
+            if (['Incremento', 'INCREMENTO'].includes(appliedFilters.sentido)) sentido = 'INCREMENTO';
+            else if (['Disminución', 'DISMINUCION'].includes(appliedFilters.sentido)) sentido = 'DISMINUCION';
+            params.set('sentido', sentido);
+        }
+
+        exportExcelBtn.disabled = true;
+        setStatus('Generando el Excel de Variaciones…', false);
+        Api.downloadExcel('reportes/exportar-excel?' + params.toString(), 'Reporte_Variaciones.xlsx')
+            .then(function(result) {
+                if (!result || !result.ok) {
+                    var errorData = (result && result.data) || {};
+                    if (['QUERY_REFERENCE_EXPIRED', 'QUERY_FILTERS_MISMATCH'].includes(errorData.code)) {
+                        currentConsultaRef = null;
+                        isExportableCurrent = false;
+                        if (exportPdfBtn) exportPdfBtn.disabled = true;
+                    }
+                    setStatus(errorData.message || 'No se pudo descargar el Excel de Variaciones.', true);
+                    return;
+                }
+                setStatus('El Excel de Variaciones se descargó correctamente.', false);
+            })
+            .catch(function() {
+                setStatus('No se pudo conectar con el servidor para descargar el Excel de Variaciones.', true);
+            })
+            .finally(function() {
+                exportExcelBtn.disabled = !isExportableCurrent;
+                if (exportPdfBtn && !isExportableCurrent) exportPdfBtn.disabled = true;
+            });
+    }
+
+    if (exportPdfBtn) exportPdfBtn.addEventListener('click', exportarVariacionesPdf);
+    if (exportExcelBtn) exportExcelBtn.addEventListener('click', exportarVariacionesExcel);
+
+    function setStatus(message, isError) {
+        status.textContent = message;
+        status.classList.toggle('is-error', Boolean(isError));
+    }
+
+    function loadCategories() {
+        Api.get('categorias?modo=reporte').then(function(response) {
+            if (!response || !response.ok || !response.data || response.data.status !== true) {
+                var message = (response && response.data && response.data.message) || 'No se pudieron cargar las categorías.';
+                categoryLoadError = message;
+                setStatus(message, true);
+                return;
+            }
+            categoryLoadError = '';
+            var categories = Array.isArray(response.data.data) ? response.data.data : [];
+            categories.forEach(function(category) {
+                categoriesData[category.id_categoria] = category;
+                var option = document.createElement('option');
+                option.value = category.id_categoria;
+                option.textContent = category.nombre;
+                categorySelect.appendChild(option);
+            });
+        }).catch(function(error) {
+            categoryLoadError = 'Error al cargar las categorías: ' + error.message;
+            setStatus(categoryLoadError, true);
         });
     }
 
-    function renderRows() {
+    function updateSubcategories(idCategoria) {
+        subcategorySelect.replaceChildren();
+        var defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Todas';
+        subcategorySelect.appendChild(defaultOption);
+
+        if (!idCategoria || !categoriesData[idCategoria]) {
+            subcategorySelect.disabled = true;
+            return;
+        }
+
+        var subcats = categoriesData[idCategoria].subcategorias || [];
+        if (subcats.length > 0) {
+            subcats.forEach(function(sc) {
+                var option = document.createElement('option');
+                option.value = sc.id_subcategoria;
+                option.textContent = sc.nombre;
+                subcategorySelect.appendChild(option);
+            });
+            subcategorySelect.disabled = false;
+        } else {
+            subcategorySelect.disabled = true;
+        }
+    }
+
+    categorySelect.addEventListener('change', function() {
+        updateSubcategories(categorySelect.value);
+    });
+
+    function renderRows(items) {
         rowsElement.replaceChildren();
-        var pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-        if (!pageRows.length) {
+        if (!items || !items.length) {
             var emptyRow = document.createElement('tr');
             emptyRow.className = 'variation-empty-row';
             var emptyCell = document.createElement('td');
@@ -100,86 +215,107 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        pageRows.forEach(function(row) {
-            var product = products[row.product];
+        items.forEach(function(item) {
             var tr = document.createElement('tr');
-            [
-                row.date,
-                product.name + '\n' + product.code,
-                product.category + ' / ' + product.subcategory,
-                product.unit
-            ].forEach(function(value, index) {
-                var cell = document.createElement('td');
-                if (index === 1) {
-                    var productName = document.createElement('strong');
-                    productName.textContent = product.name;
-                    var productCode = document.createElement('small');
-                    productCode.textContent = product.code;
-                    cell.append(productName, productCode);
-                } else {
-                    cell.textContent = value;
-                }
-                tr.appendChild(cell);
-            });
 
+            // 1. Fecha y hora
+            var dateCell = document.createElement('td');
+            dateCell.textContent = item.fecha_hora || item.fecha_movimiento || '—';
+            tr.appendChild(dateCell);
+
+            // 2. Producto (nombre y código)
+            var productCell = document.createElement('td');
+            var productName = document.createElement('strong');
+            productName.textContent = item.producto_nombre || 'Producto';
+            var productCode = document.createElement('small');
+            productCode.textContent = item.codigo_barra || '';
+            productCell.appendChild(productName);
+            productCell.appendChild(productCode);
+            tr.appendChild(productCell);
+
+            // 3. Categoría / subcategoría
+            var catCell = document.createElement('td');
+            var catName = item.categoria_nombre || 'Sin categoría';
+            var subcatName = item.subcategoria_nombre || 'General';
+            catCell.textContent = catName + ' / ' + subcatName;
+            tr.appendChild(catCell);
+
+            // 4. Unidad
+            var unitCell = document.createElement('td');
+            unitCell.textContent = item.unidad_abreviatura || 'UND';
+            tr.appendChild(unitCell);
+
+            // 5. Tipo
             var typeCell = document.createElement('td');
             var typeBadge = document.createElement('span');
-            typeBadge.className = 'variation-type-badge ' + (row.type.indexOf('Baja') === 0 ? 'is-writeoff' : 'is-adjustment');
-            typeBadge.textContent = row.type;
+            var tipo = item.tipo_variacion || item.tipo_movimiento || '';
+            var isWriteoff = tipo.indexOf('Baja') === 0;
+            typeBadge.className = 'variation-type-badge ' + (isWriteoff ? 'is-writeoff' : 'is-adjustment');
+            typeBadge.textContent = tipo;
             typeCell.appendChild(typeBadge);
             tr.appendChild(typeCell);
 
-            [
-                { value: row.direction === 'Incremento' ? row.quantity : null, className: 'variation-increase' },
-                { value: row.direction === 'Disminución' ? row.quantity : null, className: 'variation-decrease' }
-            ].forEach(function(amount) {
-                var cell = document.createElement('td');
-                cell.className = amount.className;
-                cell.textContent = amount.value === null ? '—' : String(amount.value);
-                tr.appendChild(cell);
-            });
+            // 6. Entradas
+            var entryCell = document.createElement('td');
+            entryCell.className = 'variation-increase';
+            entryCell.textContent = (item.entrada !== null && item.entrada !== undefined) ? String(item.entrada) : '—';
+            tr.appendChild(entryCell);
 
-            [row.reason, row.before + ' → ' + row.after].forEach(function(value) {
-                var cell = document.createElement('td');
-                cell.textContent = value;
-                tr.appendChild(cell);
-            });
+            // 7. Salidas
+            var exitCell = document.createElement('td');
+            exitCell.className = 'variation-decrease';
+            exitCell.textContent = (item.salida !== null && item.salida !== undefined) ? String(item.salida) : '—';
+            tr.appendChild(exitCell);
+
+            // 8. Motivo o justificación
+            var reasonCell = document.createElement('td');
+            reasonCell.textContent = item.justificacion || '—';
+            tr.appendChild(reasonCell);
+
+            // 9. Saldo anterior → resultante
+            var balanceCell = document.createElement('td');
+            balanceCell.textContent = (item.saldo_anterior !== undefined ? item.saldo_anterior : '') + ' → ' + (item.saldo_resultante !== undefined ? item.saldo_resultante : '');
+            tr.appendChild(balanceCell);
+
             rowsElement.appendChild(tr);
         });
     }
 
-    function renderSummary() {
-        document.getElementById('variation-total-operations').textContent = String(filteredRows.length);
-        document.getElementById('variation-product-count').textContent = String(new Set(filteredRows.map(function(row) { return row.product; })).size);
-        var productIndexes = Array.from(new Set(filteredRows.map(function(row) { return row.product; })));
-        var isSingleProduct = productIndexes.length === 1;
+    function renderSummary(resumen) {
+        if (!resumen) {
+            totalOperationsElement.textContent = '0';
+            productCountElement.textContent = '0';
+            allProductsSummary.hidden = false;
+            singleProductSummary.hidden = true;
+            productBreakdown.replaceChildren();
+            return;
+        }
+
+        var totalOps = Number(resumen.total_operaciones) || 0;
+        var prodCount = Number(resumen.productos_con_variaciones) || 0;
+        var isSingleProduct = Boolean(resumen.es_producto_unico);
+
+        totalOperationsElement.textContent = String(totalOps);
+        productCountElement.textContent = String(prodCount);
+
         allProductsSummary.hidden = isSingleProduct;
         singleProductSummary.hidden = !isSingleProduct;
         productBreakdown.replaceChildren();
 
-        if (isSingleProduct) {
-            var product = products[productIndexes[0]];
-            var increases = 0;
-            var decreases = 0;
-            filteredRows.forEach(function(row) {
-                if (row.direction === 'Incremento') increases += row.quantity;
-                else decreases -= row.quantity;
-            });
-            singleProductTitle.textContent = 'Resumen · ' + product.name;
-            document.getElementById('variation-single-product-operations').textContent = String(filteredRows.length);
-            document.getElementById('variation-single-product-increases').textContent = '+' + increases;
-            document.getElementById('variation-single-product-decreases').textContent = String(decreases).replace('-', '−');
+        if (isSingleProduct && resumen.resumen_producto_unico) {
+            var single = resumen.resumen_producto_unico;
+            singleProductTitle.textContent = 'Resumen · ' + (single.producto_nombre || 'Producto');
+            singleProductOperations.textContent = String(single.operaciones || 0);
+            singleProductIncreases.textContent = '+' + (single.incrementos || 0);
+            var decVal = Number(single.disminuciones) || 0;
+            singleProductDecreases.textContent = decVal > 0 ? '−' + decVal : '−0';
             return;
         }
 
-        var counts = new Map();
-        filteredRows.forEach(function(row) {
-            var current = counts.get(row.product) || { operations: 0, entries: 0, exits: 0 };
-            current.operations++;
-            if (row.direction === 'Incremento') current.entries += row.quantity;
-            else current.exits -= row.quantity;
-            counts.set(row.product, current);
-        });
+        var listPorProducto = Array.isArray(resumen.resumen_por_producto) ? resumen.resumen_por_producto : [];
+        if (!listPorProducto.length) {
+            return;
+        }
 
         var table = document.createElement('table');
         table.className = 'variation-breakdown-table';
@@ -192,36 +328,46 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         head.appendChild(headerRow);
         table.appendChild(head);
-        var body = document.createElement('tbody');
 
-        counts.forEach(function(count, productIndex) {
-            var product = products[productIndex];
+        var body = document.createElement('tbody');
+        listPorProducto.forEach(function(prod) {
             var row = document.createElement('tr');
             var nameCell = document.createElement('td');
             var name = document.createElement('strong');
-            name.textContent = product.name;
+            name.textContent = prod.producto_nombre;
             var code = document.createElement('small');
-            code.textContent = product.code;
+            code.textContent = prod.codigo_barra || '';
             nameCell.append(name, code);
             row.appendChild(nameCell);
-            [count.operations, count.entries, count.exits].forEach(function(value, index) {
-                var cell = document.createElement('td');
-                cell.textContent = index === 2 && value > 0 ? '-' + value : String(value);
-                if (index === 1) cell.className = 'variation-breakdown-increase';
-                if (index === 2) cell.className = 'variation-breakdown-decrease';
-                row.appendChild(cell);
-            });
+
+            var opsCell = document.createElement('td');
+            opsCell.textContent = String(prod.operaciones || 0);
+            row.appendChild(opsCell);
+
+            var incCell = document.createElement('td');
+            incCell.className = 'variation-breakdown-increase';
+            incCell.textContent = '+' + (prod.incrementos || 0);
+            row.appendChild(incCell);
+
+            var decCell = document.createElement('td');
+            decCell.className = 'variation-breakdown-decrease';
+            var d = Number(prod.disminuciones) || 0;
+            decCell.textContent = d > 0 ? '−' + d : '0';
+            row.appendChild(decCell);
+
             body.appendChild(row);
         });
         table.appendChild(body);
         productBreakdown.appendChild(table);
     }
 
-    function renderPagination() {
+    function renderPagination(paginationData) {
         pagination.replaceChildren();
-        var totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-        currentPage = Math.min(currentPage, totalPages);
-        function addButton(label, page, disabled, active) {
+        var total = Number(paginationData.total) || 0;
+        currentPage = Number(paginationData.page) || 1;
+        totalPages = Math.max(1, Number(paginationData.pages) || 1);
+
+        function addButton(label, targetPage, disabled, active) {
             var button = document.createElement('button');
             button.type = 'button';
             button.textContent = label;
@@ -231,72 +377,213 @@ document.addEventListener('DOMContentLoaded', function() {
                 button.setAttribute('aria-current', 'page');
             }
             button.addEventListener('click', function() {
-                currentPage = page;
-                render();
+                if (targetPage !== currentPage) {
+                    loadVariaciones(targetPage);
+                }
             });
             pagination.appendChild(button);
         }
-        addButton('Anterior', Math.max(1, currentPage - 1), currentPage === 1, false);
+
+        addButton('Anterior', Math.max(1, currentPage - 1), currentPage <= 1, false);
+
         for (var page = 1; page <= totalPages; page++) {
             addButton(String(page), page, false, page === currentPage);
         }
-        addButton('Siguiente', Math.min(totalPages, currentPage + 1), currentPage === totalPages, false);
-        var first = filteredRows.length ? (currentPage - 1) * pageSize + 1 : 0;
-        var last = filteredRows.length ? Math.min(currentPage * pageSize, filteredRows.length) : 0;
-        document.getElementById('variation-page-status').textContent = 'Mostrando ' + first + '–' + last + ' de ' + filteredRows.length + ' operaciones';
+
+        addButton('Siguiente', Math.min(totalPages, currentPage + 1), currentPage >= totalPages, false);
+
+        var first = total > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+        var last = total > 0 ? Math.min(currentPage * pageSize, total) : 0;
+        pageStatus.textContent = 'Mostrando ' + (total > 0 ? first + '–' + last : '0') + ' de ' + total + ' operaciones';
     }
 
-    function render() {
-        renderRows();
-        renderSummary();
-        renderPagination();
+    async function loadVariaciones(page) {
+        var requestSeq = ++requestSequence;
+        page = page || 1;
+        if (exportPdfBtn) exportPdfBtn.disabled = true;
+        if (exportExcelBtn) exportExcelBtn.disabled = true;
+        isExportableCurrent = false;
+        setExportStatus('Consultando variaciones y preparando las exportaciones...', false);
+
+        if (!appliedFilters) {
+            appliedFilters = {
+                q: productInput.value.trim(),
+                id_categoria: categorySelect.value,
+                id_subcategoria: subcategorySelect.value,
+                fecha_inicio: startDate.value,
+                fecha_fin: endDate.value,
+                tipo_variacion: typeSelect.value,
+                sentido: directionSelect.value
+            };
+        }
+
+        var params = new URLSearchParams({
+            page: String(page),
+            limit: String(pageSize),
+            fecha_inicio: appliedFilters.fecha_inicio,
+            fecha_fin: appliedFilters.fecha_fin
+        });
+
+        if (appliedFilters.q) params.set('q', appliedFilters.q);
+        if (appliedFilters.id_categoria) params.set('id_categoria', appliedFilters.id_categoria);
+        if (appliedFilters.id_subcategoria) params.set('id_subcategoria', appliedFilters.id_subcategoria);
+        if (appliedFilters.tipo_variacion) params.set('tipo_variacion', appliedFilters.tipo_variacion);
+
+        if (appliedFilters.sentido) {
+            var sentidoParam = 'TODOS';
+            if (appliedFilters.sentido === 'Incremento' || appliedFilters.sentido === 'INCREMENTO') {
+                sentidoParam = 'INCREMENTO';
+            } else if (appliedFilters.sentido === 'Disminución' || appliedFilters.sentido === 'DISMINUCION') {
+                sentidoParam = 'DISMINUCION';
+            }
+            params.set('sentido', sentidoParam);
+        }
+
+        if (currentConsultaRef) {
+            params.set('referencia_consulta', currentConsultaRef);
+        }
+
+        rowsElement.replaceChildren();
+        var loadingRow = document.createElement('tr');
+        loadingRow.className = 'variation-empty-row';
+        var loadingCell = document.createElement('td');
+        loadingCell.colSpan = 9;
+        loadingCell.textContent = 'Cargando variaciones…';
+        loadingRow.appendChild(loadingCell);
+        rowsElement.appendChild(loadingRow);
+
+        try {
+            var response = await Api.get('reportes/variaciones?' + params.toString());
+            if (requestSeq !== requestSequence) return;
+            if (!response) return;
+
+            if (!response.ok || !response.data || response.data.status !== true) {
+                var errData = response.data || {};
+                if (errData.code === 'QUERY_REFERENCE_EXPIRED' || errData.code === 'QUERY_FILTERS_MISMATCH') {
+                    currentConsultaRef = null;
+                }
+                throw new Error(errData.message || 'No se pudieron cargar las variaciones.');
+            }
+
+            var data = response.data.data || {};
+            currentConsultaRef = data.referencia_consulta || null;
+            isExportableCurrent = Boolean(data.exportable);
+
+            var items = Array.isArray(data.items) ? data.items : [];
+            var resumen = data.resumen || {};
+            var paginationData = data.pagination || { total: items.length, page: page, limit: pageSize, pages: 1 };
+            var totalCount = Number(paginationData.total) || 0;
+            isExportableCurrent = Boolean(data.exportable) && totalCount > 0;
+
+            renderRows(items);
+            renderSummary(resumen);
+            renderPagination(paginationData);
+
+            if (exportPdfBtn) exportPdfBtn.disabled = !isExportableCurrent;
+            if (exportExcelBtn) exportExcelBtn.disabled = !isExportableCurrent;
+            if (isExportableCurrent) {
+                setExportStatus(totalCount + ' variaciones encontradas. Puedes exportar el reporte en PDF o Excel.', false);
+            } else if (totalCount === 0) {
+                setExportStatus('No hay variaciones para esta consulta. PDF y Excel se habilitarán cuando existan registros.', false);
+            } else {
+                setExportStatus('La consulta encontró variaciones, pero no se pudo habilitar la exportación. Vuelve a consultar.', true);
+            }
+
+            setStatus(categoryLoadError, Boolean(categoryLoadError));
+        } catch (error) {
+            if (requestSeq !== requestSequence) return;
+            rowsElement.replaceChildren();
+            var errorRow = document.createElement('tr');
+            errorRow.className = 'variation-empty-row';
+            var errorCell = document.createElement('td');
+            errorCell.colSpan = 9;
+            errorCell.textContent = 'No se pudieron cargar las variaciones.';
+            errorRow.appendChild(errorCell);
+            rowsElement.appendChild(errorRow);
+
+            pageStatus.textContent = 'Error al cargar variaciones.';
+            pagination.replaceChildren();
+            if (exportPdfBtn) exportPdfBtn.disabled = true;
+            if (exportExcelBtn) exportExcelBtn.disabled = true;
+            isExportableCurrent = false;
+            currentConsultaRef = null;
+            setExportStatus(error.message || 'No se pudo verificar la disponibilidad de exportación.', true);
+            setStatus(error.message, true);
+        }
     }
 
     document.getElementById('variation-apply').addEventListener('click', function() {
         if (!startDate.value || !endDate.value) {
-            status.textContent = 'Selecciona las fechas inicial y final para consultar.';
-            status.classList.add('is-error');
+            setStatus('Selecciona las fechas inicial y final para consultar.', true);
             (startDate.value ? endDate : startDate).focus();
             return;
         }
         if (startDate.value && endDate.value && startDate.value > endDate.value) {
-            status.textContent = 'La fecha inicial no puede ser posterior a la fecha final.';
-            status.classList.add('is-error');
+            setStatus('La fecha inicial no puede ser posterior a la fecha final.', true);
             startDate.focus();
             return;
         }
-        status.textContent = '';
-        status.classList.remove('is-error');
-        currentPage = 1;
-        filteredRows = getFilteredRows();
-        render();
+
+        setStatus('', false);
+        currentConsultaRef = null;
+        appliedFilters = {
+            q: productInput.value.trim(),
+            id_categoria: categorySelect.value,
+            id_subcategoria: subcategorySelect.value,
+            fecha_inicio: startDate.value,
+            fecha_fin: endDate.value,
+            tipo_variacion: typeSelect.value,
+            sentido: directionSelect.value
+        };
+
+        loadVariaciones(1);
     });
 
     document.getElementById('variation-clear').addEventListener('click', function() {
         productInput.value = '';
         categorySelect.value = '';
-        updateSubcategories();
+        updateSubcategories('');
         subcategorySelect.value = '';
         startDate.value = defaultStartDate;
         endDate.value = defaultEndDate;
         typeSelect.value = '';
         directionSelect.value = '';
-        status.textContent = '';
-        status.classList.remove('is-error');
-        currentPage = 1;
-        filteredRows = variations.slice();
-        render();
+        setStatus('', false);
+
+        currentConsultaRef = null;
+        appliedFilters = {
+            q: '',
+            id_categoria: '',
+            id_subcategoria: '',
+            fecha_inicio: defaultStartDate,
+            fecha_fin: defaultEndDate,
+            tipo_variacion: '',
+            sentido: ''
+        };
+
+        loadVariaciones(1);
     });
 
-    categorySelect.addEventListener('change', updateSubcategories);
     summaryToggle.addEventListener('click', function() {
         var expanded = summaryToggle.getAttribute('aria-expanded') === 'true';
         summaryToggle.setAttribute('aria-expanded', String(!expanded));
         productBreakdown.hidden = expanded;
-        summaryToggle.querySelector('i').classList.toggle('is-rotated', !expanded);
+        var icon = summaryToggle.querySelector('i');
+        if (icon) {
+            icon.classList.toggle('is-rotated', !expanded);
+        }
     });
 
-    initializeFilterOptions();
-    filteredRows = variations.slice();
-    render();
+    loadCategories();
+    // Carga inicial automática con filtros por defecto
+    appliedFilters = {
+        q: productInput.value.trim(),
+        id_categoria: categorySelect.value,
+        id_subcategoria: subcategorySelect.value,
+        fecha_inicio: startDate.value,
+        fecha_fin: endDate.value,
+        tipo_variacion: typeSelect.value,
+        sentido: directionSelect.value
+    };
+    loadVariaciones(1);
 });

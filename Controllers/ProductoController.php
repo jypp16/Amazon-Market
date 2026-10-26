@@ -5,6 +5,7 @@ namespace Controllers;
 use Libraries\Core\Controller;
 use Services\ProductoService;
 use Models\CategoriaModel;
+use Models\SubcategoriaModel;
 use Models\UnidadMedidaModel;
 
 class ProductoController extends Controller {
@@ -41,9 +42,11 @@ class ProductoController extends Controller {
 
     public function crear() {
         $catModel = new CategoriaModel();
-        $unidadModel = new \Models\UnidadMedidaModel();
+        $subcatModel = new SubcategoriaModel();
+        $unidadModel = new UnidadMedidaModel();
         $data = [
             'categorias' => $catModel->obtenerActivas(),
+            'subcategorias' => $subcatModel->obtenerTodasAgrupadasPorCategoria(true),
             'unidades' => $unidadModel->obtenerActivas(),
             'page_title' => 'Nuevo Producto - Amazon Market'
         ];
@@ -89,10 +92,13 @@ class ProductoController extends Controller {
         }
 
         $catModel = new CategoriaModel();
-        $unidadModel = new \Models\UnidadMedidaModel();
+        $subcatModel = new SubcategoriaModel();
+        $unidadModel = new UnidadMedidaModel();
         $data = [
             'producto' => $producto,
             'categorias' => $catModel->obtenerActivas(),
+            'subcategorias' => $subcatModel->obtenerPorCategoria((int)$producto['id_categoria'], true),
+            'todas_subcategorias' => $subcatModel->obtenerTodasAgrupadasPorCategoria(true),
             'unidades' => $unidadModel->obtenerActivas(),
             'page_title' => 'Editar Producto - Amazon Market'
         ];

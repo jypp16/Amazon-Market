@@ -7,10 +7,11 @@
             <p>Entradas, salidas y saldos por producto. Consulta de solo lectura.</p>
         </div>
         <div class="kardex-export-actions">
-            <button type="button" class="kardex-export-pdf"><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> Exportar PDF</button>
-            <button type="button" class="kardex-export-excel"><i class="fa-regular fa-file-excel" aria-hidden="true"></i> Exportar Excel</button>
+            <button type="button" class="kardex-export-pdf" disabled><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> Exportar PDF</button>
+            <button type="button" class="kardex-export-excel" disabled><i class="fa-regular fa-file-excel" aria-hidden="true"></i> Exportar Excel</button>
         </div>
     </header>
+    <p id="kardex-export-status" class="kardex-export-status" role="status" aria-live="polite">Las exportaciones se habilitan cuando hay movimientos para la consulta.</p>
 
     <div class="kardex-filter-card" aria-label="Filtros del Kardex">
         <div class="kardex-filter-grid">
@@ -27,11 +28,11 @@
             </div>
             <div class="kardex-filter-field">
                 <label for="kardex-subcategory">Subcategoría</label>
-                <select id="kardex-subcategory" disabled><option value="">Por implementar</option></select>
+                <select id="kardex-subcategory" disabled><option value="">Todas</option></select>
             </div>
             <div class="kardex-filter-field">
                 <label for="kardex-start-date">Desde</label>
-                <input id="kardex-start-date" type="date">
+                <input id="kardex-start-date" type="date" value="<?= date('Y-m-01') ?>">
             </div>
             <div class="kardex-filter-field">
                 <label for="kardex-end-date">Hasta (obligatorio)</label>

@@ -3,12 +3,14 @@
 namespace Controllers;
 
 use Libraries\Core\Controller;
+use Libraries\Core\InventarioException;
 use Services\VentaService;
 use Models\ClienteModel;
 use Models\ProductoModel;
 use Models\TipoComprobanteModel;
 use Models\MetodoPagoModel;
 use Models\CategoriaModel;
+use Throwable;
 
 class VentaController extends Controller {
 
@@ -56,15 +58,23 @@ class VentaController extends Controller {
                 $input = $_POST;
             }
 
-            // Vincular venta al inquilino autenticado (defensa BOLA/IDOR)
+            // Vincular venta al inquilino autenticado (defensa BOLA/IDOR - Task 8)
             $input['id_usuario'] = intval($_SESSION['idUser'] ?? 0);
 
-            $resultado = $this->service->procesarVenta($input);
-
             header('Content-Type: application/json');
-            http_response_code($resultado['status'] ? 201 : 400);
-            echo json_encode($resultado);
+            try {
+                $resultado = $this->service->procesarVenta($input);
+                http_response_code($resultado['status'] ? 201 : 400);
+                echo json_encode($resultado);
+            } catch (InventarioException $e) {
+                http_response_code($e->getStatusCode());
+                echo json_encode($e->asResponseArray());
+            } catch (Throwable $e) {
+                http_response_code(400);
+                echo json_encode(['status' => false, 'message' => $e->getMessage()]);
+            }
             exit;
         }
     }
 }
+

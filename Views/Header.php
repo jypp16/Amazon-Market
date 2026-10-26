@@ -24,7 +24,7 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
     <!-- Hojas de Estilos Corporativas (Azul y Dorado) -->
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/style.css?v=<?= filemtime(__DIR__ . '/../Assets/css/style.css') ?>">
     <script>const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
-    <script src="<?= BASE_URL ?>/Assets/js/api.js"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
 </head>
 <body>
     <div class="app-layout">
@@ -69,9 +69,11 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
                         <a href="<?= BASE_URL ?>/Producto" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Producto') !== false) ? 'active' : '' ?>">
                             <i class="fa-solid fa-border-all"></i><span>Productos</span>
                         </a>
+                        <?php if ($rol == 1 && in_array('inventario.ajustes', $slugs)): ?>
                         <a href="<?= BASE_URL ?>/Inventario/ajustes" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Inventario/ajustes') === 0) ? 'active' : '' ?>">
                             <i class="fa-solid fa-sliders"></i><span>Ajustes de inventario</span>
                         </a>
+                        <?php endif; ?>
                     </div>
                 </details>
                 <?php endif; ?>

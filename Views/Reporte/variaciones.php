@@ -7,10 +7,11 @@
             <p>Bajas por daño o vencimiento y ajustes de conteo. Consulta de solo lectura.</p>
         </div>
         <div class="kardex-export-actions">
-            <button type="button" class="kardex-export-pdf"><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> Exportar PDF</button>
-            <button type="button" class="kardex-export-excel"><i class="fa-regular fa-file-excel" aria-hidden="true"></i> Exportar Excel</button>
+            <button type="button" class="kardex-export-pdf" disabled><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> Exportar PDF</button>
+            <button type="button" class="kardex-export-excel" disabled><i class="fa-regular fa-file-excel" aria-hidden="true"></i> Exportar Excel</button>
         </div>
     </header>
+    <p id="kardex-export-status" class="kardex-export-status" role="status" aria-live="polite">Las exportaciones se habilitan cuando hay variaciones para la consulta.</p>
 
     <section class="kardex-filter-card variation-filter-card" aria-label="Filtros de variaciones">
         <div class="variation-filter-grid">
@@ -28,7 +29,7 @@
             </div>
             <div class="kardex-filter-field">
                 <label for="variation-start-date">Desde (obligatorio)</label>
-                <input id="variation-start-date" type="date" value="2026-10-01">
+                <input id="variation-start-date" type="date" value="<?= date('Y-m-01') ?>">
             </div>
             <div class="kardex-filter-field">
                 <label for="variation-end-date">Hasta (obligatorio)</label>
