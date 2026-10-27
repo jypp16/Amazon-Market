@@ -66,14 +66,14 @@ Se aceptarán Factura y Boleta. Inicialmente no se adjuntará una imagen, fotogr
 
 No habrá un campo genérico llamado "Título del documento". Se utilizarán los datos que realmente permiten identificarlo.
 
-| Dato | Qué representa |
-| --- | --- |
-| Proveedor | La empresa o persona que entrega la mercadería |
-| Tipo de documento | Factura o Boleta |
-| Serie | La serie que figura en el documento, como F001 |
-| Número | El número que acompaña a la serie |
-| Fecha de emisión | La fecha escrita en el documento |
-| Fecha de recepción | El día en que el minimarket recibió la mercadería |
+| Dato                | Qué representa                                               |
+| ------------------- | ------------------------------------------------------------ |
+| Proveedor           | La empresa o persona que entrega la mercadería               |
+| Tipo de documento   | Factura o Boleta                                             |
+| Serie               | La serie que figura en el documento, como F001               |
+| Número              | El número que acompaña a la serie                            |
+| Fecha de emisión    | La fecha escrita en el documento                             |
+| Fecha de recepción  | El día en que el minimarket recibió la mercadería            |
 | Total del documento | El importe final que se utilizará para comprobar el registro |
 
 El sistema guardará automáticamente la fecha y hora de registro y el administrador responsable.
@@ -116,14 +116,14 @@ El alcance acordado utiliza artículos que se reciben y venden cerrados, tal com
 
 El contenido indicado en el empaque forma parte de la descripción del artículo. No determina por sí solo cómo se cuenta el inventario.
 
-| Artículo | Cómo se contará el saldo |
-| --- | --- |
-| Arroz marca A en bolsa de 1 kg | Número de bolsas |
-| Azúcar marca B en bolsa de 1 kg | Número de bolsas |
-| Leche marca C en envase de 1 litro | Número de envases |
-| Atún marca D en lata de 170 g | Número de latas |
-| Bebida X en botella de 500 ml | Número de botellas |
-| Jamón en paquete cerrado de contenido fijo | Número de paquetes |
+| Artículo                                   | Cómo se contará el saldo |
+| ------------------------------------------ | ------------------------ |
+| Arroz marca A en bolsa de 1 kg             | Número de bolsas         |
+| Azúcar marca B en bolsa de 1 kg            | Número de bolsas         |
+| Leche marca C en envase de 1 litro         | Número de envases        |
+| Atún marca D en lata de 170 g              | Número de latas          |
+| Bebida X en botella de 500 ml              | Número de botellas       |
+| Jamón en paquete cerrado de contenido fijo | Número de paquetes       |
 
 Diez bolsas de arroz de un kilo serán diez unidades de ese producto. Una bolsa de cinco kilos será otro artículo, porque su contenido de fábrica es diferente.
 
@@ -136,10 +136,10 @@ Un artículo podrá tener presentaciones que agrupen cantidades del mismo produc
 Ejemplo ilustrativo para una cerveza específica:
 
 | Presentación | Unidades de inventario que representa |
-| --- | ---: |
-| Lata | 1 lata |
-| Pack de 6 | 6 latas |
-| Caja de 24 | 24 latas |
+| ------------ | ------------------------------------: |
+| Lata         |                                1 lata |
+| Pack de 6    |                               6 latas |
+| Caja de 24   |                              24 latas |
 
 La equivalencia depende del producto. Una caja de otro artículo puede contener 12, 20 o una cantidad distinta. No se utilizará una equivalencia universal para todo lo llamado "Caja".
 
@@ -224,9 +224,9 @@ Los vencimientos se conservarán en los detalles de compra, no como una única f
 Se aceptó separar las cantidades por vencimiento. Ejemplo ilustrativo:
 
 | Producto | Cantidad recibida | Vencimiento |
-| --- | ---: | --- |
-| Leche X | 12 envases | 15/03/2027 |
-| Leche X | 8 envases | 20/04/2027 |
+| -------- | ----------------: | ----------- |
+| Leche X  |        12 envases | 15/03/2027  |
+| Leche X  |         8 envases | 20/04/2027  |
 
 El ingreso total es de veinte unidades. Las líneas conservan las dos fechas para consulta y alertas.
 
@@ -346,9 +346,7 @@ En el historial se verá el registro inicial y sus correcciones. En los totales 
 
 ## 23. Anulación de una compra
 
-Se aceptó contemplar "Anular compra" para un registro que realmente no debía existir. No será un borrado y no se utilizará para devolver mercadería al proveedor.
-
-La compra quedará visible como anulada, con motivo, fecha y administrador. Sus efectos se revertirán mediante una operación identificada cuando sea válido hacerlo.
+ediante una operación identificada cuando sea válido hacerlo.
 
 No se podrá anular nuevamente una compra ya anulada. Tampoco se permitirán reversiones que generen existencias negativas o ignoren operaciones posteriores que necesiten revisión.
 
@@ -362,10 +360,10 @@ El stock actual no se cambiará libremente desde productos. Una diferencia encon
 
 Se distinguen tres situaciones:
 
-| Situación | Operación que la explica |
-| --- | --- |
-| Se digitó mal una compra | Corrección vinculada a la compra |
-| El conteo físico difiere del saldo del sistema | Ajuste de inventario con motivo |
+| Situación                                                       | Operación que la explica                  |
+| --------------------------------------------------------------- | ----------------------------------------- |
+| Se digitó mal una compra                                        | Corrección vinculada a la compra          |
+| El conteo físico difiere del saldo del sistema                  | Ajuste de inventario con motivo           |
 | Mercadería ingresada correctamente se dañó o venció y se retira | Baja o merma en su módulo correspondiente |
 
 Aunque cambien existencias, sus motivos son distintos. Separarlos evita ocultar pérdidas como errores de digitación o modificar una compra que realmente ocurrió.
@@ -400,26 +398,26 @@ También se han precisado las presentaciones, los importes finales, las correcci
 
 Los siguientes casos sirven para comprobar el comportamiento acordado. Todavía no son resultados de pruebas ejecutadas.
 
-| Caso | Resultado esperado |
-| --- | --- |
-| Crear un producto nuevo | Comienza con saldo cero |
-| Recibir dos cajas de 24 | Ingresa 48 unidades al producto |
-| Recibir el mismo artículo con dos vencimientos | Guarda líneas separadas y suma ambas al saldo general |
-| Vender un pack de seis | Cobra el precio de la presentación y descuenta seis unidades |
-| Disponer de cinco unidades e intentar vender un pack de seis | Impide completar esa venta por falta de existencias |
-| Cambiar un precio de venta | Afecta nuevas ventas, no las anteriores |
-| Cambiar una equivalencia | No reinterpreta operaciones históricas |
-| Recibir una respuesta perdida y reenviar | Reconoce la operación guardada, sin duplicar ingresos |
-| Fallar durante la confirmación | No deja compra, stock o Kardex parcialmente actualizados |
-| Repetir el documento del mismo proveedor | Detecta el duplicado |
-| Corregir 24 unidades a veinte | Aplica una disminución de cuatro, respetando las demás operaciones |
-| Corregir solo el costo | Mantiene las cantidades disponibles |
-| Intentar anular dos veces | Impide una segunda reversión |
-| Llegar a quince días antes del vencimiento | Genera un aviso para revisión física |
-| Marcar un aviso como revisado | Conserva la revisión y no cambia existencias |
-| Alcanzar el stock mínimo | Muestra la alerta de bajo stock |
-| Superar el mínimo después de un ingreso | Retira la alerta de bajo stock |
-| Aplicar un descuento o dividir una línea por fechas | Conserva el total final y distribuye correctamente los importes |
+| Caso                                                         | Resultado esperado                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Crear un producto nuevo                                      | Comienza con saldo cero                                            |
+| Recibir dos cajas de 24                                      | Ingresa 48 unidades al producto                                    |
+| Recibir el mismo artículo con dos vencimientos               | Guarda líneas separadas y suma ambas al saldo general              |
+| Vender un pack de seis                                       | Cobra el precio de la presentación y descuenta seis unidades       |
+| Disponer de cinco unidades e intentar vender un pack de seis | Impide completar esa venta por falta de existencias                |
+| Cambiar un precio de venta                                   | Afecta nuevas ventas, no las anteriores                            |
+| Cambiar una equivalencia                                     | No reinterpreta operaciones históricas                             |
+| Recibir una respuesta perdida y reenviar                     | Reconoce la operación guardada, sin duplicar ingresos              |
+| Fallar durante la confirmación                               | No deja compra, stock o Kardex parcialmente actualizados           |
+| Repetir el documento del mismo proveedor                     | Detecta el duplicado                                               |
+| Corregir 24 unidades a veinte                                | Aplica una disminución de cuatro, respetando las demás operaciones |
+| Corregir solo el costo                                       | Mantiene las cantidades disponibles                                |
+| Intentar anular dos veces                                    | Impide una segunda reversión                                       |
+| Llegar a quince días antes del vencimiento                   | Genera un aviso para revisión física                               |
+| Marcar un aviso como revisado                                | Conserva la revisión y no cambia existencias                       |
+| Alcanzar el stock mínimo                                     | Muestra la alerta de bajo stock                                    |
+| Superar el mínimo después de un ingreso                      | Retira la alerta de bajo stock                                     |
+| Aplicar un descuento o dividir una línea por fechas          | Conserva el total final y distribuye correctamente los importes    |
 
 ## 28. Qué se precisará en el siguiente paso
 
@@ -441,7 +439,10 @@ Estos puntos no cambian el propósito del módulo. Evitan que los casos excepcio
 Las reglas descritas son los acuerdos del grupo en esta conversación. Las siguientes referencias se utilizaron como apoyo para distinguir conceptos y conocer formas de resolverlos; no establecen que todos los minimarkets trabajen igual.
 
 - [ERPNext sobre venta con distintas unidades, equivalencias y precios](https://docs.frappe.io/erpnext/Selling-in-different-UOM).
-- [Odoo sobre presentaciones y empaques por producto](https://www.odoo.com/documentation/19.0/applications/inventory_and_mrp/inventory/product_management/configure/packaging.html).
+- [Odoo sobre presentaciones y Se aceptó contemplar "Anular compra" para un registro que realmente no debía existir. No será un borrado y no se utilizará para devolver mercadería al proveedor.
+
+La compra quedará visible como anulada, con motivo, fecha y administrador. Sus efectos se revertirán mempaques por producto](https://www.odoo.com/documentation/19.0/applications/inventory_and_mrp/inventory/product_management/configure/packaging.html).
+
 - [GS1 sobre identificación y seguimiento por lote](https://www.gs1.org/standards/gs1-global-traceability-standard/current-standard).
 - [Odoo sobre rotación según fecha de ingreso o vencimiento](https://www.odoo.com/documentation/saas-15.2/applications/inventory_and_mrp/inventory/routes/strategies/removal.html).
 - [MySQL sobre confirmación y reversión de transacciones](https://dev.mysql.com/doc/refman/8.4/en/innodb-autocommit-commit-rollback.html).
