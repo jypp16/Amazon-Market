@@ -17,7 +17,6 @@ abstract class ReporteInventarioPDF extends ReportPDF {
         $filtros = $datos['filtros_aplicados'] ?? [];
         $this->metaEnvuelta('Período:', $this->formatDate($filtros['fecha_inicio']) . ' al ' . $this->formatDate($filtros['fecha_fin']));
         $this->metaEnvuelta('Generado por:', $responsable !== '' ? $responsable : 'Administrador');
-        $this->metaEnvuelta('Referencia de consulta:', (string)($datos['referencia_consulta'] ?? ''));
 
         $labels = [
             'id_producto' => 'Producto ID', 'id_categoria' => 'Categoría ID',
