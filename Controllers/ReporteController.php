@@ -20,6 +20,124 @@ class ReporteController extends Controller {
         $this->views->render($this, "index", $data);
     }
 
+    public function cierresCaja() {
+        $cierres = $this->cierresCajaDemo();
+        $data = [
+            'page_title' => 'Cierres de caja - Amazon Market',
+            'cierres' => $cierres
+        ];
+        $this->views->render($this, 'cierresCaja', $data);
+    }
+
+    public function detalleCierreCaja($id = '') {
+        $cierres = $this->cierresCajaDemo();
+        $cierre = null;
+        foreach ($cierres as $item) {
+            if ((string)$item['id'] === (string)$id) {
+                $cierre = $item;
+                break;
+            }
+        }
+
+        if ($cierre === null) {
+            http_response_code(404);
+            $this->views->render($this, 'detalleCierreCaja', [
+                'page_title' => 'Cierre no encontrado - Amazon Market',
+                'cierre' => null
+            ]);
+            return;
+        }
+
+        $data = [
+            'page_title' => 'Detalle de cierre de caja - Amazon Market',
+            'cierre' => $cierre
+        ];
+        $this->views->render($this, 'detalleCierreCaja', $data);
+    }
+
+    private function cierresCajaDemo() {
+        return [
+            [
+                'id' => 101,
+                'closed_at' => '20/10/2026 13:30',
+                'seller' => 'Luis',
+                'shift' => 'Mañana',
+                'shift_schedule' => 'Mañana · 08:00 – 14:00',
+                'opening_at' => '20/10/2026 08:05',
+                'closing_at' => '20/10/2026 13:30',
+                'arqueo_at' => '13:25',
+                'expected' => 300.00,
+                'counted' => 295.00,
+                'opening_fund' => 200.00,
+                'closing_difference' => -5.00,
+                'opening_difference' => 0.00,
+                'observation' => 'Observación registrada.',
+                'authorization' => 'Sin excepción',
+                'cash_sales' => 80.00,
+                'income' => 50.00,
+                'expenses' => 30.00,
+                'card_sales' => 90.00,
+                'digital_sales' => 0.00,
+                'has_omitted_withdrawal' => true,
+                'movements' => [
+                    ['time' => '09:40', 'type' => 'Venta en efectivo', 'reference' => 'Boleta B001-000120', 'amount' => 80.00, 'seller' => 'Luis', 'administrator' => '—'],
+                    ['time' => '10:15', 'type' => 'Inyección', 'reference' => 'Cambio para caja', 'amount' => 50.00, 'seller' => 'Luis', 'administrator' => 'Admin (entregó)'],
+                    ['time' => '11:30', 'type' => 'Retiro', 'reference' => 'Pago a proveedor', 'amount' => -30.00, 'seller' => 'Luis', 'administrator' => 'Admin (recibió)'],
+                    ['time' => '11:45', 'type' => 'Retiro omitido', 'reference' => 'Vinculado al turno 19/10 tarde · cierre original conservado', 'amount' => 300.00, 'seller' => 'Luis', 'administrator' => 'Admin (recibió)']
+                ]
+            ],
+            [
+                'id' => 102,
+                'closed_at' => '19/10/2026 21:05',
+                'seller' => 'Marta',
+                'shift' => 'Tarde',
+                'shift_schedule' => 'Tarde · 14:00 – 21:00',
+                'opening_at' => '19/10/2026 14:00',
+                'closing_at' => '19/10/2026 21:05',
+                'arqueo_at' => '20:55',
+                'expected' => 500.00,
+                'counted' => 200.00,
+                'opening_fund' => 200.00,
+                'closing_difference' => -300.00,
+                'opening_difference' => -10.00,
+                'observation' => 'Se registró el faltante del arqueo.',
+                'authorization' => 'Sin excepción',
+                'cash_sales' => 240.00,
+                'income' => 100.00,
+                'expenses' => 40.00,
+                'card_sales' => 120.00,
+                'digital_sales' => 40.00,
+                'has_omitted_withdrawal' => true,
+                'movements' => [
+                    ['time' => '20:50', 'type' => 'Retiro omitido', 'reference' => 'Vinculado al turno 18/10 mañana · cierre original conservado', 'amount' => 300.00, 'seller' => 'Marta', 'administrator' => 'Admin (recibió)']
+                ]
+            ],
+            [
+                'id' => 103,
+                'closed_at' => '18/10/2026 21:00',
+                'seller' => 'Marta',
+                'shift' => 'Tarde',
+                'shift_schedule' => 'Tarde · 14:00 – 21:00',
+                'opening_at' => '18/10/2026 14:00',
+                'closing_at' => '18/10/2026 21:00',
+                'arqueo_at' => '20:50',
+                'expected' => 450.00,
+                'counted' => 450.00,
+                'opening_fund' => 200.00,
+                'closing_difference' => 0.00,
+                'opening_difference' => 0.00,
+                'observation' => 'Sin observación.',
+                'authorization' => 'Sin excepción',
+                'cash_sales' => 200.00,
+                'income' => 80.00,
+                'expenses' => 30.00,
+                'card_sales' => 80.00,
+                'digital_sales' => 20.00,
+                'movements' => []
+            ]
+        ];
+    }
+
     public function ventas() {
         $filtros = $_GET;
         $resultado = $this->service->reporteVentas($filtros);

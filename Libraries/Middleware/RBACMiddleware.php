@@ -188,6 +188,12 @@ class RBACMiddleware extends Middleware {
                 'index'   => 'ventas.acceder',
                 'guardar' => 'ventas.procesar',
             ],
+            'caja' => [
+                'abrir'      => 'turnos.abrir',
+                'movimientos' => 'turnos.acceder',
+                'arqueo'     => 'turnos.cerrar',
+                'consultar'  => 'turnos.acceder',
+            ],
             'compra' => [
                 'index'     => 'compras.listar',
                 'registrar' => 'compras.crear',
@@ -208,6 +214,8 @@ class RBACMiddleware extends Middleware {
                 'comprobantes'           => 'reportes.ver',
                 'metodospago'            => 'reportes.ver',
                 'resumen'                => 'reportes.ver',
+                'cierrescaja'            => 'reportes.ver',
+                'detallecierrecaja'      => 'reportes.ver',
             ],
         ];
 
