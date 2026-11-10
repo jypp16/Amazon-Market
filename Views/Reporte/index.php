@@ -67,6 +67,16 @@
         </div>
     </a>
 
+    <a href="<?= BASE_URL ?>/Reporte/cierresCaja" class="card report-card orange-card" aria-label="Cierres de caja: diferencias y relevos">
+        <div class="card-body">
+            <div class="stat-icon"><i class="fa-solid fa-cash-register" aria-hidden="true"></i></div>
+            <div class="stat-details">
+                <h3>Cierres de caja</h3>
+                <p>Diferencias y relevos</p>
+            </div>
+        </div>
+    </a>
+
     <a href="<?= BASE_URL ?>/Reporte/clientes" class="card report-card blue-card">
         <div class="card-body">
             <div class="stat-icon"><i class="fa-solid fa-users"></i></div>

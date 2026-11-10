@@ -23,6 +23,26 @@
     <script src="<?= BASE_URL ?>/Assets/js/kardex.js?v=<?= filemtime(__DIR__ . "/../Assets/js/kardex.js") ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/variaciones.js?v=<?= filemtime(__DIR__ . "/../Assets/js/variaciones.js") ?>"></script>
 
+    <?php if (strpos($_GET['url'] ?? '', 'Caja/abrir') === 0): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaService.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/caja.js?v=<?= filemtime(__DIR__ . "/../Assets/js/caja.js") ?>"></script>
+    <?php endif; ?>
+
+    <?php if (strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaMovimientosService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaMovimientosService.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaMovimientos.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaMovimientos.js") ?>"></script>
+    <?php endif; ?>
+
+    <?php if (strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaArqueoService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaArqueoService.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaArqueo.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaArqueo.js") ?>"></script>
+    <?php endif; ?>
+
+    <?php if (strpos($_GET['url'] ?? '', 'Caja/consultar') === 0): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaConsultaService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaConsultaService.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/cajaConsulta.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaConsulta.js") ?>"></script>
+    <?php endif; ?>
+
     <!-- Auto-ocultar alertas flash después de 4 segundos -->
     <script>
     document.addEventListener('DOMContentLoaded', function() {

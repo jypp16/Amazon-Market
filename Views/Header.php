@@ -8,7 +8,13 @@ $permisos = RBACMiddleware::getPermisosRol($rol);
 $slugs = array_column($permisos, 'slug');
 $esKardex = strpos($_GET['url'] ?? '', 'Reporte/kardex') === 0;
 $esReporteVariaciones = strpos($_GET['url'] ?? '', 'Reporte/variaciones') === 0;
+$esReporteCierresCaja = strpos($_GET['url'] ?? '', 'Reporte/cierresCaja') === 0;
+$esDetalleCierreCaja = strpos($_GET['url'] ?? '', 'Reporte/detalleCierreCaja') === 0;
 $esReporteInventario = $esKardex || $esReporteVariaciones;
+$esCajaAbrir = strpos($_GET['url'] ?? '', 'Caja/abrir') === 0;
+$esCajaMovimientos = strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0;
+$esCajaArqueo = strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0;
+$esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -23,6 +29,12 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Hojas de Estilos Corporativas (Azul y Dorado) -->
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/style.css?v=<?= filemtime(__DIR__ . '/../Assets/css/style.css') ?>">
+    <?php if ($esCajaAbrir || $esCajaMovimientos || $esCajaArqueo || $esCajaConsultar): ?>
+    <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/caja.css?v=<?= filemtime(__DIR__ . '/../Assets/css/caja.css') ?>">
+    <?php endif; ?>
+    <?php if ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
+    <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/cierresCaja.css?v=<?= filemtime(__DIR__ . '/../Assets/css/cierresCaja.css') ?>">
+    <?php endif; ?>
     <script>const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
     <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
 </head>
@@ -129,6 +141,38 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
                 </a>
                 <?php endif; ?>
 
+                <?php
+                $puedeAccederCaja = in_array('turnos.acceder', $slugs);
+                $enSeccionCaja = strpos($_GET['url'] ?? '', 'Caja') === 0;
+                ?>
+                <?php if ($puedeAccederCaja): ?>
+                <details class="menu-group" <?= $enSeccionCaja ? 'open' : '' ?>>
+                    <summary class="menu-link menu-group-toggle <?= $enSeccionCaja ? 'active' : '' ?>">
+                        <i class="fa-solid fa-money-bill-1-wave"></i>
+                        <span>Caja</span>
+                        <i class="fa-solid fa-chevron-down menu-chevron"></i>
+                    </summary>
+                    <div class="menu-submenu">
+                        <?php if (in_array('turnos.abrir', $slugs)): ?>
+                        <a href="<?= BASE_URL ?>/Caja/abrir" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/abrir') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-lock-open"></i><span>Abrir caja</span>
+                        </a>
+                        <?php endif; ?>
+                        <a href="<?= BASE_URL ?>/Caja/movimientos" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-arrow-right-arrow-left"></i><span>Movimientos</span>
+                        </a>
+                        <?php if (in_array('turnos.cerrar', $slugs)): ?>
+                        <a href="<?= BASE_URL ?>/Caja/arqueo" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-check"></i><span>Arqueo y cierre</span>
+                        </a>
+                        <?php endif; ?>
+                        <a href="<?= BASE_URL ?>/Caja/consultar" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/consultar') === 0) ? 'active' : '' ?>">
+                            <i class="fa-solid fa-magnifying-glass"></i><span>Consultar caja</span>
+                        </a>
+                    </div>
+                </details>
+                <?php endif; ?>
+
                 <?php if (in_array('reportes.ver', $slugs)): ?>
                 <a href="<?= BASE_URL ?>/Reporte" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Reporte') !== false) ? 'active' : '' ?>">
                     <i class="fa-solid fa-chart-pie"></i> <span>Reportes</span>
@@ -144,7 +188,7 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
         <!-- Contenedor Principal (Workspace) -->
         <main class="main-content">
             <!-- Barra Superior del Workspace -->
-            <header class="topbar <?= $esReporteInventario ? 'kardex-topbar' : '' ?>">
+            <header class="topbar <?= $esReporteInventario ? 'kardex-topbar' : '' ?> <?= ($esCajaAbrir || $esCajaMovimientos || $esCajaArqueo || $esCajaConsultar) ? 'cash-opening-topbar' : '' ?>">
                 <div class="topbar-left">
                     <?php if ($esReporteInventario): ?>
                     <nav class="kardex-breadcrumb" aria-label="Ruta de navegación">
@@ -153,11 +197,32 @@ $esReporteInventario = $esKardex || $esReporteVariaciones;
                         <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
                         <strong><?= $esKardex ? 'Kardex de inventario' : 'Reporte de variaciones' ?></strong>
                     </nav>
+                    <?php elseif ($esCajaAbrir || $esCajaMovimientos || $esCajaArqueo || $esCajaConsultar): ?>
+                    <h1 class="page-title">
+                        <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+                        <?= $esCajaAbrir ? 'Abrir caja' : ($esCajaMovimientos ? 'Movimientos de caja' : ($esCajaArqueo ? 'Arqueo y cierre' : 'Consultar caja')) ?>
+                    </h1>
+                    <?php elseif ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
+                    <nav class="kardex-breadcrumb" aria-label="Ruta de navegación">
+                        <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
+                        <span>Reportes</span>
+                        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                        <strong>Cierres de caja</strong>
+                    </nav>
                     <?php else: ?>
                     <h1 class="page-title"><i class="fa-solid fa-folder-open"></i> <?= e(str_replace(" - Amazon Market", "", $data['page_title'] ?? '')) ?></h1>
                     <?php endif; ?>
                 </div>
                 <div class="topbar-right">
+                    <?php if ($esCajaAbrir): ?>
+                    <span class="cash-opening-status" id="cash_opening_status">Sin caja abierta</span>
+                    <?php elseif ($esCajaMovimientos): ?>
+                    <span class="cash-opening-status" id="cash_movements_status">Cargando estado de caja…</span>
+                    <?php elseif ($esCajaArqueo): ?>
+                    <span class="cash-opening-status" id="cash_arqueo_status">Cargando estado de caja…</span>
+                    <?php elseif ($esCajaConsultar): ?>
+                    <span class="cash-opening-status" id="cash_consulta_status">Cargando perfil…</span>
+                    <?php endif; ?>
                     <span class="date-badge"><i class="fa-solid fa-calendar-day"></i> <?= date('d/m/Y') ?></span>
                 </div>
             </header>
