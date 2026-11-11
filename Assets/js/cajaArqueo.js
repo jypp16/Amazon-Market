@@ -7,6 +7,7 @@
     var noSession = document.getElementById('cash_arqueo_no_session');
     var loadError = document.getElementById('cash_arqueo_load_error');
     var statusChip = document.getElementById('cash_arqueo_status');
+    var scheduleBadge = null;
     var countInput = document.getElementById('cash_count_amount');
     var observationInput = document.getElementById('cash_count_observation');
     var saveButton = document.getElementById('cash_count_save');
@@ -35,6 +36,11 @@
     var authWarning = document.getElementById('cash_auth_warning');
     var authFeedback = document.getElementById('cash_auth_feedback');
     var appLayout = document.querySelector('.app-layout');
+    var workflowConfig = window.CAJA_WORKFLOWS_CONFIG || {};
+    var scheduleState = 'within_hours';
+    var schedule = null;
+    var sellerId = workflowConfig.sellerId;
+    var sellerUsername = workflowConfig.sellerUsername || '';
 
     function formatMoney(value) {
         var amount = Number(value);
@@ -51,6 +57,40 @@
         if (amount < 0) return '−' + formatMoney(amount);
         if (amount > 0) return '+' + formatMoney(amount);
         return formatMoney(0);
+    }
+
+    function formatArqueoDateTime(item) {
+        var dateTime = item.date_time || item.datetime || item.created_at || item.fecha_hora;
+        if (dateTime) {
+            var rawDateTime = String(dateTime);
+            var isoDateTime = rawDateTime.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/);
+            if (isoDateTime) {
+                return isoDateTime[3] + '/' + isoDateTime[2] + '/' + isoDateTime[1]
+                    + ' ' + isoDateTime[4] + ':' + isoDateTime[5];
+            }
+            if (/^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}$/.test(rawDateTime)) return rawDateTime;
+            var parsedDateTime = new Date(rawDateTime);
+            if (!Number.isNaN(parsedDateTime.getTime())) {
+                return new Intl.DateTimeFormat('es-PE', {
+                    timeZone: 'America/Lima',
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).format(parsedDateTime).replace(',', '');
+            }
+            return rawDateTime;
+        }
+
+        var date = item.date || item.arqueo_date || item.fecha;
+        var time = item.time || item.hora;
+        if (date && time) {
+            var isoDate = String(date).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            return (isoDate ? isoDate[3] + '/' + isoDate[2] + '/' + isoDate[1] : date) + ' ' + time;
+        }
+        return time || '—';
     }
 
     function parseCount() {
@@ -73,6 +113,41 @@
     function activeArqueo() {
         if (!session) return null;
         return (session.history || []).find(function (item) { return item.status === 'Vigente'; }) || null;
+    }
+
+    function latestArqueo() {
+        return session && Array.isArray(session.history) && session.history.length
+            ? session.history[session.history.length - 1] : null;
+    }
+
+    function renderSchedule(turn) {
+        schedule = turn && turn.shift ? turn.shift : null;
+        scheduleState = turn && turn.status ? turn.status : 'within_hours';
+        var topbarRight = document.querySelector('.cash-opening-topbar .topbar-right');
+        if (!scheduleBadge && topbarRight) {
+            scheduleBadge = document.createElement('span');
+            scheduleBadge.id = 'cash_arqueo_schedule_status';
+            scheduleBadge.className = 'cash-schedule-badge';
+            topbarRight.insertBefore(scheduleBadge, statusChip);
+        }
+        if (scheduleBadge) {
+            var outside = scheduleState === 'outside_hours';
+            scheduleBadge.textContent = outside ? 'Fuera de horario'
+                : (scheduleState === 'no_shift' ? 'Sin turno hoy' : 'Dentro del horario');
+            scheduleBadge.classList.toggle('is-outside', outside);
+            scheduleBadge.classList.toggle('is-no-turn', scheduleState === 'no_shift');
+        }
+        var notice = document.getElementById('cash_close_schedule_notice');
+        if (scheduleState === 'outside_hours' && schedule) {
+            notice.textContent = 'Estás cerrando caja fuera del horario de tu turno ('
+                + (schedule.start || '—') + ' – ' + (schedule.end || '—')
+                + '). Un administrador debe autorizar este cierre.';
+            notice.hidden = false;
+            closeButton.textContent = 'Solicitar autorización';
+        } else {
+            notice.hidden = true;
+            closeButton.textContent = 'Confirmar cierre';
+        }
     }
 
     function updateDifference() {
@@ -130,7 +205,7 @@
             var statusCell = document.createElement('td');
             var badge = document.createElement('span');
 
-            time.textContent = item.time || '—';
+            time.textContent = formatArqueoDateTime(item);
             counted.textContent = formatMoney(item.counted);
             difference.textContent = formatSigned(item.difference);
             difference.className = Number(item.difference) < 0
@@ -161,11 +236,17 @@
         if (current) {
             arqueoStatus.textContent = '✓ Arqueo vigente de las ' + (current.time || '—');
             arqueoStatus.className = 'is-valid';
+        } else if (latestArqueo() && latestArqueo().status === 'Desactualizado') {
+            arqueoStatus.textContent = '✕ Arqueo desactualizado: realiza uno nuevo antes de cerrar';
+            arqueoStatus.className = 'is-warning';
+        } else if (!latestArqueo()) {
+            arqueoStatus.textContent = '✕ No hay ningún arqueo: realiza uno antes de cerrar';
+            arqueoStatus.className = 'is-warning';
         } else {
             arqueoStatus.textContent = '⚠ Debes realizar un arqueo nuevo antes de cerrar.';
             arqueoStatus.className = 'is-warning';
         }
-        closeButton.disabled = isLoading || !session || !session.is_open || !owned || !current;
+        closeButton.disabled = isLoading || !session || !session.is_open || !owned;
     }
 
     function renderSession(nextSession) {
@@ -190,6 +271,12 @@
 
         loading.hidden = true;
         loadError.hidden = true;
+        if (!isOpen && session && session.closed_summary) {
+            noSession.hidden = true;
+            workspace.hidden = false;
+            showCloseSummary(session.closed_summary);
+            return;
+        }
         if (!isOpen || !owned) {
             workspace.hidden = true;
             noSession.hidden = false;
@@ -219,19 +306,32 @@
         loading.hidden = false;
         loadError.hidden = true;
         return service.getState().then(function (nextSession) {
-            if (nextSession && nextSession.is_open) {
-                var requiredNumbers = [
-                    'opening_fund', 'cash_sales', 'income', 'expenses',
-                    'expected', 'card', 'yape_plin', 'version'
-                ];
-                var complete = requiredNumbers.every(function (key) {
-                    return Number.isFinite(Number(nextSession[key]));
-                });
-                if (!complete || !Array.isArray(nextSession.history)) {
-                    throw new Error('El estado de arqueo está incompleto.');
+            if (!nextSession) throw new Error('No se recibió el estado de caja.');
+            return Promise.all([
+                nextSession.is_owner !== false && (nextSession.is_open || nextSession.closed_summary)
+                    ? service.getArqueos(nextSession.session_id || sellerId)
+                    : Promise.resolve({ history: nextSession.history || [] }),
+                service.getTurnoDeHoy(sellerId)
+            ]).then(function (results) {
+                var arqueosResult = results[0];
+                var history = arqueosResult
+                    && (arqueosResult.history || arqueosResult.arqueos || arqueosResult.data);
+                if (Array.isArray(history)) nextSession.history = history;
+                renderSchedule(results[1]);
+                if (nextSession.is_open) {
+                    var requiredNumbers = [
+                        'opening_fund', 'cash_sales', 'income', 'expenses',
+                        'expected', 'card', 'yape_plin', 'version'
+                    ];
+                    var complete = requiredNumbers.every(function (key) {
+                        return Number.isFinite(Number(nextSession[key]));
+                    });
+                    if (!complete || !Array.isArray(nextSession.history)) {
+                        throw new Error('El estado de arqueo está incompleto.');
+                    }
                 }
-            }
-            renderSession(nextSession);
+                renderSession(nextSession);
+            });
         }).catch(showLoadError);
     }
 
@@ -251,8 +351,9 @@
             && !observationInput.value.trim();
         saveButton.disabled = value || !session || !session.is_open || amount === null || needsObservation;
         saveButton.textContent = value && operation === 'count' ? 'Guardando…' : 'Guardar arqueo';
-        closeButton.disabled = value || !activeArqueo();
-        closeButton.textContent = value && operation === 'close' ? 'Cerrando…' : 'Confirmar cierre';
+        closeButton.disabled = value || !session || !session.is_open || session.is_owner === false;
+        closeButton.textContent = value && operation === 'close' ? 'Cerrando…'
+            : (scheduleState === 'outside_hours' ? 'Solicitar autorización' : 'Confirmar cierre');
         renderChecklist();
     }
 
@@ -372,9 +473,11 @@
                 observationInput.focus();
             } else {
                 showFeedback(countFeedback, 'No se pudo completar la operación. Inténtalo de nuevo.', true);
+                countInput.focus();
             }
         }).catch(function () {
             showFeedback(countFeedback, 'No se pudo completar la operación. Inténtalo de nuevo.', true);
+            countInput.focus();
         }).finally(function () {
             setLoading(false);
             updateDifference();
@@ -473,16 +576,27 @@
     }
 
     function reconcileCloseFailure() {
-        return service.getState().then(function (current) {
-            if (current && !current.is_open && current.closed_summary) {
-                session = current;
-                showCloseSummary(current.closed_summary);
+        return service.getCierre(session && session.session_id || sellerId).then(function (result) {
+            var summary = result && (result.summary || result.cierre || result.data && result.data.summary);
+            if (summary) {
+                if (!overlay.hidden) closeAuthorization(false);
+                showCloseSummary(summary);
                 return;
             }
             showCloseFailure();
-        }).catch(function () {
-            showCloseFailure();
-        });
+        }).catch(showCloseFailure);
+    }
+
+    function confirmPersistedClose() {
+        return service.getCierre(session && session.session_id || sellerId).then(function (result) {
+            var summary = result && (result.summary || result.cierre || result.data && result.data.summary);
+            if (!summary) {
+                showCloseFailure();
+                return;
+            }
+            closeAuthorization(false);
+            showCloseSummary(summary);
+        }).catch(showCloseFailure);
     }
 
     function showCloseFailure() {
@@ -496,9 +610,9 @@
 
     function handleCloseResult(result) {
         if (result.type === 'closed') {
-            closeAuthorization(false);
-            showCloseSummary(result.summary || result);
+            return confirmPersistedClose();
         } else if (result.type === 'authorization_required') {
+            renderSchedule({ status: 'outside_hours', shift: result.schedule || {} });
             openAuthorization(result.schedule || {});
         } else if (result.type === 'authorization_denied') {
             authFeedback.textContent = 'No se pudo autorizar. Verifica los datos.';
@@ -519,7 +633,15 @@
     }
 
     function submitClose(credentials) {
-        if (isLoading || !session || !activeArqueo()) return Promise.resolve();
+        if (isLoading || !session || !session.is_open) return Promise.resolve();
+        if (!activeArqueo()) {
+            var message = latestArqueo() && latestArqueo().status === 'Desactualizado'
+                ? 'Arqueo desactualizado: realiza uno nuevo antes de cerrar.'
+                : 'No hay ningún arqueo vigente. Realiza uno antes de cerrar.';
+            showFeedback(closeFeedback, message, true);
+            countInput.focus();
+            return Promise.resolve();
+        }
         var active = activeArqueo();
         var payload = {
             arqueo_id: active.id,
@@ -548,6 +670,10 @@
         var firstInvalid = null;
         if (!usernameInput.value.trim()) {
             setFieldError(usernameInput, 'cash_admin_username_error', 'Completa este campo.');
+            firstInvalid = firstInvalid || usernameInput;
+        }
+        if (sellerUsername && usernameInput.value.trim().toLowerCase() === sellerUsername.toLowerCase()) {
+            setFieldError(usernameInput, 'cash_admin_username_error', 'Un vendedor no puede autorizarse a sí mismo.');
             firstInvalid = firstInvalid || usernameInput;
         }
         if (!passwordInput.value) {
@@ -609,7 +735,13 @@
         if (observationInput.value.trim()) clearFieldError(observationInput, 'cash_count_observation_error');
         updateDifference();
     });
-    closeButton.addEventListener('click', function () { submitClose(null); });
+    closeButton.addEventListener('click', function () {
+        if (scheduleState === 'outside_hours' && activeArqueo()) {
+            openAuthorization(schedule);
+            return;
+        }
+        submitClose(null);
+    });
     authForm.addEventListener('submit', submitAuthorization);
     authCancel.addEventListener('click', function () { closeAuthorization(true); });
     document.addEventListener('keydown', closeDialogOnEscape);

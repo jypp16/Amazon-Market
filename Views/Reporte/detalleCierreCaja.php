@@ -71,7 +71,7 @@
             <table class="close-table">
                 <thead>
                     <tr>
-                        <th scope="col">Hora</th>
+                        <th scope="col">Fecha y hora</th>
                         <th scope="col">Tipo</th>
                         <th scope="col">Motivo o referencia</th>
                         <th scope="col">Importe</th>
@@ -90,7 +90,7 @@
                             : ($esRetiroOmitido ? 'close-type-omitted' : 'close-type-sale'));
                     ?>
                     <tr>
-                        <td><?= e($movimiento['time']) ?></td>
+                        <td><?= e(($movimiento['date'] ?? substr($cierre['closed_at'], 0, 10)) . ' ' . $movimiento['time']) ?></td>
                         <td><span class="close-movement-type <?= e($claseTipo) ?>"><?= e($movimiento['type']) ?></span></td>
                         <td>
                             <?= e($movimiento['reference']) ?>

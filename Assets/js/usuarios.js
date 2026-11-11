@@ -5,13 +5,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!tbody) return;
 
     let roles = [];
+    const puedeProgramar = typeof canProgramSchedules !== 'undefined' && canProgramSchedules
+        && typeof UsuariosHorariosService !== 'undefined';
+    let turnos = [];
+    let programacionesActuales = new Map();
+    let semanaLista = inicioSemana(new Date());
+    let usuarioProgramado = null;
+    let semanaModal = semanaLista;
+    let programacionSemana = null;
+    let programacionAnterior = null;
+    let modalRegreso = null;
+    let turnoEditando = null;
+    let toastTimer = null;
+    const overlayProgramacion = document.getElementById('program_schedule_modal');
+    const overlayTurnos = document.getElementById('manage_shifts_modal');
+    const diaIndices = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+    const diaNombres = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const diasSeleccionados = new Set();
+    let turnoSeleccionado = '';
 
     async function cargarUsuarios(busqueda = '') {
         try {
             tbody.textContent = '';
             const trLoad = document.createElement('tr');
             const tdLoad = document.createElement('td');
-            tdLoad.colSpan = 8;
+            tdLoad.colSpan = 9;
             tdLoad.style.textAlign = 'center';
             tdLoad.style.padding = '20px';
             tdLoad.style.color = '#888';
@@ -22,9 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
             trLoad.appendChild(tdLoad);
             tbody.appendChild(trLoad);
 
-            const endpoint = busqueda ? 'usuarios?q=' + encodeURIComponent(busqueda) : 'usuarios';
             const inicio = Date.now();
-            const resultado = await Api.get(endpoint);
+            const resultado = puedeProgramar
+                ? await UsuariosHorariosService.getUsuarios(busqueda)
+                : await Api.get(busqueda ? 'usuarios?q=' + encodeURIComponent(busqueda) : 'usuarios');
             const elapsed = Date.now() - inicio;
             if (elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
 
@@ -33,10 +52,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            renderizarTabla(resultado.data.data || []);
+            const usuarios = resultado.data.data || [];
+            usuariosActuales = usuarios;
+            await cargarProgramacionesDeFilas(usuarios);
+            renderizarTabla(usuarios);
         } catch (error) {
             mostrarError('Error de conexión: ' + error.message);
         }
+    }
+
+    async function cargarProgramacionesDeFilas(usuarios) {
+        programacionesActuales = new Map();
+        if (!puedeProgramar) return;
+        const vendedores = usuarios.filter(esVendedor);
+        const resultados = await Promise.all(vendedores.map(async usuario => [
+            String(usuario.id_usuario),
+            await UsuariosHorariosService.getProgramacion(usuario.id_usuario, semanaLista)
+        ]));
+        resultados.forEach(([id, programacion]) => programacionesActuales.set(id, programacion));
     }
 
     function renderizarTabla(usuarios) {
@@ -45,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (usuarios.length === 0) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = 8;
+            td.colSpan = 9;
             td.textContent = 'No se encontraron usuarios.';
             td.style.textAlign = 'center';
             tr.appendChild(td);
@@ -81,6 +114,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const celdaDir = document.createElement('td');
             celdaDir.textContent = usu.direccion || '-';
 
+            const celdaHorario = document.createElement('td');
+            celdaHorario.className = 'user-schedule-cell';
+            if (esAdministrador(usu)) {
+                const acceso = document.createElement('span');
+                acceso.className = 'user-schedule-badge is-open';
+                acceso.innerHTML = '<i class="fa-solid fa-lock-open" aria-hidden="true"></i> Acceso libre';
+                celdaHorario.appendChild(acceso);
+            } else if (esVendedor(usu)) {
+                renderizarHorarioUsuario(celdaHorario, usu);
+            } else {
+                celdaHorario.textContent = '-';
+            }
+
             const celdaAcciones = document.createElement('td');
             const divAcciones = document.createElement('div');
             divAcciones.className = 'actions-group';
@@ -90,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnEditar.type = 'button';
                 btnEditar.className = 'btn btn-edit';
                 btnEditar.title = 'Editar';
+                btnEditar.setAttribute('aria-label', 'Editar usuario');
                 const iconEdit = document.createElement('i');
                 iconEdit.className = 'fa-solid fa-pen-to-square';
                 btnEditar.appendChild(iconEdit);
@@ -97,11 +144,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 divAcciones.appendChild(btnEditar);
             }
 
+            if (puedeProgramar && esVendedor(usu)) {
+                const btnProgramar = document.createElement('button');
+                btnProgramar.type = 'button';
+                btnProgramar.className = 'btn btn-schedule';
+                btnProgramar.title = 'Programar horario';
+                btnProgramar.setAttribute('aria-label', 'Programar horario');
+                btnProgramar.innerHTML = '<i class="fa-regular fa-calendar-days" aria-hidden="true"></i>';
+                btnProgramar.addEventListener('click', async () => {
+                    try {
+                        await abrirModalProgramacion(usu, btnProgramar);
+                    } catch (error) {
+                        await Modal.error('No se pudo cargar la programación', error.message || 'Inténtalo de nuevo.');
+                    }
+                });
+                divAcciones.appendChild(btnProgramar);
+            }
+
             if (typeof canDelete !== 'undefined' && canDelete) {
                 const btnEliminar = document.createElement('button');
                 btnEliminar.type = 'button';
                 btnEliminar.className = 'btn btn-delete';
                 btnEliminar.title = 'Eliminar';
+                btnEliminar.setAttribute('aria-label', 'Eliminar usuario');
                 const iconDel = document.createElement('i');
                 iconDel.className = 'fa-solid fa-trash-can';
                 btnEliminar.appendChild(iconDel);
@@ -117,10 +182,480 @@ document.addEventListener('DOMContentLoaded', () => {
             fila.appendChild(celdaTel);
             fila.appendChild(celdaEmail);
             fila.appendChild(celdaDir);
+            fila.appendChild(celdaHorario);
             fila.appendChild(celdaAcciones);
             tbody.appendChild(fila);
         });
     }
+
+    function renderizarHorarioUsuario(celda, usuario) {
+        const programacion = programacionesActuales.get(String(usuario.id_usuario));
+        if (!programacion) {
+            const sinProgramar = document.createElement('span');
+            sinProgramar.className = 'user-schedule-badge is-unset';
+            sinProgramar.innerHTML = '<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Sin programar';
+            celda.appendChild(sinProgramar);
+            return;
+        }
+        const turno = turnos.find(item => Number(item.id) === Number(programacion.turnoId));
+        if (!turno) {
+            celda.textContent = 'Sin programar';
+            return;
+        }
+        const badge = document.createElement('span');
+        badge.className = 'user-schedule-badge';
+        badge.textContent = turno.nombre + ' · ' + turno.inicio + '–' + turno.fin;
+        const dias = document.createElement('div');
+        dias.className = 'user-schedule-days-mini';
+        diaIndices.forEach((dia, indice) => {
+            const cuadrito = document.createElement('span');
+            cuadrito.textContent = dia;
+            if (programacion.dias.includes(indice)) cuadrito.classList.add('is-active');
+            dias.appendChild(cuadrito);
+        });
+        celda.append(badge, dias);
+    }
+
+    function esVendedor(usuario) {
+        return String(usuario.rol || '').toLocaleLowerCase('es').includes('vendedor');
+    }
+
+    function esAdministrador(usuario) {
+        return String(usuario.rol || '').toLocaleLowerCase('es').includes('administrador');
+    }
+
+    function inicioSemana(fecha) {
+        const lunes = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate(), 12);
+        lunes.setDate(lunes.getDate() - ((lunes.getDay() + 6) % 7));
+        return fechaIso(lunes);
+    }
+
+    function fechaIso(fecha) {
+        return [
+            fecha.getFullYear(),
+            String(fecha.getMonth() + 1).padStart(2, '0'),
+            String(fecha.getDate()).padStart(2, '0')
+        ].join('-');
+    }
+
+    function moverSemana(inicio, cantidad) {
+        const fecha = new Date(inicio + 'T12:00:00');
+        fecha.setDate(fecha.getDate() + cantidad * 7);
+        return fechaIso(fecha);
+    }
+
+    function fechaCorta(fecha) {
+        return new Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'short' })
+            .format(fecha).replace('.', '');
+    }
+
+    function rangoSemana(inicio) {
+        const lunes = new Date(inicio + 'T12:00:00');
+        const domingo = new Date(lunes);
+        domingo.setDate(domingo.getDate() + 6);
+        const mismoMes = lunes.getMonth() === domingo.getMonth()
+            && lunes.getFullYear() === domingo.getFullYear();
+        const inicioTexto = mismoMes
+            ? String(lunes.getDate())
+            : fechaCorta(lunes) + (lunes.getFullYear() !== domingo.getFullYear() ? ' ' + lunes.getFullYear() : '');
+        return inicioTexto + ' – ' + fechaCorta(domingo) + ' ' + domingo.getFullYear();
+    }
+
+    async function cargarTurnos() {
+        if (!puedeProgramar) return;
+        turnos = await UsuariosHorariosService.getTurnos();
+    }
+
+    function abrirOverlay(overlay, foco) {
+        if (!overlay) return;
+        modalRegreso = document.activeElement;
+        overlay.hidden = false;
+        document.body.classList.add('user-schedule-modal-open');
+        window.requestAnimationFrame(() => (foco || overlay.querySelector('button, input'))?.focus());
+    }
+
+    function cerrarOverlay(overlay) {
+        if (!overlay) return;
+        if (overlay === overlayTurnos && !document.getElementById('shift_edit_panel').hidden) {
+            cerrarEditorTurno();
+        }
+        overlay.hidden = true;
+        if (overlayProgramacion?.hidden !== false && overlayTurnos?.hidden !== false) {
+            document.body.classList.remove('user-schedule-modal-open');
+        }
+        if (modalRegreso && typeof modalRegreso.focus === 'function') modalRegreso.focus();
+    }
+
+    function mostrarAviso(mensaje) {
+        const aviso = document.getElementById('user_schedule_toast');
+        if (!aviso) return;
+        window.clearTimeout(toastTimer);
+        aviso.textContent = mensaje;
+        aviso.hidden = false;
+        toastTimer = window.setTimeout(() => { aviso.hidden = true; }, 3500);
+    }
+
+    function resumenProgramacion(programacion, incluirTurno = true) {
+        if (!programacion) return 'La semana anterior no tiene programación';
+        const turno = turnos.find(item => Number(item.id) === Number(programacion.turnoId));
+        const dias = programacion.dias.map(indice => diaIndices[indice]).join(' ');
+        return (incluirTurno && turno ? turno.nombre + ' · ' : '') + dias;
+    }
+
+    async function abrirModalProgramacion(usuario, boton) {
+        usuarioProgramado = usuario;
+        semanaModal = semanaLista;
+        turnoSeleccionado = '';
+        diasSeleccionados.clear();
+        document.getElementById('program_schedule_user').textContent =
+            (usuario.nombre || '') + ' · ' + (usuario.username || '');
+        document.getElementById('program_shift_error').textContent = '';
+        document.getElementById('program_days_error').textContent = '';
+        modalRegreso = boton;
+        await cargarSemanaModal();
+        abrirOverlay(overlayProgramacion, overlayProgramacion.querySelector('[data-close-schedule]'));
+    }
+
+    async function cargarSemanaModal() {
+        document.getElementById('program_week_range').textContent = rangoSemana(semanaModal);
+        [programacionSemana, programacionAnterior] = await Promise.all([
+            UsuariosHorariosService.getProgramacion(usuarioProgramado.id_usuario, semanaModal),
+            UsuariosHorariosService.getProgramacion(usuarioProgramado.id_usuario, moverSemana(semanaModal, -1))
+        ]);
+        turnoSeleccionado = programacionSemana ? String(programacionSemana.turnoId) : '';
+        diasSeleccionados.clear();
+        if (programacionSemana) programacionSemana.dias.forEach(dia => diasSeleccionados.add(dia));
+        renderizarProgramacionModal();
+    }
+
+    function renderizarProgramacionModal() {
+        const anterior = document.getElementById('program_previous_summary');
+        const copiar = document.getElementById('program_copy_previous');
+        anterior.textContent = programacionAnterior
+            ? resumenProgramacion(programacionAnterior)
+            : 'La semana anterior no tiene programación';
+        copiar.hidden = !programacionAnterior;
+
+        const opcionesTurno = document.getElementById('program_shift_options');
+        opcionesTurno.textContent = '';
+        turnos.forEach(turno => {
+            const label = document.createElement('label');
+            label.className = 'user-schedule-shift-option';
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'program_turno';
+            radio.value = String(turno.id);
+            radio.checked = turnoSeleccionado === String(turno.id);
+            radio.addEventListener('change', () => {
+                turnoSeleccionado = radio.value;
+                document.getElementById('program_shift_error').textContent = '';
+                actualizarResumenProgramacion();
+            });
+            const texto = document.createElement('span');
+            const nombre = document.createElement('strong');
+            nombre.textContent = turno.nombre;
+            const horas = document.createElement('small');
+            horas.textContent = turno.inicio + '–' + turno.fin;
+            texto.append(nombre, horas);
+            label.append(radio, texto);
+            opcionesTurno.appendChild(label);
+        });
+
+        const opcionesDia = document.getElementById('program_day_options');
+        opcionesDia.textContent = '';
+        diaIndices.forEach((dia, indice) => {
+            const boton = document.createElement('button');
+            boton.type = 'button';
+            boton.className = 'user-schedule-day';
+            boton.textContent = dia;
+            boton.title = diaNombres[indice];
+            boton.setAttribute('aria-label', diaNombres[indice]);
+            boton.setAttribute('aria-pressed', diasSeleccionados.has(indice) ? 'true' : 'false');
+            boton.addEventListener('click', () => {
+                if (diasSeleccionados.has(indice)) diasSeleccionados.delete(indice);
+                else diasSeleccionados.add(indice);
+                boton.setAttribute('aria-pressed', diasSeleccionados.has(indice) ? 'true' : 'false');
+                document.getElementById('program_days_error').textContent = '';
+                actualizarResumenProgramacion();
+            });
+            opcionesDia.appendChild(boton);
+        });
+
+        const aplicar = document.getElementById('program_apply_scope');
+        aplicar.hidden = !programacionSemana;
+        const soloSemana = aplicar.querySelector('input[value="semana"]');
+        if (soloSemana) soloSemana.checked = true;
+        document.getElementById('program_shift_error').textContent = '';
+        document.getElementById('program_days_error').textContent = '';
+        actualizarResumenProgramacion();
+    }
+
+    function actualizarResumenProgramacion() {
+        const turno = turnos.find(item => String(item.id) === turnoSeleccionado);
+        const resumen = document.getElementById('program_schedule_summary');
+        resumen.textContent = turno
+            ? 'Turno ' + turno.nombre.toLocaleLowerCase('es') + ', ' + diasSeleccionados.size
+                + (diasSeleccionados.size === 1 ? ' día por semana.' : ' días por semana.')
+            : 'Selecciona un turno y los días de atención.';
+    }
+
+    async function guardarHorarioProgramado() {
+        const errorTurno = document.getElementById('program_shift_error');
+        const errorDias = document.getElementById('program_days_error');
+        errorTurno.textContent = turnoSeleccionado ? '' : 'Selecciona un turno';
+        errorDias.textContent = diasSeleccionados.size ? '' : 'Selecciona al menos un día';
+        if (!turnoSeleccionado || !diasSeleccionados.size) return;
+
+        const boton = document.getElementById('program_save');
+        boton.disabled = true;
+        try {
+            const alcance = programacionSemana
+                ? (overlayProgramacion.querySelector('input[name="program_scope"]:checked')?.value || 'semana')
+                : 'semana';
+            await UsuariosHorariosService.guardarProgramacion(
+                usuarioProgramado.id_usuario,
+                semanaModal,
+                { turnoId: Number(turnoSeleccionado), dias: [...diasSeleccionados].sort((a, b) => a - b), alcance: alcance }
+            );
+            await cargarProgramacionesDeFilas(usuariosActuales);
+            renderizarTabla(usuariosActuales);
+            cerrarOverlay(overlayProgramacion);
+            mostrarAviso('Programación guardada');
+        } catch (error) {
+            await Modal.error('No se pudo guardar', error.message || 'No se pudo guardar la programación.');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    function abrirModalTurnos(boton) {
+        modalRegreso = boton;
+        renderizarListaTurnos();
+        abrirOverlay(overlayTurnos, document.getElementById('shift_new'));
+    }
+
+    function renderizarListaTurnos() {
+        const lista = document.getElementById('shifts_list');
+        lista.textContent = '';
+        if (!turnos.length) {
+            const vacio = document.createElement('p');
+            vacio.className = 'user-shifts-empty';
+            vacio.textContent = 'Aún no hay turnos de atención. Crea uno para programar a los vendedores.';
+            lista.appendChild(vacio);
+        }
+        turnos.forEach(turno => {
+            const tarjeta = document.createElement('article');
+            tarjeta.className = 'user-shift-card';
+            const datos = document.createElement('div');
+            const nombre = document.createElement('strong');
+            nombre.textContent = turno.nombre;
+            const detalle = document.createElement('p');
+            const cantidad = Number(turno.vendedoresAsignados) || 0;
+            detalle.textContent = turno.inicio + '–' + turno.fin + ' · ' + cantidad
+                + (cantidad === 1 ? ' vendedor asignado' : ' vendedores asignados');
+            datos.append(nombre, detalle);
+
+            const acciones = document.createElement('div');
+            acciones.className = 'user-shift-actions';
+            const editar = document.createElement('button');
+            editar.type = 'button';
+            editar.className = 'btn btn-edit';
+            editar.setAttribute('aria-label', 'Editar turno ' + turno.nombre);
+            editar.title = 'Editar turno';
+            editar.innerHTML = '<i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>';
+            editar.addEventListener('click', () => abrirEditorTurno(turno, tarjeta));
+            const eliminar = document.createElement('button');
+            eliminar.type = 'button';
+            eliminar.className = 'btn btn-delete';
+            eliminar.setAttribute('aria-label', 'Eliminar turno ' + turno.nombre);
+            eliminar.title = cantidad ? 'Un turno con vendedores asignados no se puede eliminar' : 'Eliminar turno';
+            eliminar.disabled = cantidad > 0;
+            eliminar.innerHTML = '<i class="fa-solid fa-trash-can" aria-hidden="true"></i>';
+            eliminar.addEventListener('click', () => eliminarTurno(turno));
+            acciones.append(editar, eliminar);
+            tarjeta.append(datos, acciones);
+            if (cantidad) {
+                const nota = document.createElement('small');
+                nota.className = 'user-shifts-delete-note';
+                nota.textContent = 'Tiene vendedores asignados y no se puede eliminar.';
+                tarjeta.appendChild(nota);
+            }
+            lista.appendChild(tarjeta);
+        });
+    }
+
+    function abrirEditorTurno(turno = null, tarjeta = null) {
+        const panel = document.getElementById('shift_edit_panel');
+        const lista = document.getElementById('shifts_list');
+        turnoEditando = turno ? turno.id : null;
+        document.getElementById('shift_name').value = turno?.nombre || '';
+        document.getElementById('shift_start').value = turno?.inicio || '';
+        document.getElementById('shift_end').value = turno?.fin || '';
+        limpiarErroresTurno();
+        if (tarjeta) {
+            tarjeta.classList.add('is-editing');
+            tarjeta.appendChild(panel);
+        } else {
+            document.querySelector('.user-shifts-dialog').insertBefore(panel, lista);
+        }
+        panel.hidden = false;
+        document.getElementById('shift_name').focus();
+    }
+
+    function limpiarErroresTurno() {
+        ['shift_name', 'shift_start', 'shift_end'].forEach(campo => {
+            document.getElementById(campo + '_error').textContent = '';
+            document.getElementById(campo).removeAttribute('aria-invalid');
+        });
+    }
+
+    function cerrarEditorTurno() {
+        const panel = document.getElementById('shift_edit_panel');
+        const lista = document.getElementById('shifts_list');
+        const tarjetaAnterior = panel.parentElement?.closest('.user-shift-card');
+        panel.hidden = true;
+        document.querySelector('.user-shifts-dialog').insertBefore(panel, lista);
+        tarjetaAnterior?.classList.remove('is-editing');
+        turnoEditando = null;
+    }
+
+    function validarEditorTurno() {
+        limpiarErroresTurno();
+        const nombre = document.getElementById('shift_name').value.trim();
+        const inicio = document.getElementById('shift_start').value;
+        const fin = document.getElementById('shift_end').value;
+        let valido = true;
+        const marcarError = (campo, mensaje) => {
+            document.getElementById(campo).setAttribute('aria-invalid', 'true');
+            document.getElementById(campo + '_error').textContent = mensaje;
+            valido = false;
+        };
+        if (!nombre) marcarError('shift_name', 'El nombre del turno es obligatorio.');
+        else if (turnos.some(turno => turno.id !== Number(turnoEditando)
+            && turno.nombre.toLocaleLowerCase('es') === nombre.toLocaleLowerCase('es'))) {
+            marcarError('shift_name', 'Ya existe un turno con ese nombre.');
+        }
+        const horaValida = valor => /^([01]\d|2[0-3]):[0-5]\d$/.test(valor);
+        if (!horaValida(inicio)) marcarError('shift_start', 'Ingresa una hora válida.');
+        if (!horaValida(fin)) marcarError('shift_end', 'Ingresa una hora válida.');
+        else if (horaValida(inicio) && fin <= inicio) marcarError('shift_end', 'La hora de fin debe ser posterior al inicio.');
+        return valido ? { nombre, inicio, fin } : null;
+    }
+
+    async function guardarTurno() {
+        const datos = validarEditorTurno();
+        if (!datos) return;
+        const boton = document.getElementById('shift_save');
+        boton.disabled = true;
+        try {
+            if (turnoEditando === null) await UsuariosHorariosService.crearTurno(datos);
+            else await UsuariosHorariosService.editarTurno(turnoEditando, datos);
+            await cargarTurnos();
+            cerrarEditorTurno();
+            renderizarListaTurnos();
+            await cargarProgramacionesDeFilas(usuariosActuales);
+            renderizarTabla(usuariosActuales);
+        } catch (error) {
+            const mensaje = error.message || 'No se pudo guardar el turno.';
+            document.getElementById('shift_name_error').textContent = mensaje;
+            document.getElementById('shift_name').setAttribute('aria-invalid', 'true');
+        } finally {
+            boton.disabled = false;
+        }
+    }
+
+    async function eliminarTurno(turno) {
+        const confirmado = await Modal.confirm('Eliminar turno', '¿Deseas eliminar el turno «' + turno.nombre + '»?', 'danger');
+        if (!confirmado) return;
+        try {
+            await UsuariosHorariosService.eliminarTurno(turno.id);
+            await cargarTurnos();
+            if (!document.getElementById('shift_edit_panel').hidden) cerrarEditorTurno();
+            renderizarListaTurnos();
+            await cargarProgramacionesDeFilas(usuariosActuales);
+            renderizarTabla(usuariosActuales);
+        } catch (error) {
+            await Modal.error('No se puede eliminar el turno', error.message);
+        }
+    }
+
+    function instalarControlesModales() {
+        if (!puedeProgramar) return;
+        overlayProgramacion.querySelectorAll('[data-close-schedule]').forEach(boton =>
+            boton.addEventListener('click', () => cerrarOverlay(overlayProgramacion)));
+        overlayTurnos.querySelectorAll('[data-close-shifts]').forEach(boton =>
+            boton.addEventListener('click', () => {
+                if (!document.getElementById('shift_edit_panel').hidden) cerrarEditorTurno();
+                cerrarOverlay(overlayTurnos);
+            }));
+        overlayProgramacion.addEventListener('click', evento => {
+            if (evento.target === overlayProgramacion) cerrarOverlay(overlayProgramacion);
+        });
+        overlayTurnos.addEventListener('click', evento => {
+            if (evento.target === overlayTurnos) cerrarOverlay(overlayTurnos);
+        });
+        document.addEventListener('keydown', evento => {
+            const visible = overlayProgramacion.hidden === false ? overlayProgramacion
+                : (overlayTurnos.hidden === false ? overlayTurnos : null);
+            if (!visible) return;
+            if (document.querySelector('[data-modal-dynamic]')) return;
+            if (evento.key === 'Escape') {
+                cerrarOverlay(visible);
+                return;
+            }
+            if (evento.key !== 'Tab') return;
+            const elementos = [...visible.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+                .filter(elemento => elemento.offsetParent !== null);
+            if (!elementos.length) return;
+            const primero = elementos[0];
+            const ultimo = elementos[elementos.length - 1];
+            if (evento.shiftKey && document.activeElement === primero) {
+                evento.preventDefault();
+                ultimo.focus();
+            } else if (!evento.shiftKey && document.activeElement === ultimo) {
+                evento.preventDefault();
+                primero.focus();
+            }
+        });
+
+        document.getElementById('btn_turnos_atencion')?.addEventListener('click', evento =>
+            abrirModalTurnos(evento.currentTarget));
+        document.getElementById('program_week_previous').addEventListener('click', async () => {
+            semanaModal = moverSemana(semanaModal, -1);
+            try {
+                await cargarSemanaModal();
+            } catch (error) {
+                await Modal.error('No se pudo cargar la semana', error.message || 'Inténtalo de nuevo.');
+            }
+        });
+        document.getElementById('program_week_next').addEventListener('click', async () => {
+            semanaModal = moverSemana(semanaModal, 1);
+            try {
+                await cargarSemanaModal();
+            } catch (error) {
+                await Modal.error('No se pudo cargar la semana', error.message || 'Inténtalo de nuevo.');
+            }
+        });
+        document.getElementById('program_copy_previous').addEventListener('click', () => {
+            if (!programacionAnterior) return;
+            turnoSeleccionado = String(programacionAnterior.turnoId);
+            diasSeleccionados.clear();
+            programacionAnterior.dias.forEach(dia => diasSeleccionados.add(dia));
+            renderizarProgramacionModal();
+        });
+        document.getElementById('program_save').addEventListener('click', guardarHorarioProgramado);
+        document.getElementById('shift_new').addEventListener('click', () => abrirEditorTurno());
+        document.getElementById('shift_cancel_edit').addEventListener('click', cerrarEditorTurno);
+        document.getElementById('shift_save').addEventListener('click', guardarTurno);
+        ['shift_name', 'shift_start', 'shift_end'].forEach(campo => {
+            document.getElementById(campo).addEventListener('input', () => {
+                document.getElementById(campo).removeAttribute('aria-invalid');
+                document.getElementById(campo + '_error').textContent = '';
+            });
+        });
+    }
+
+    let usuariosActuales = [];
 
     async function cargarDropdowns() {
         try {
@@ -194,7 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.textContent = '';
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 8;
+        td.colSpan = 9;
         td.textContent = mensaje;
         td.style.textAlign = 'center';
         td.style.color = '#dc3545';
@@ -216,6 +751,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 350));
     }
 
+    instalarControlesModales();
     cargarDropdowns();
-    cargarUsuarios();
+    if (puedeProgramar) {
+        cargarTurnos()
+            .then(() => cargarUsuarios())
+            .catch(error => mostrarError('No se pudieron cargar los turnos: ' + error.message));
+    } else {
+        cargarUsuarios();
+    }
 });

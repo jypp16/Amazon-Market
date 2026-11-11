@@ -48,12 +48,18 @@
         return delay({ type: type });
     }
 
-    function allMovements() {
-        if (scenario !== 'multiple_pages') return clone(baseMovements);
+    function allMovements(date) {
+        if (scenario !== 'multiple_pages') {
+            return clone(baseMovements).map(function (movement) {
+                movement.date = date || defaultDate;
+                return movement;
+            });
+        }
         var result = [];
         for (var index = 0; index < 12; index += 1) {
             var movement = clone(baseMovements[index % baseMovements.length]);
             movement.id = 'mov-' + (index + 1);
+            movement.date = date || defaultDate;
             movement.time = String(8 + Math.floor(index / 2)).padStart(2, '0')
                 + ':' + (index % 2 ? '30' : '00');
             result.push(movement);
@@ -80,7 +86,7 @@
         if (scenario === 'access_denied') return { type: 'access_denied' };
 
         var noMovements = scenario === 'no_movements';
-        var movements = noMovements ? [] : allMovements();
+        var movements = noMovements ? [] : allMovements(filters.date);
         var start = (page - 1) * pageSize;
         var rows = movements.slice(start, start + pageSize);
         return {

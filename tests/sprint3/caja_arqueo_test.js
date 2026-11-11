@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const serviceSource = fs.readFileSync('Assets/js/cajaArqueoService.js', 'utf8');
+const demoSource = fs.readFileSync('Assets/js/cajaDemoService.js', 'utf8');
 const screenSource = fs.readFileSync('Assets/js/cajaArqueo.js', 'utf8');
 const viewSource = fs.readFileSync('Views/Caja/arqueo.php', 'utf8');
 const authPartialSource = fs.readFileSync('Views/Caja/_autorizacion.php', 'utf8');
@@ -11,6 +12,7 @@ function createService(scenario, apiRequest) {
     let requestId = 0;
     const window = {
         CAJA_ARQUEO_CONFIG: { mockEnabled: scenario !== null, mockScenario: scenario || 'success', mockLatencyMs: 0 },
+        CAJA_WORKFLOWS_CONFIG: { mockEnabled: scenario !== null, scenario: scenario || 'success', latencyMs: 0 },
         crypto: { randomUUID: () => 'arqueo-request-' + (++requestId) },
         setTimeout
     };
@@ -24,6 +26,7 @@ function createService(scenario, apiRequest) {
         Promise
     };
     vm.createContext(context);
+    vm.runInContext(demoSource, context);
     vm.runInContext(serviceSource, context);
     return window.CajaArqueoService;
 }
@@ -60,6 +63,7 @@ async function testBreakdownsAndPreviewCases() {
         const last = state.history[state.history.length - 1];
         assert.equal(last.difference, expectedDifference);
         assert.equal(last.status, status);
+        assert.match(last.date, /^\d{4}-\d{2}-\d{2}$/);
     }
     console.log('[PASS] Estado de caja, desglose, faltante, sobrante, equilibrio y arqueo desactualizado.');
 }
@@ -129,7 +133,9 @@ function testMarkupAndAccessibility() {
     assert.match(viewSource, /cash_count_amount/);
     assert.match(viewSource, /aria-live="polite"/);
     assert.match(viewSource, /Historial de arqueos/);
-    assert.match(viewSource, /cash_close_confirm[^>]+disabled/);
+    assert.match(viewSource, /Fecha y hora/);
+    assert.match(screenSource, /formatArqueoDateTime/);
+    assert.match(viewSource, /id="cash_close_confirm"/);
     assert.match(viewSource, /Views\/Caja\/_autorizacion\.php/);
     assert.match(authPartialSource, /role="dialog" aria-modal="true"/);
     assert.match(authPartialSource, /type="password"/);

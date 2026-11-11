@@ -3,16 +3,19 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const serviceSource = fs.readFileSync('Assets/js/cajaService.js', 'utf8');
+const demoSource = fs.readFileSync('Assets/js/cajaDemoService.js', 'utf8');
 const screenSource = fs.readFileSync('Assets/js/caja.js', 'utf8');
 
 function createService(scenario, apiRequest) {
     const window = {
         CAJA_SERVICE_CONFIG: { mockEnabled: true, mockScenario: scenario, referenceAmount: 200 },
+        CAJA_WORKFLOWS_CONFIG: { mockEnabled: true, scenario, sellerUsername: 'seller' },
         setTimeout,
         crypto: { randomUUID: () => 'request-unique-test' }
     };
     const context = { window, Api: { request: apiRequest || (() => Promise.reject(new Error('Unexpected API request'))) } };
     vm.createContext(context);
+    vm.runInContext(demoSource, context);
     vm.runInContext(serviceSource, context);
     return window.CajaService;
 }
@@ -255,8 +258,8 @@ async function testCancelAndAlreadyOpen() {
     assert.equal(prevented, true);
     assert.equal(elements.cash_auth_overlay.hidden, true);
     assert.equal(elements.app_layout.inert, false);
-    assert.equal(document.activeElement, elements.cash_opening_confirm);
-    assert.equal(elements.cash_opening_status.textContent, 'Sin caja abierta');
+    assert.equal(document.activeElement, elements.cash_counted);
+    assert.equal(elements.cash_opening_status.textContent, 'Fuera de horario');
     console.log('[PASS] Escape cancela fuera de carga, restituye foco y no abre la caja.');
 
     const alreadyOpenService = {
