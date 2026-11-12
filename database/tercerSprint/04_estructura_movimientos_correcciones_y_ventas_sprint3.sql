@@ -20,10 +20,13 @@
 --        necesidad de desactivar `FOREIGN_KEY_CHECKS`.
 -- =============================================================================
 
+SET SESSION sql_mode = 'STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
 DELIMITER $$
 
 BEGIN NOT ATOMIC
     DECLARE v_db_actual VARCHAR(128);
+    DECLARE v_lock_name VARCHAR(64);
     DECLARE v_estado_migracion VARCHAR(32) DEFAULT NULL;
     DECLARE v_paso_migracion VARCHAR(64) DEFAULT NULL;
 
@@ -34,6 +37,8 @@ BEGIN NOT ATOMIC
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'PROTECCION_ACTIVA: Base no autorizada o falta @SPRINT3_BASE_CONFIRMADA en paso 04.';
     END IF;
+
+    SET v_lock_name = CONCAT('am_sprint3_mig_', MD5(v_db_actual));
 
     IF NOT EXISTS (
         SELECT 1
@@ -59,6 +64,11 @@ BEGIN NOT ATOMIC
     IF v_estado_migracion <> 'EN_PROGRESO' OR v_paso_migracion <> '03_SESIONES_ARQUEOS_AUTORIZACIONES' THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'ORDEN_MIGRACION_INVALIDO: El paso 04 exige estado EN_PROGRESO y paso_actual = 03_SESIONES_ARQUEOS_AUTORIZACIONES.';
+    END IF;
+
+    IF COALESCE(IS_USED_LOCK(v_lock_name), -1) <> CONNECTION_ID() THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'LOCK_MIGRACION_NO_VIGENTE: El paso 04 debe ejecutarse en la misma conexión que adquirió GET_LOCK en el paso 01.';
     END IF;
 
     IF EXISTS (
@@ -204,10 +214,6 @@ BEGIN NOT ATOMIC
         and char_length(trim(`motivo`)) between 1 and 250
       )
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-    UPDATE `sprint3_migracion_control`
-       SET `paso_actual` = '04_MOVIMIENTOS_CORRECCIONES_VENTAS'
-     WHERE `id_migracion` = 3;
 END$$
 
 -- =============================================================================
@@ -518,6 +524,66 @@ FOR EACH ROW
 BEGIN
     SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'HISTORIAL_CORRECCION_INMUTABLE: Los eslabones de correccion_movimiento_caja no pueden eliminarse.';
+END$$
+
+-- =============================================================================
+-- CIERRE DEL PASO 04: VERIFICACIÓN DE OBJETOS Y TRIGGERS ANTES DE AVANZAR PASO
+-- =============================================================================
+BEGIN NOT ATOMIC
+    DECLARE v_db_actual VARCHAR(128);
+    DECLARE v_col_venta_ok INT DEFAULT 0;
+    DECLARE v_tablas_ok INT DEFAULT 0;
+    DECLARE v_fks_ok INT DEFAULT 0;
+    DECLARE v_triggers_ok INT DEFAULT 0;
+
+    SET v_db_actual = DATABASE();
+
+    SELECT COUNT(*)
+      INTO v_col_venta_ok
+      FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = v_db_actual
+       AND TABLE_NAME = 'venta'
+       AND COLUMN_NAME = 'id_sesion_caja';
+
+    SELECT COUNT(*)
+      INTO v_tablas_ok
+      FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = v_db_actual
+       AND TABLE_NAME IN ('movimiento_caja', 'correccion_movimiento_caja');
+
+    SELECT COUNT(*)
+      INTO v_fks_ok
+      FROM information_schema.TABLE_CONSTRAINTS
+     WHERE CONSTRAINT_SCHEMA = v_db_actual
+       AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+       AND (
+           TABLE_NAME IN ('movimiento_caja', 'correccion_movimiento_caja')
+           OR (TABLE_NAME = 'venta' AND CONSTRAINT_NAME = 'fk_venta_sesion_caja')
+       );
+
+    SELECT COUNT(*)
+      INTO v_triggers_ok
+      FROM information_schema.TRIGGERS
+     WHERE TRIGGER_SCHEMA = v_db_actual
+       AND TRIGGER_NAME IN (
+           'trg_movimiento_caja_before_insert_integridad',
+           'trg_movimiento_caja_before_update_inmutable',
+           'trg_movimiento_caja_before_delete_prohibido',
+           'trg_correccion_movimiento_caja_before_insert_integridad',
+           'trg_correccion_movimiento_caja_before_update_inmutable',
+           'trg_correccion_movimiento_caja_before_delete_prohibido'
+       );
+
+    IF v_col_venta_ok <> 1 OR v_tablas_ok <> 2 OR v_fks_ok <> 14 OR v_triggers_ok <> 6 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'VERIFICACION_PASO04_INCOMPLETA: No se crearon todas las columnas (1), tablas (2), FKs (14) o triggers (6) del paso 04.';
+    END IF;
+
+    UPDATE `sprint3_migracion_control`
+       SET `paso_actual` = '04_MOVIMIENTOS_CORRECCIONES_VENTAS'
+     WHERE `id_migracion` = 3
+       AND `estado` = 'EN_PROGRESO'
+       AND `paso_actual` = '03_SESIONES_ARQUEOS_AUTORIZACIONES';
 END$$
 
 DELIMITER ;

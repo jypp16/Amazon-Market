@@ -20,10 +20,13 @@
 --        y claves foráneas con `ON DELETE RESTRICT`.
 -- =============================================================================
 
+SET SESSION sql_mode = 'STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
 DELIMITER $$
 
 BEGIN NOT ATOMIC
     DECLARE v_db_actual VARCHAR(128);
+    DECLARE v_lock_name VARCHAR(64);
     DECLARE v_estado_migracion VARCHAR(32) DEFAULT NULL;
     DECLARE v_paso_migracion VARCHAR(64) DEFAULT NULL;
 
@@ -34,6 +37,8 @@ BEGIN NOT ATOMIC
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'PROTECCION_ACTIVA: Base no autorizada o falta @SPRINT3_BASE_CONFIRMADA en paso 05.';
     END IF;
+
+    SET v_lock_name = CONCAT('am_sprint3_mig_', MD5(v_db_actual));
 
     IF NOT EXISTS (
         SELECT 1
@@ -59,6 +64,11 @@ BEGIN NOT ATOMIC
     IF v_estado_migracion <> 'EN_PROGRESO' OR v_paso_migracion <> '04_MOVIMIENTOS_CORRECCIONES_VENTAS' THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'ORDEN_MIGRACION_INVALIDO: El paso 05 exige estado EN_PROGRESO y paso_actual = 04_MOVIMIENTOS_CORRECCIONES_VENTAS.';
+    END IF;
+
+    IF COALESCE(IS_USED_LOCK(v_lock_name), -1) <> CONNECTION_ID() THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'LOCK_MIGRACION_NO_VIGENTE: El paso 05 debe ejecutarse en la misma conexión que adquirió GET_LOCK en el paso 01.';
     END IF;
 
     IF EXISTS (
@@ -123,10 +133,6 @@ BEGIN NOT ATOMIC
         and json_valid(`proyeccion_json`)
       )
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-    UPDATE `sprint3_migracion_control`
-       SET `paso_actual` = '05_IDEMPOTENCIA_Y_REPORTES'
-     WHERE `id_migracion` = 3;
 END$$
 
 -- =============================================================================
@@ -195,6 +201,63 @@ BEGIN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'SNAPSHOT_REPORT_MISMATCH: reporte_consulta_snapshot_item solo admite cabeceras de tipo kardex o variaciones.';
     END IF;
+END$$
+
+-- =============================================================================
+-- CIERRE DEL PASO 05: VERIFICACIÓN DE OBJETOS Y TRIGGERS ANTES DE AVANZAR PASO
+-- =============================================================================
+BEGIN NOT ATOMIC
+    DECLARE v_db_actual VARCHAR(128);
+    DECLARE v_tabla_ok INT DEFAULT 0;
+    DECLARE v_fks_ok INT DEFAULT 0;
+    DECLARE v_enums_ok INT DEFAULT 0;
+    DECLARE v_triggers_ok INT DEFAULT 0;
+
+    SET v_db_actual = DATABASE();
+
+    SELECT COUNT(*)
+      INTO v_tabla_ok
+      FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = v_db_actual
+       AND TABLE_NAME = 'reporte_caja_snapshot_item';
+
+    SELECT COUNT(*)
+      INTO v_fks_ok
+      FROM information_schema.TABLE_CONSTRAINTS
+     WHERE CONSTRAINT_SCHEMA = v_db_actual
+       AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+       AND TABLE_NAME = 'reporte_caja_snapshot_item';
+
+    SELECT COUNT(*)
+      INTO v_enums_ok
+      FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = v_db_actual
+       AND (
+           (TABLE_NAME = 'control_solicitud_idempotencia' AND COLUMN_NAME = 'tipo_operacion' AND COLUMN_TYPE LIKE '%CAJA_CERRAR%')
+           OR (TABLE_NAME = 'reporte_consulta_snapshot' AND COLUMN_NAME = 'tipo_reporte' AND COLUMN_TYPE LIKE '%cierres_caja%')
+       );
+
+    SELECT COUNT(*)
+      INTO v_triggers_ok
+      FROM information_schema.TRIGGERS
+     WHERE TRIGGER_SCHEMA = v_db_actual
+       AND TRIGGER_NAME IN (
+           'trg_reporte_caja_snapshot_item_before_insert_integridad',
+           'trg_reporte_caja_snapshot_item_before_update_inmutable',
+           'trg_reporte_caja_snapshot_item_before_delete_prohibido',
+           'trg_reporte_consulta_snapshot_item_before_insert_tipo'
+       );
+
+    IF v_tabla_ok <> 1 OR v_fks_ok <> 2 OR v_enums_ok <> 2 OR v_triggers_ok <> 4 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'VERIFICACION_PASO05_INCOMPLETA: No se crearon todas las tablas (1), FKs (2), ENUMs (2) o triggers (4) del paso 05.';
+    END IF;
+
+    UPDATE `sprint3_migracion_control`
+       SET `paso_actual` = '05_IDEMPOTENCIA_Y_REPORTES'
+     WHERE `id_migracion` = 3
+       AND `estado` = 'EN_PROGRESO'
+       AND `paso_actual` = '04_MOVIMIENTOS_CORRECCIONES_VENTAS';
 END$$
 
 DELIMITER ;

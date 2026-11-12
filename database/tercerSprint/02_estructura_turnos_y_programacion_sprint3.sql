@@ -21,10 +21,13 @@
 --        confirmada en la Sección 13.1 del Contrato API.
 -- =============================================================================
 
+SET SESSION sql_mode = 'STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
 DELIMITER $$
 
 BEGIN NOT ATOMIC
     DECLARE v_db_actual VARCHAR(128);
+    DECLARE v_lock_name VARCHAR(64);
     DECLARE v_estado_migracion VARCHAR(32) DEFAULT NULL;
     DECLARE v_paso_migracion VARCHAR(64) DEFAULT NULL;
 
@@ -35,6 +38,8 @@ BEGIN NOT ATOMIC
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'PROTECCION_ACTIVA: Base no autorizada o falta @SPRINT3_BASE_CONFIRMADA en paso 02.';
     END IF;
+
+    SET v_lock_name = CONCAT('am_sprint3_mig_', MD5(v_db_actual));
 
     IF NOT EXISTS (
         SELECT 1
@@ -60,6 +65,11 @@ BEGIN NOT ATOMIC
     IF v_estado_migracion <> 'EN_PROGRESO' OR v_paso_migracion <> '01_PREFLIGHT' THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'ORDEN_MIGRACION_INVALIDO: El paso 02 exige estado EN_PROGRESO y paso_actual = 01_PREFLIGHT.';
+    END IF;
+
+    IF COALESCE(IS_USED_LOCK(v_lock_name), -1) <> CONNECTION_ID() THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'LOCK_MIGRACION_NO_VIGENTE: El paso 02 debe ejecutarse en la misma conexión que adquirió GET_LOCK en el paso 01.';
     END IF;
 
     IF EXISTS (
@@ -163,10 +173,6 @@ BEGIN NOT ATOMIC
       CONSTRAINT `fk_prog_detalle_turno` FOREIGN KEY (`id_turno`) REFERENCES `turno` (`id_turno`),
       CONSTRAINT `chk_prog_detalle_dia` CHECK (`dia_semana` between 0 and 6)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-    UPDATE `sprint3_migracion_control`
-       SET `paso_actual` = '02_TURNOS_Y_PROGRAMACION'
-     WHERE `id_migracion` = 3;
 END$$
 
 -- =============================================================================
@@ -187,9 +193,28 @@ FOR EACH ROW
 BEGIN
     DECLARE v_asignados INT DEFAULT 0;
     DECLARE v_sesiones_abiertas INT DEFAULT 0;
+    DECLARE v_semana_actual DATE;
+    DECLARE v_vendedor INT;
+    DECLARE v_inicio_base DATE;
+    DECLARE v_desde DATE;
+    DECLARE v_siguiente_base DATE;
+    DECLARE v_semanas INT;
+    DECLARE v_excepciones INT;
+    DECLARE v_fin INT DEFAULT 0;
+    DECLARE c_bases CURSOR FOR
+        SELECT DISTINCT ps.id_usuario_vendedor, ps.semana_inicio
+          FROM programacion_semanal ps
+          JOIN programacion_semanal_detalle psd
+            ON psd.id_programacion = ps.id_programacion
+         WHERE ps.es_vigente = 1
+           AND ps.alcance = 'desde'
+           AND psd.id_turno = OLD.id_turno;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_fin = 1;
 
     IF OLD.estado = 1 AND NEW.estado = 0 THEN
-        -- Verificar si existen vendedores asignados en programaciones vigentes/futuras
+        SET v_semana_actual = DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY);
+
+        -- Una excepción exacta actual/futura tiene prioridad sobre cualquier base.
         SELECT COUNT(DISTINCT ps.id_usuario_vendedor)
           INTO v_asignados
           FROM programacion_semanal ps
@@ -197,10 +222,54 @@ BEGIN
              ON psd.id_programacion = ps.id_programacion
          WHERE ps.es_vigente = 1
            AND psd.id_turno = OLD.id_turno
-           AND (
-               ps.alcance = 'desde'
-               OR ps.semana_inicio >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-           );
+           AND ps.alcance = 'semana'
+           AND ps.semana_inicio >= v_semana_actual;
+
+        IF v_asignados = 0 THEN
+            -- es_vigente identifica la versión ganadora de una regla, no que una
+            -- base histórica siga aplicándose después de otra base más reciente.
+            -- Cada base rige [su lunes, siguiente base), excepto semanas puntuales.
+            OPEN c_bases;
+            bases_vigentes: LOOP
+                FETCH c_bases INTO v_vendedor, v_inicio_base;
+                IF v_fin = 1 THEN
+                    LEAVE bases_vigentes;
+                END IF;
+
+                SET v_desde = GREATEST(v_inicio_base, v_semana_actual);
+                SELECT MIN(semana_inicio)
+                  INTO v_siguiente_base
+                  FROM programacion_semanal
+                 WHERE id_usuario_vendedor = v_vendedor
+                   AND es_vigente = 1
+                   AND alcance = 'desde'
+                   AND semana_inicio > v_inicio_base;
+
+                IF v_siguiente_base IS NULL THEN
+                    -- La última base vuelve a regir tras las excepciones finitas.
+                    SET v_asignados = 1;
+                    LEAVE bases_vigentes;
+                END IF;
+
+                IF v_siguiente_base > v_desde THEN
+                    SET v_semanas = DATEDIFF(v_siguiente_base, v_desde) DIV 7;
+                    SELECT COUNT(DISTINCT semana_inicio)
+                      INTO v_excepciones
+                      FROM programacion_semanal
+                     WHERE id_usuario_vendedor = v_vendedor
+                       AND es_vigente = 1
+                       AND alcance = 'semana'
+                       AND semana_inicio >= v_desde
+                       AND semana_inicio < v_siguiente_base;
+
+                    IF v_excepciones < v_semanas THEN
+                        SET v_asignados = 1;
+                        LEAVE bases_vigentes;
+                    END IF;
+                END IF;
+            END LOOP bases_vigentes;
+            CLOSE c_bases;
+        END IF;
 
         IF v_asignados > 0 THEN
             SIGNAL SQLSTATE '45000'
@@ -344,6 +413,56 @@ FOR EACH ROW
 BEGIN
     SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'HISTORIAL_PROGRAMACION_INMUTABLE: Los detalles de versiones de programación semanal no pueden eliminarse.';
+END$$
+
+-- =============================================================================
+-- CIERRE DEL PASO 02: VERIFICACIÓN DE OBJETOS Y TRIGGERS ANTES DE AVANZAR PASO
+-- =============================================================================
+BEGIN NOT ATOMIC
+    DECLARE v_db_actual VARCHAR(128);
+    DECLARE v_tablas_ok INT DEFAULT 0;
+    DECLARE v_fks_ok INT DEFAULT 0;
+    DECLARE v_triggers_ok INT DEFAULT 0;
+
+    SET v_db_actual = DATABASE();
+
+    SELECT COUNT(*)
+      INTO v_tablas_ok
+      FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = v_db_actual
+       AND TABLE_NAME IN ('turno', 'programacion_semanal', 'programacion_semanal_detalle');
+
+    SELECT COUNT(*)
+      INTO v_fks_ok
+      FROM information_schema.TABLE_CONSTRAINTS
+     WHERE CONSTRAINT_SCHEMA = v_db_actual
+       AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+       AND TABLE_NAME IN ('turno', 'programacion_semanal', 'programacion_semanal_detalle');
+
+    SELECT COUNT(*)
+      INTO v_triggers_ok
+      FROM information_schema.TRIGGERS
+     WHERE TRIGGER_SCHEMA = v_db_actual
+       AND TRIGGER_NAME IN (
+           'trg_turno_before_delete_prohibido',
+           'trg_turno_before_update_integridad',
+           'trg_programacion_semanal_before_insert_integridad',
+           'trg_programacion_semanal_before_update_integridad',
+           'trg_programacion_semanal_before_delete_prohibido',
+           'trg_prog_detalle_before_insert_integridad',
+           'trg_prog_detalle_before_delete_prohibido'
+       );
+
+    IF v_tablas_ok <> 3 OR v_fks_ok <> 10 OR v_triggers_ok <> 7 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'VERIFICACION_PASO02_INCOMPLETA: No se crearon todas las tablas (3), FKs (10) o triggers (7) del paso 02.';
+    END IF;
+
+    UPDATE `sprint3_migracion_control`
+       SET `paso_actual` = '02_TURNOS_Y_PROGRAMACION'
+     WHERE `id_migracion` = 3
+       AND `estado` = 'EN_PROGRESO'
+       AND `paso_actual` = '01_PREFLIGHT';
 END$$
 
 DELIMITER ;

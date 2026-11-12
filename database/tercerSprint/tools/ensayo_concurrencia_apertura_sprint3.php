@@ -21,6 +21,8 @@ $forbiddenDbs = [
     'amazon_market',
     'amazon_market_sprint3_verify_20261112_012430',
     'amazon_market_sprint3_verify_20261112_012312',
+    'amazon_market_sprint3_migration_test_20261112_140017',
+    'amazon_market_sprint3_migration_test_20261112_140630',
     'amazon_market_sprint2_test',
     'amazon_market_restore_verify_20261027_113040',
     'mysql',
@@ -89,32 +91,18 @@ $res2 = json_decode(trim((string)$out2), true) ?: ['raw_out' => $out2, 'raw_err'
 $openCount = (int)$pdo->query("SELECT COUNT(*) FROM sesion_caja WHERE estado = 'ABIERTA'")->fetchColumn();
 $guardRow = $pdo->query("SELECT id_caja_fisica, id_sesion_abierta_actual, id_ultima_sesion_cerrada FROM caja_fisica_guardia WHERE id_caja_fisica = 1")->fetch();
 
-// Limpiar datos temporales de la prueba para dejar la base de ensayo limpia
+// Limpiar datos temporales de la prueba para dejar la base de ensayo limpia preservando exactamente la definición original de los triggers
 $pdo->exec("UPDATE caja_fisica_guardia SET id_sesion_abierta_actual = NULL, id_ultima_sesion_cerrada = NULL WHERE id_caja_fisica = 1");
-$pdo->exec("DROP TRIGGER IF EXISTS trg_sesion_caja_before_delete_prohibido");
-$pdo->exec("DROP TRIGGER IF EXISTS trg_turno_before_delete_prohibido");
+$trgSesionCreate = $pdo->query("SHOW CREATE TRIGGER `trg_sesion_caja_before_delete_prohibido`")->fetch(PDO::FETCH_ASSOC)['SQL Original Statement'];
+$trgTurnoCreate = $pdo->query("SHOW CREATE TRIGGER `trg_turno_before_delete_prohibido`")->fetch(PDO::FETCH_ASSOC)['SQL Original Statement'];
+$pdo->exec("DROP TRIGGER IF EXISTS `trg_sesion_caja_before_delete_prohibido`");
+$pdo->exec("DROP TRIGGER IF EXISTS `trg_turno_before_delete_prohibido`");
 $pdo->exec("DELETE FROM sesion_caja");
 $pdo->exec("DELETE FROM turno");
 $pdo->exec("ALTER TABLE sesion_caja AUTO_INCREMENT = 1");
 $pdo->exec("ALTER TABLE turno AUTO_INCREMENT = 1");
-$pdo->exec(
-    "CREATE TRIGGER `trg_sesion_caja_before_delete_prohibido`
-     BEFORE DELETE ON `sesion_caja`
-     FOR EACH ROW
-     BEGIN
-         SIGNAL SQLSTATE '45000'
-             SET MESSAGE_TEXT = 'HISTORIAL_SESION_INMUTABLE: Las sesiones de caja no pueden eliminarse.';
-     END"
-);
-$pdo->exec(
-    "CREATE TRIGGER `trg_turno_before_delete_prohibido`
-     BEFORE DELETE ON `turno`
-     FOR EACH ROW
-     BEGIN
-         SIGNAL SQLSTATE '45000'
-             SET MESSAGE_TEXT = 'BAJA_LOGICA_REQUERIDA: Los turnos no se eliminan físicamente; actualice estado = 0 para preservar referencias históricas.';
-     END"
-);
+$pdo->exec($trgSesionCreate);
+$pdo->exec($trgTurnoCreate);
 
 $statuses = [$res1['status'] ?? 'ERR', $res2['status'] ?? 'ERR'];
 sort($statuses);

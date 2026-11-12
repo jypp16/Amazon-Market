@@ -27,6 +27,8 @@
 --        marcar `sprint3_migracion_control.estado = 'COMPLETADA'`.
 -- =============================================================================
 
+SET SESSION sql_mode = 'STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
 DELIMITER $$
 
 BEGIN NOT ATOMIC
@@ -39,13 +41,17 @@ BEGIN NOT ATOMIC
     DECLARE v_asignaciones_admin INT DEFAULT 0;
     DECLARE v_cruces_prohibidos INT DEFAULT 0;
     DECLARE v_ventas_con_sesion INT DEFAULT 0;
+    DECLARE v_tablas_totales INT DEFAULT 0;
+    DECLARE v_triggers_totales INT DEFAULT 0;
     DECLARE v_lock_name VARCHAR(128);
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         ROLLBACK;
         SET v_lock_name = CONCAT('am_sprint3_mig_', MD5(DATABASE()));
-        DO RELEASE_LOCK(v_lock_name);
+        IF COALESCE(IS_USED_LOCK(v_lock_name), -1) = CONNECTION_ID() THEN
+            DO RELEASE_LOCK(v_lock_name);
+        END IF;
         RESIGNAL;
     END;
 
@@ -56,6 +62,8 @@ BEGIN NOT ATOMIC
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'PROTECCION_ACTIVA: Base no autorizada o falta @SPRINT3_BASE_CONFIRMADA en paso 06.';
     END IF;
+
+    SET v_lock_name = CONCAT('am_sprint3_mig_', MD5(v_db_actual));
 
     IF NOT EXISTS (
         SELECT 1
@@ -81,6 +89,11 @@ BEGIN NOT ATOMIC
     IF v_estado_migracion <> 'EN_PROGRESO' OR v_paso_migracion <> '05_IDEMPOTENCIA_Y_REPORTES' THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'ORDEN_MIGRACION_INVALIDO: El paso 06 exige estado EN_PROGRESO y paso_actual = 05_IDEMPOTENCIA_Y_REPORTES.';
+    END IF;
+
+    IF COALESCE(IS_USED_LOCK(v_lock_name), -1) <> CONNECTION_ID() THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'LOCK_MIGRACION_NO_VIGENTE: El paso 06 debe ejecutarse en la misma conexión que adquirió GET_LOCK en el paso 01.';
     END IF;
 
     START TRANSACTION;
@@ -287,6 +300,22 @@ BEGIN NOT ATOMIC
        OR (SELECT COUNT(*) FROM `sprint2_archivo_kardex`) <> CAST(JSON_VALUE(v_base_json, '$.sprint2_archivo_kardex') AS UNSIGNED) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'CONSERVACION_DATOS_FALLIDA: Se detectó una discrepancia respecto a la línea base de conteos o stock.';
+    END IF;
+
+    SELECT COUNT(*)
+      INTO v_tablas_totales
+      FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = v_db_actual
+       AND TABLE_TYPE = 'BASE TABLE';
+
+    SELECT COUNT(*)
+      INTO v_triggers_totales
+      FROM information_schema.TRIGGERS
+     WHERE TRIGGER_SCHEMA = v_db_actual;
+
+    IF v_tablas_totales <> 43 OR v_triggers_totales <> 34 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'VERIFICACION_PASO06_INCOMPLETA: El esquema final debe contener exactamente 43 tablas y 34 triggers antes de marcar COMPLETADA.';
     END IF;
 
     -- =========================================================================

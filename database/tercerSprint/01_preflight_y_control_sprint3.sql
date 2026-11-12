@@ -22,6 +22,8 @@
 --   `ROLLBACK`. Por ello todas las precondiciones se evalúan ANTES de ejecutar DDL.
 -- =============================================================================
 
+SET SESSION sql_mode = 'STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
+
 DELIMITER $$
 
 BEGIN NOT ATOMIC
@@ -289,7 +291,7 @@ BEGIN NOT ATOMIC
         3,
         v_db_actual,
         'EN_PROGRESO',
-        '01_PREFLIGHT',
+        '00_INICIANDO',
         VERSION(),
         TRIM(@SPRINT3_RESPALDO_ARCHIVO),
         UPPER(TRIM(@SPRINT3_RESPALDO_SHA256)),
@@ -318,6 +320,18 @@ BEGIN NOT ATOMIC
             'sprint2_archivo_compra_historial', (SELECT COUNT(*) FROM sprint2_archivo_compra_historial),
             'sprint2_archivo_kardex', (SELECT COUNT(*) FROM sprint2_archivo_kardex)
         );
+
+    -- 7. Verificación de postcondición del paso 01 antes de marcar 01_PREFLIGHT
+    IF COALESCE(IS_USED_LOCK(@SPRINT3_MIG_LOCK), -1) <> CONNECTION_ID()
+       OR (SELECT COUNT(*) FROM sprint3_migracion_control WHERE id_migracion = 3 AND base_datos = v_db_actual) <> 1 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'POSTCONDICION_PASO01_FALLIDA: No se pudo verificar el bloqueo o el registro de control del paso 01.';
+    END IF;
+
+    UPDATE `sprint3_migracion_control`
+       SET `paso_actual` = '01_PREFLIGHT'
+     WHERE `id_migracion` = 3
+       AND `estado` = 'EN_PROGRESO';
 END$$
 
 DELIMITER ;
