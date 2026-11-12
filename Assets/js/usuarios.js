@@ -383,6 +383,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const aplicar = document.getElementById('program_apply_scope');
         aplicar.hidden = !programacionSemana;
+        document.getElementById('program_base_hint').hidden = Boolean(programacionSemana);
         const soloSemana = aplicar.querySelector('input[value="semana"]');
         if (soloSemana) soloSemana.checked = true;
         document.getElementById('program_shift_error').textContent = '';
@@ -411,7 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const alcance = programacionSemana
                 ? (overlayProgramacion.querySelector('input[name="program_scope"]:checked')?.value || 'semana')
-                : 'semana';
+                : 'desde';
             await UsuariosHorariosService.guardarProgramacion(
                 usuarioProgramado.id_usuario,
                 semanaModal,

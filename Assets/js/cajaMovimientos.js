@@ -12,6 +12,7 @@
     var confirmation = document.getElementById('cash_movements_confirmation');
     var incomeForm = document.getElementById('cash_income_form');
     var expenseForm = document.getElementById('cash_expense_form');
+    var correctionForm = document.getElementById('cash_correction_form');
     if (!service || !workspace) return;
 
     var session = null;
@@ -21,6 +22,9 @@
     var submitting = false;
     var requestFingerprint = null;
     var requestId = null;
+    var correctionData = null;
+    var correctionLoading = false;
+    var sellerUsername = config.sellerUsername || '';
     var expenseTypes = config.expenseTypes || [
         { value: 'cash_out', label: 'Salida de caja' },
         { value: 'admin_withdrawal', label: 'Retiro del administrador' },
@@ -48,6 +52,16 @@
         confirmOmitted: document.getElementById('cash_confirm_omitted'),
         submit: document.getElementById('cash_expense_submit'),
         feedback: document.getElementById('cash_expense_feedback')
+    };
+    var correction = {
+        original: document.getElementById('cash_correction_original'),
+        amount: document.getElementById('cash_correction_amount'),
+        admin: document.getElementById('cash_correction_admin'),
+        password: document.getElementById('cash_correction_password'),
+        reason: document.getElementById('cash_correction_reason'),
+        submit: document.getElementById('cash_correction_submit'),
+        cancel: document.getElementById('cash_correction_cancel'),
+        feedback: document.getElementById('cash_correction_feedback')
     };
 
     function formatMoney(value) {
@@ -119,6 +133,123 @@
         status.classList.toggle('is-outside', !open);
     }
 
+    function correctionError(input, errorId, message) {
+        if (message) setFieldError(input, errorId, message);
+        else clearFieldError(input, errorId);
+    }
+
+    function selectedCorrectionMovement() {
+        if (!correctionData) return null;
+        return (correctionData.movements || []).find(function (movement) {
+            return String(movement.id) === String(correction.original.value);
+        }) || null;
+    }
+
+    function renderCorrectionDetail() {
+        var movement = selectedCorrectionMovement();
+        var detail = document.getElementById('cash_correction_original_detail');
+        if (!movement) {
+            detail.textContent = '';
+            detail.hidden = true;
+            return;
+        }
+        var originalAmount = Number(movement.amount);
+        var currentAmount = Number(movement.current_amount !== undefined
+            ? movement.current_amount : movement.amount);
+        detail.textContent = (movement.label || movement.type || 'Movimiento')
+            + ' · ' + (movement.reference || movement.reason || 'Sin referencia')
+            + ' · Importe original: ' + formatMoney(originalAmount)
+            + (currentAmount !== originalAmount ? ' · Importe vigente: ' + formatMoney(currentAmount) : '')
+            + ' · Estado: ' + (movement.status || 'Confirmado');
+        detail.hidden = false;
+    }
+
+    function renderCorrectionLedger() {
+        var tbody = document.getElementById('cash_correction_history_rows');
+        tbody.replaceChildren();
+        var entries = [];
+        (correctionData && correctionData.movements || []).forEach(function (movement) {
+            entries.push({
+                label: 'Original · ' + (movement.status || 'Confirmado'),
+                reference: movement.reference || movement.id,
+                amount: formatMoney(movement.amount),
+                note: movement.reason || 'Registro original conservado',
+                order: movement.recorded_at || ''
+            });
+        });
+        (correctionData && correctionData.corrections || []).forEach(function (item) {
+            entries.push({
+                label: 'Corrección vinculada · ' + (item.status || 'Registrada'),
+                reference: item.original_reference || item.original_movement_id,
+                amount: formatMoney(item.corrected_amount),
+                note: (item.reason || '—') + ' · Efecto: ' + (item.effect || 'Pendiente del servidor'),
+                order: item.recorded_at || ''
+            });
+        });
+        entries.sort(function (left, right) {
+            return String(left.order).localeCompare(String(right.order));
+        });
+        if (!entries.length) {
+            var emptyRow = document.createElement('tr');
+            var emptyCell = document.createElement('td');
+            emptyCell.colSpan = 4;
+            emptyCell.textContent = 'No hay movimientos confirmados disponibles para corregir.';
+            emptyRow.appendChild(emptyCell);
+            tbody.appendChild(emptyRow);
+            return;
+        }
+        entries.forEach(function (entry) {
+            var row = document.createElement('tr');
+            [entry.label, entry.reference, entry.amount, entry.note].forEach(function (value) {
+                var cell = document.createElement('td');
+                cell.textContent = value;
+                row.appendChild(cell);
+            });
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderCorrectionOptions() {
+        var selectedValue = correction.original.value;
+        correction.original.replaceChildren(new Option('Selecciona el movimiento que se registró mal', ''));
+        (correctionData && correctionData.movements || []).forEach(function (movement) {
+            var option = new Option(
+                (movement.label || movement.type || 'Movimiento') + ' · '
+                    + (movement.reference || movement.id) + ' · ' + formatMoney(movement.amount),
+                movement.id
+            );
+            correction.original.add(option);
+        });
+        correction.original.value = selectedValue;
+        correction.submit.disabled = submitting || correctionLoading
+            || !(correctionData && correctionData.movements && correctionData.movements.length);
+        renderCorrectionDetail();
+        renderCorrectionLedger();
+    }
+
+    function loadCorrectionData() {
+        if (correctionData || correctionLoading || typeof service.listCorrectableMovements !== 'function') return;
+        correctionLoading = true;
+        correction.feedback.hidden = true;
+        correction.submit.disabled = true;
+        correction.submit.textContent = 'Cargando registros…';
+        service.listCorrectableMovements(session.session_id || config.sessionId).then(function (result) {
+            if (!result || !Array.isArray(result.movements) || !Array.isArray(result.corrections)) {
+                throw new Error('No se recibió el historial de correcciones.');
+            }
+            correctionData = result;
+            renderCorrectionOptions();
+        }).catch(function () {
+            correction.feedback.textContent = 'No se pudieron cargar los registros para corregir. Inténtalo de nuevo.';
+            correction.feedback.classList.add('is-error');
+            correction.feedback.hidden = false;
+        }).finally(function () {
+            correctionLoading = false;
+            correction.submit.textContent = 'Solicitar corrección';
+            renderCorrectionOptions();
+        });
+    }
+
     function showNoSession() {
         session.is_open = false;
         setStatus(false);
@@ -184,7 +315,9 @@
     }
 
     function activeFeedback() {
-        return currentTab === 'income' ? income.feedback : expense.feedback;
+        if (currentTab === 'income') return income.feedback;
+        if (currentTab === 'expense') return expense.feedback;
+        return correction.feedback;
     }
 
     function renderOriginClose(turnId) {
@@ -209,6 +342,22 @@
         var balanceNote = document.getElementById('cash_balance_note');
         var closePanel = document.getElementById('cash_origin_close');
         var originId = expense.originTurn.value;
+
+        if (currentTab === 'correction') {
+            label.textContent = 'Corrección vinculada';
+            label.className = 'cash-effect-neutral';
+            impact.className = 'cash-effect-neutral';
+            impact.textContent = 'Se calcula al autorizar';
+            totalLabel.textContent = 'Saldo después';
+            total.textContent = 'Pendiente de autorización';
+            omittedNote.hidden = true;
+            closePanel.hidden = true;
+            balanceNote.textContent =
+                'El servidor confirma el efecto de la corrección. No se crea un ingreso ni un egreso físico nuevo.';
+            correction.submit.disabled = submitting || correctionLoading
+                || !(correctionData && correctionData.movements && correctionData.movements.length);
+            return;
+        }
 
         if (currentTab === 'income') {
             var amount = parseAmount(income.amount);
@@ -355,6 +504,66 @@
         };
     }
 
+    function validateCorrection() {
+        var firstInvalid = null;
+        var movement = selectedCorrectionMovement();
+        var amountText = correction.amount.value.trim();
+        var amount = /^\d+(?:[,.]\d{1,2})?$/.test(amountText)
+            ? Number(amountText.replace(',', '.')) : NaN;
+        var reason = correction.reason.value.trim();
+        var username = correction.admin.value.trim();
+        var password = correction.password.value;
+
+        [
+            [correction.original, 'cash_correction_original_error'],
+            [correction.amount, 'cash_correction_amount_error'],
+            [correction.admin, 'cash_correction_admin_error'],
+            [correction.password, 'cash_correction_password_error'],
+            [correction.reason, 'cash_correction_reason_error']
+        ].forEach(function (field) { clearFieldError(field[0], field[1]); });
+
+        if (!movement) {
+            setFieldError(correction.original, 'cash_correction_original_error',
+                'Selecciona el registro original que contiene el error.');
+            firstInvalid = firstInvalid || correction.original;
+        }
+        if (!Number.isFinite(amount) || amount < 0) {
+            setFieldError(correction.amount, 'cash_correction_amount_error',
+                'Ingresa el importe correcto, desde cero y con hasta dos decimales.');
+            firstInvalid = firstInvalid || correction.amount;
+        }
+        if (!username) {
+            setFieldError(correction.admin, 'cash_correction_admin_error',
+                'Ingresa el usuario del administrador que autoriza.');
+            firstInvalid = firstInvalid || correction.admin;
+        } else if (sellerUsername && username.toLowerCase() === sellerUsername.toLowerCase()) {
+            setFieldError(correction.admin, 'cash_correction_admin_error',
+                'El vendedor no puede autorizar su propia corrección.');
+            firstInvalid = firstInvalid || correction.admin;
+        }
+        if (!password) {
+            setFieldError(correction.password, 'cash_correction_password_error',
+                'Ingresa la contraseña del administrador.');
+            firstInvalid = firstInvalid || correction.password;
+        }
+        if (!reason) {
+            setFieldError(correction.reason, 'cash_correction_reason_error',
+                'Describe el error comprobado y el motivo de la corrección.');
+            firstInvalid = firstInvalid || correction.reason;
+        }
+        if (firstInvalid) {
+            firstInvalid.focus();
+            return null;
+        }
+        return {
+            original_movement_id: movement.id,
+            corrected_amount: Math.round(amount * 100) / 100,
+            reason: reason,
+            admin_username: username,
+            admin_password: password
+        };
+    }
+
     function getRequestId(payload) {
         var fingerprint = JSON.stringify(payload);
         if (!requestId || requestFingerprint !== fingerprint) {
@@ -373,14 +582,18 @@
         submitting = loadingState;
         income.submit.disabled = loadingState;
         expense.submit.disabled = loadingState;
+        correction.submit.disabled = loadingState || correctionLoading
+            || !(correctionData && correctionData.movements && correctionData.movements.length);
         document.getElementById('cash_income_cancel').disabled = loadingState;
         document.getElementById('cash_expense_cancel').disabled = loadingState;
+        correction.cancel.disabled = loadingState;
         income.submit.textContent = loadingState ? 'Registrando…' : 'Confirmar ingreso';
         expense.submit.textContent = loadingState ? 'Registrando…' : (isOmittedWithdrawal() ? 'Registrar retiro omitido' : 'Confirmar egreso');
+        correction.submit.textContent = loadingState ? 'Validando con el administrador…' : 'Solicitar corrección';
     }
 
-    function showFeedback(message, isError) {
-        var feedback = activeFeedback();
+    function showFeedback(message, isError, formType) {
+        var feedback = formType === 'correction' ? correction.feedback : activeFeedback();
         feedback.textContent = message;
         feedback.classList.toggle('is-error', Boolean(isError));
         feedback.hidden = false;
@@ -485,42 +698,147 @@
         });
     }
 
+    function submitCorrection() {
+        if (submitting || !session || !session.is_open) return;
+        var payload = validateCorrection();
+        if (!payload) return;
+        payload.session_id = session.session_id || config.sessionId || null;
+        var fingerprint = {
+            session_id: payload.session_id,
+            original_movement_id: payload.original_movement_id,
+            corrected_amount: payload.corrected_amount,
+            reason: payload.reason,
+            admin_username: payload.admin_username
+        };
+        payload.request_id = getRequestId(fingerprint);
+        correction.feedback.hidden = true;
+        setFormLoading(true);
+        service.requestCorrection(payload).then(function (result) {
+            if (result.type !== 'success') {
+                if (result.type === 'cash_closed') {
+                    showClosedSession();
+                    return;
+                }
+                if (result.type === 'movement_required' || result.type === 'movement_not_found') {
+                    setFieldError(correction.original, 'cash_correction_original_error',
+                        'El registro original ya no está disponible. Actualiza la lista.');
+                    correction.original.focus();
+                } else if (result.type === 'amount_invalid') {
+                    setFieldError(correction.amount, 'cash_correction_amount_error',
+                        'Ingresa el importe correcto, desde cero y con hasta dos decimales.');
+                    correction.amount.focus();
+                } else if (result.type === 'reason_required') {
+                    setFieldError(correction.reason, 'cash_correction_reason_error',
+                        'Describe el error comprobado y el motivo de la corrección.');
+                    correction.reason.focus();
+                } else if (result.type === 'administrator_required') {
+                    setFieldError(correction.admin, 'cash_correction_admin_error',
+                        'Ingresa el usuario del administrador que autoriza.');
+                    correction.admin.focus();
+                } else if (result.type === 'authorization_denied') {
+                    setFieldError(correction.password, 'cash_correction_password_error',
+                        'El administrador no pudo autorizar. Verifica sus credenciales y que sea distinto del vendedor.');
+                    correction.password.focus();
+                } else if (result.type === 'correction_not_allowed') {
+                    showFeedback('Este tipo de registro no admite corrección desde esta pantalla.', true, 'correction');
+                } else {
+                    showFeedback('No se pudo autorizar ni guardar la corrección. Inténtalo de nuevo.', true, 'correction');
+                }
+                return;
+            }
+
+            var data = result.data || {};
+            var balance = Number(data.balance);
+            if (!data.correction || !Number.isFinite(balance)
+                || !Array.isArray(correctionData && correctionData.corrections)) {
+                showFeedback('El servidor no confirmó todos los datos de la corrección. Reintenta o consulta el historial.', true, 'correction');
+                return;
+            }
+            session.balance = balance;
+            if (data.original_movement) {
+                var existing = correctionData.movements.find(function (item) {
+                    return item.id === data.original_movement.id;
+                });
+                if (existing) existing.current_amount = data.original_movement.current_amount;
+            }
+            correctionData.corrections.push(data.correction);
+            setStatus(true);
+            correctionForm.reset();
+            correction.password.value = '';
+            correction.feedback.hidden = true;
+            clearErrors(correctionForm);
+            clearRequestId();
+            renderCorrectionOptions();
+            renderPreview();
+            var effect = data.correction.effect || 'Efecto informado por el servidor';
+            showFeedback('Corrección autorizada y vinculada al registro original. '
+                + effect + '. Saldo actualizado: ' + formatMoney(balance) + '.', false, 'correction');
+        }).catch(function () {
+            showFeedback('No se pudo autorizar ni guardar la corrección. Inténtalo de nuevo.', true, 'correction');
+        }).finally(function () {
+            correction.password.value = '';
+            setFormLoading(false);
+            renderPreview();
+        });
+    }
+
     function updateTab(nextTab, focus) {
         currentTab = nextTab;
         var incomeActive = nextTab === 'income';
+        var expenseActive = nextTab === 'expense';
+        var correctionActive = nextTab === 'correction';
         var incomeTab = document.getElementById('cash_income_tab');
         var expenseTab = document.getElementById('cash_expense_tab');
-        incomeTab.classList.toggle('is-active', incomeActive);
-        expenseTab.classList.toggle('is-active', !incomeActive);
-        incomeTab.setAttribute('aria-selected', String(incomeActive));
-        expenseTab.setAttribute('aria-selected', String(!incomeActive));
-        incomeTab.tabIndex = incomeActive ? 0 : -1;
-        expenseTab.tabIndex = incomeActive ? -1 : 0;
+        var correctionTab = document.getElementById('cash_correction_tab');
+        [
+            [incomeTab, incomeActive],
+            [expenseTab, expenseActive],
+            [correctionTab, correctionActive]
+        ].forEach(function (entry) {
+            entry[0].classList.toggle('is-active', entry[1]);
+            entry[0].setAttribute('aria-selected', String(entry[1]));
+            entry[0].tabIndex = entry[1] ? 0 : -1;
+        });
         incomeForm.hidden = !incomeActive;
-        expenseForm.hidden = incomeActive;
+        expenseForm.hidden = !expenseActive;
+        correctionForm.hidden = !correctionActive;
         incomeForm.setAttribute('aria-hidden', String(!incomeActive));
-        expenseForm.setAttribute('aria-hidden', String(incomeActive));
+        expenseForm.setAttribute('aria-hidden', String(!expenseActive));
+        correctionForm.setAttribute('aria-hidden', String(!correctionActive));
         income.feedback.hidden = true;
         expense.feedback.hidden = true;
+        correction.feedback.hidden = true;
+        if (correctionActive) loadCorrectionData();
         renderPreview();
-        if (focus) (incomeActive ? incomeTab : expenseTab).focus();
+        if (focus) (incomeActive ? incomeTab : (expenseActive ? expenseTab : correctionTab)).focus();
     }
 
     function handleTabKeydown(event) {
         var keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
         if (!keys.includes(event.key)) return;
         event.preventDefault();
-        if (event.key === 'Home') updateTab('income', true);
-        else if (event.key === 'End') updateTab('expense', true);
-        else updateTab(currentTab === 'income' ? 'expense' : 'income', true);
+        var tabs = ['income', 'expense', 'correction'];
+        var index = tabs.indexOf(currentTab);
+        if (event.key === 'Home') index = 0;
+        else if (event.key === 'End') index = tabs.length - 1;
+        else index = (index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length;
+        updateTab(tabs[index], true);
     }
 
     function cancelForm(formType) {
-        clearErrors(formType === 'income' ? incomeForm : expenseForm);
+        clearErrors(formType === 'income' ? incomeForm
+            : (formType === 'expense' ? expenseForm : correctionForm));
         income.feedback.hidden = true;
         expense.feedback.hidden = true;
+        correction.feedback.hidden = true;
         clearRequestId();
-        window.setTimeout(renderPreview, 0);
+        window.setTimeout(function () {
+            if (formType === 'correction') {
+                correction.password.value = '';
+                renderCorrectionOptions();
+            }
+            renderPreview();
+        }, 0);
     }
 
     document.getElementById('cash_income_tab').addEventListener('click', function () {
@@ -529,8 +847,12 @@
     document.getElementById('cash_expense_tab').addEventListener('click', function () {
         updateTab('expense', false);
     });
+    document.getElementById('cash_correction_tab').addEventListener('click', function () {
+        updateTab('correction', false);
+    });
     document.getElementById('cash_income_tab').addEventListener('keydown', handleTabKeydown);
     document.getElementById('cash_expense_tab').addEventListener('keydown', handleTabKeydown);
+    document.getElementById('cash_correction_tab').addEventListener('keydown', handleTabKeydown);
     incomeForm.addEventListener('submit', function (event) {
         event.preventDefault();
         submitMovement('income');
@@ -541,6 +863,11 @@
     });
     incomeForm.addEventListener('reset', function () { cancelForm('income'); });
     expenseForm.addEventListener('reset', function () { cancelForm('expense'); });
+    correctionForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        submitCorrection();
+    });
+    correctionForm.addEventListener('reset', function () { cancelForm('correction'); });
 
     income.amount.addEventListener('input', function () {
         clearFieldError(income.amount, 'cash_income_amount_error');
@@ -585,6 +912,22 @@
             expense.submit.textContent = isOmittedWithdrawal() ? 'Registrar retiro omitido' : 'Confirmar egreso';
             renderPreview();
         });
+    });
+    correction.original.addEventListener('change', function () {
+        clearFieldError(correction.original, 'cash_correction_original_error');
+        renderCorrectionDetail();
+    });
+    correction.amount.addEventListener('input', function () {
+        clearFieldError(correction.amount, 'cash_correction_amount_error');
+    });
+    correction.admin.addEventListener('input', function () {
+        clearFieldError(correction.admin, 'cash_correction_admin_error');
+    });
+    correction.password.addEventListener('input', function () {
+        clearFieldError(correction.password, 'cash_correction_password_error');
+    });
+    correction.reason.addEventListener('input', function () {
+        clearFieldError(correction.reason, 'cash_correction_reason_error');
     });
     retryButton.addEventListener('click', loadWorkspace);
 

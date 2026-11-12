@@ -18,7 +18,8 @@ function createService(scenario, latencyMs = 0) {
                 { value: 'cash_out', label: 'Salida de caja' },
                 { value: 'admin_withdrawal', label: 'Retiro del administrador' },
                 { value: 'omitted_withdrawal', label: 'Retiro omitido' }
-            ]
+            ],
+            sellerUsername: 'luis'
         },
         setTimeout,
         crypto: { randomUUID: () => 'movement-' + (++requestId) }
@@ -61,7 +62,10 @@ class Element {
     removeAttribute(name) { delete this.attributes[name]; }
     getAttribute(name) { return this.attributes[name] || null; }
     focus() { global.document.activeElement = this; }
-    replaceChildren(option) { this.options = [option]; }
+    replaceChildren(option) {
+        this.options = arguments.length ? [option] : [];
+        if (!arguments.length) this.children = [];
+    }
     add(option) { this.options.push(option); }
     appendChild(child) { this.children.push(child); }
     querySelectorAll(selector) {
@@ -96,6 +100,7 @@ function createScreen(service) {
             ];
             return [];
         },
+        createElement(tag) { return new Element(tag); },
         querySelector() { return null; },
         addEventListener(name, callback) { this.listeners[name] = callback; }
     };
@@ -112,7 +117,13 @@ function createScreen(service) {
         'cash_expense_amount', 'cash_expense_reason', 'cash_expense_admin_group', 'cash_expense_admin',
         'cash_origin_turn_group', 'cash_origin_turn', 'cash_confirm_omitted_group',
         'cash_confirm_omitted', 'cash_expense_submit', 'cash_expense_feedback',
-        'cash_income_cancel', 'cash_expense_cancel', 'cash_effect_current', 'cash_effect_label',
+        'cash_income_cancel', 'cash_expense_cancel', 'cash_correction_tab', 'cash_correction_form',
+        'cash_correction_original', 'cash_correction_amount', 'cash_correction_admin',
+        'cash_correction_password', 'cash_correction_reason', 'cash_correction_submit',
+        'cash_correction_cancel', 'cash_correction_feedback', 'cash_correction_original_detail',
+        'cash_correction_history_rows', 'cash_correction_original_error', 'cash_correction_amount_error',
+        'cash_correction_admin_error', 'cash_correction_password_error', 'cash_correction_reason_error',
+        'cash_effect_current', 'cash_effect_label',
         'cash_effect_amount', 'cash_effect_total_label', 'cash_effect_total', 'cash_omitted_note',
         'cash_origin_close', 'cash_origin_expected', 'cash_origin_counted', 'cash_origin_shortage',
         'cash_balance_note', 'cash_income_amount_error', 'cash_income_reason_error',
@@ -124,6 +135,7 @@ function createScreen(service) {
     ids.forEach(get);
     const incomeForm = get('cash_income_form');
     const expenseForm = get('cash_expense_form');
+    const correctionForm = get('cash_correction_form');
     const allErrors = [
         'cash_income_amount_error', 'cash_income_reason_error', 'cash_income_admin_error',
         'cash_expense_amount_error', 'cash_expense_reason_error', 'cash_expense_admin_error',
@@ -140,6 +152,16 @@ function createScreen(service) {
         get('cash_origin_turn'), get('cash_confirm_omitted'),
         get('expense_cash_out'), get('expense_admin_withdrawal'), get('expense_omitted')
     ];
+    correctionForm.controls = [
+        get('cash_correction_original'), get('cash_correction_amount'),
+        get('cash_correction_admin'), get('cash_correction_password'),
+        get('cash_correction_reason')
+    ];
+    correctionForm.errors = [
+        get('cash_correction_original_error'), get('cash_correction_amount_error'),
+        get('cash_correction_admin_error'), get('cash_correction_password_error'),
+        get('cash_correction_reason_error')
+    ];
     get('income_manual').value = 'manual';
     get('income_manual').checked = true;
     get('income_manual').defaultChecked = true;
@@ -153,6 +175,7 @@ function createScreen(service) {
     get('cash_expense_amount').defaultValue = '';
     get('cash_income_reason').defaultValue = '';
     get('cash_expense_reason').defaultValue = '';
+    correctionForm.controls.forEach(control => { control.defaultValue = ''; });
     get('cash_income_admin').value = '';
     get('cash_expense_admin').value = '';
     get('cash_origin_turn').value = '';
@@ -163,12 +186,15 @@ function createScreen(service) {
     get('cash_expense_form').querySelectorAll = selector => selector === '[aria-invalid="true"]'
         ? expenseForm.controls.filter(control => control.getAttribute('aria-invalid') === 'true')
         : expenseForm.errors;
+    correctionForm.querySelectorAll = selector => selector === '[aria-invalid="true"]'
+        ? correctionForm.controls.filter(control => control.getAttribute('aria-invalid') === 'true')
+        : correctionForm.errors;
     get('cash_income_tab').classList.add('is-active');
 
     const context = {
         window: {
             CajaMovimientosService: service,
-            CAJA_MOVEMENTS_CONFIG: { mockEnabled: true },
+            CAJA_MOVEMENTS_CONFIG: { mockEnabled: true, sellerUsername: 'luis' },
             setTimeout
         },
         document,
@@ -218,6 +244,39 @@ async function testServiceMockScenarios() {
     assert.equal(expenseResult.data.movement.impact, 0);
     assert.equal(expenseResult.data.balance, 300);
     console.log('[PASS] Retiro omitido conserva el saldo actual y reporta impacto cero.');
+
+    const correctionService = createService('success');
+    const correctionPayload = {
+        request_id: 'correction-once',
+        original_movement_id: 'movement-income-1',
+        corrected_amount: 40,
+        reason: 'Comprobante y entrega confirman S/ 40,00',
+        admin_username: 'admin',
+        admin_password: 'password'
+    };
+    const beforeCorrection = await correctionService.listCorrectableMovements('session-1');
+    assert.equal(beforeCorrection.movements[0].amount, 50);
+    const correctionResult = await correctionService.requestCorrection(correctionPayload);
+    assert.equal(correctionResult.type, 'success');
+    assert.equal(correctionResult.data.balance, 240);
+    assert.equal(correctionResult.data.correction.effect, 'Resta S/ 10,00');
+    assert.equal(correctionResult.data.original_movement.amount, 50);
+    assert.equal(correctionResult.data.original_movement.current_amount, 40);
+    assert.equal((await correctionService.requestCorrection(correctionPayload)).data.balance, 240);
+    const afterCorrection = await correctionService.listCorrectableMovements('session-1');
+    assert.equal(afterCorrection.movements[0].amount, 50);
+    assert.equal(afterCorrection.corrections.length, 1);
+    console.log('[PASS] Corrección autorizada se enlaza al original, aplica el efecto y es idempotente.');
+
+    const selfAuthorization = await createService('success').requestCorrection(Object.assign(
+        {}, correctionPayload, { admin_username: 'luis', request_id: 'self-authorization' }
+    ));
+    assert.equal(selfAuthorization.type, 'authorization_denied');
+    const invalidCredentials = await createService('invalid_credentials').requestCorrection(
+        Object.assign({}, correctionPayload, { request_id: 'bad-credentials' })
+    );
+    assert.equal(invalidCredentials.type, 'authorization_denied');
+    console.log('[PASS] Mock rechaza autoautorización y credenciales administrativas inválidas.');
 
     const closed = createService('cash_closed');
     assert.equal((await closed.getSessionState()).is_open, false);
@@ -417,6 +476,113 @@ async function testClosedAndServerRace() {
     console.log('[PASS] Saldo insuficiente actualiza el disponible; caja cerrada durante envío bloquea formularios.');
 }
 
+async function testCorrectionFormFlow() {
+    const calls = [];
+    const service = {
+        createRequestId: () => 'ui-correction-1',
+        getSessionState: async () => ({
+            is_open: true, session_id: 'session-1', seller: 'Luis', turn: 'Mañana', balance: 100
+        }),
+        listActiveAdministrators: async () => [],
+        listClosedTurns: async () => [],
+        listCorrectableMovements: async sessionId => {
+            assert.equal(sessionId, 'session-1');
+            return {
+                movements: [{
+                    id: 'movement-1', type: 'manual', label: 'Ingreso', amount: 20,
+                    current_amount: 20, reference: 'Comprobante 123', status: 'Confirmado'
+                }],
+                corrections: []
+            };
+        },
+        requestCorrection: async payload => {
+            calls.push(JSON.parse(JSON.stringify(payload)));
+            return {
+                type: 'success',
+                data: {
+                    correction: {
+                        id: 'correction-1', original_movement_id: 'movement-1',
+                        original_amount: 20, previous_corrected_amount: 20,
+                        corrected_amount: 15, effect: 'Resta S/ 5,00', reason: payload.reason,
+                        status: 'Autorizada', responsible: payload.admin_username
+                    },
+                    original_movement: { id: 'movement-1', amount: 20, current_amount: 15 },
+                    balance: 95
+                }
+            };
+        }
+    };
+    const { document, elements } = createScreen(service);
+    await waitForWorkspace(elements);
+    elements.cash_correction_tab.listeners.click();
+    await new Promise(resolve => setTimeout(resolve, 2));
+    elements.cash_correction_original.value = 'movement-1';
+    await elements.cash_correction_original.dispatch('change');
+    assert.equal(elements.cash_correction_original_detail.hidden, false);
+
+    await elements.cash_correction_form.dispatch('submit');
+    assert.match(elements.cash_correction_amount_error.textContent, /importe correcto/);
+    assert.equal(document.activeElement, elements.cash_correction_amount);
+    assert.equal(calls.length, 0);
+
+    elements.cash_correction_amount.value = '15,00';
+    elements.cash_correction_admin.value = 'luis';
+    elements.cash_correction_password.value = 'password';
+    elements.cash_correction_reason.value = 'Comprobante confirma S/ 15,00';
+    await elements.cash_correction_form.dispatch('submit');
+    assert.match(elements.cash_correction_admin_error.textContent, /no puede autorizar/);
+    assert.equal(calls.length, 0);
+
+    elements.cash_correction_admin.value = 'admin';
+    await elements.cash_correction_form.dispatch('submit');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].corrected_amount, 15);
+    assert.equal(calls[0].session_id, 'session-1');
+    assert.equal(elements.cash_effect_current.textContent, 'S/ 95,00');
+    assert.match(elements.cash_correction_feedback.textContent, /Resta S\/ 5,00/);
+    assert.equal(elements.cash_correction_history_rows.children.length, 2);
+    console.log('[PASS] UI valida campos, bloquea autoautorización y muestra el efecto confirmado en el historial.');
+}
+
+async function testCorrectionApiAdapter() {
+    let request;
+    const window = { CAJA_MOVEMENTS_CONFIG: { mockEnabled: false } };
+    const context = {
+        window,
+        Api: {
+            request: (endpoint, options) => {
+                request = { endpoint, options };
+                return Promise.resolve({
+                    data: {
+                        code: 'CORRECTION_SAVED',
+                        data: {
+                            correction: { id: 'correction-1' },
+                            original_movement: { id: 'movement-1', current_amount: 15 },
+                            balance: 95
+                        }
+                    }
+                });
+            }
+        }
+    };
+    vm.createContext(context);
+    vm.runInContext(serviceSource, context);
+    const payload = {
+        request_id: 'request-1', session_id: 'session-1',
+        original_movement_id: 'movement-1', corrected_amount: 15,
+        reason: 'Evidencia revisada', admin_username: 'admin', admin_password: 'secret'
+    };
+    const result = await window.CajaMovimientosService.requestCorrection(payload);
+    assert.equal(request.endpoint, 'caja/movimientos/correcciones');
+    assert.equal(request.options.method, 'POST');
+    assert.equal(request.options.headers['X-Request-Reference'], 'request-1');
+    assert.deepEqual(request.options.body, payload);
+    assert.equal(result.type, 'success');
+    assert.equal(result.data.balance, 95);
+    console.log('[PASS] Adaptador API envía la corrección autenticada y normaliza la respuesta confirmada.');
+}
+
 function testMarkupAndOptions() {
     assert.match(viewSource, /role="tablist"/);
     assert.match(viewSource, /role="radiogroup"/);
@@ -434,6 +600,8 @@ function testMarkupAndOptions() {
     await testLivePreviewValidationAndSuccess();
     await testConditionalFieldsAndErrorState();
     await testClosedAndServerRace();
+    await testCorrectionFormFlow();
+    await testCorrectionApiAdapter();
 }()).catch(error => {
     console.error('[FAIL] ' + error.stack);
     process.exitCode = 1;
