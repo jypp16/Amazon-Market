@@ -33,33 +33,43 @@ const UsuariosHorariosService = (() => {
         return String(usuarioId) + '|' + fechaSemana(semanaInicio);
     }
 
+    function copiarTurnos(programacion) {
+        if (Array.isArray(programacion.turnos)) {
+            return programacion.turnos.map(horario => ({
+                turnoId: Number(horario.turnoId),
+                dias: [...horario.dias]
+            }));
+        }
+        if (programacion.turnoId !== undefined && Array.isArray(programacion.dias)) {
+            return [{ turnoId: Number(programacion.turnoId), dias: [...programacion.dias] }];
+        }
+        return [];
+    }
+
     function clonar(programacion) {
         return programacion ? {
-            turnoId: programacion.turnoId,
-            dias: [...programacion.dias],
+            turnos: copiarTurnos(programacion),
             semanaInicio: programacion.semanaInicio,
             alcance: programacion.alcance || 'semana'
         } : null;
     }
 
-    function guardarEjemplo(usuarioId, semanaInicio, turnoId, dias) {
+    function guardarEjemplo(usuarioId, semanaInicio, turnosProgramados) {
         const semana = fechaSemana(semanaInicio);
         programaciones.set(clave(usuarioId, semana), {
-            turnoId: turnoId,
-            dias: dias,
+            turnos: turnosProgramados,
             semanaInicio: semana,
             alcance: 'semana'
         });
     }
 
-    function guardarBaseEjemplo(usuarioId, semanaInicio, turnoId, dias) {
+    function guardarBaseEjemplo(usuarioId, semanaInicio, turnosProgramados) {
         const semana = fechaSemana(semanaInicio);
         reglasDesde.push({
             usuarioId: String(usuarioId),
             semanaInicio: semana,
             programacion: {
-                turnoId: turnoId,
-                dias: dias,
+                turnos: turnosProgramados,
                 semanaInicio: semana,
                 alcance: 'desde'
             }
@@ -68,10 +78,13 @@ const UsuariosHorariosService = (() => {
 
     const semanaActual = fechaSemana(fechaIso(new Date()));
     const semanaAnterior = desplazarSemana(semanaActual, -1);
-    guardarBaseEjemplo(4, semanaAnterior, 1, [0, 1, 2, 3, 4]);
-    guardarBaseEjemplo(6, semanaAnterior, 2, [0, 1, 2, 3, 4]);
-    guardarEjemplo(6, semanaActual, 2, [0, 1, 2, 3, 4, 5]);
-    guardarBaseEjemplo(7, semanaActual, 1, [2, 3, 4]);
+    guardarBaseEjemplo(4, semanaAnterior, [
+        { turnoId: 1, dias: [0, 1, 2, 3, 4] },
+        { turnoId: 2, dias: [0, 1, 2, 3, 4] }
+    ]);
+    guardarBaseEjemplo(6, semanaAnterior, [{ turnoId: 2, dias: [0, 1, 2, 3, 4] }]);
+    guardarEjemplo(6, semanaActual, [{ turnoId: 2, dias: [0, 1, 2, 3, 4, 5] }]);
+    guardarBaseEjemplo(7, semanaActual, [{ turnoId: 1, dias: [2, 3, 4] }]);
 
     // TODO backend: mantener el endpoint vigente de usuarios hasta integrar el contrato consolidado.
     async function getUsuarios(busqueda = '') {
@@ -90,12 +103,12 @@ const UsuariosHorariosService = (() => {
     function contarAsignados(turnoId) {
         const usuarios = new Set();
         programaciones.forEach((programacion, claveProgramacion) => {
-            if (Number(programacion.turnoId) === Number(turnoId)) {
+            if (copiarTurnos(programacion).some(horario => horario.turnoId === Number(turnoId))) {
                 usuarios.add(claveProgramacion.split('|')[0]);
             }
         });
         reglasDesde.forEach(regla => {
-            if (Number(regla.programacion.turnoId) === Number(turnoId)) {
+            if (copiarTurnos(regla.programacion).some(horario => horario.turnoId === Number(turnoId))) {
                 usuarios.add(String(regla.usuarioId));
             }
         });
@@ -155,18 +168,31 @@ const UsuariosHorariosService = (() => {
         return regla ? clonar({ ...regla.programacion, semanaInicio: semana, alcance: 'desde' }) : null;
     }
 
-    // TODO backend: persistir turno, días y alcance; devolver la programación confirmada por el servidor.
+    // TODO backend: persistir varios turnos, sus días y el alcance; devolver lo confirmado por el servidor.
     async function guardarProgramacion(usuarioId, semanaInicio, datos) {
         const semana = fechaSemana(semanaInicio);
-        const turnoId = Number(datos.turnoId);
-        if (!turnos.some(turno => turno.id === turnoId)) throw new Error('Selecciona un turno válido.');
-        if (!Array.isArray(datos.dias) || datos.dias.length === 0) throw new Error('Selecciona al menos un día.');
-        if (datos.dias.some(dia => !Number.isInteger(dia) || dia < 0 || dia > 6)) {
-            throw new Error('La selección de días no es válida.');
+        if (!Array.isArray(datos.turnos) || datos.turnos.length === 0) {
+            throw new Error('Selecciona al menos un turno.');
         }
+        const idsSeleccionados = new Set();
+        const turnosProgramados = datos.turnos.map(horario => {
+            const turnoId = Number(horario.turnoId);
+            if (!turnos.some(turno => turno.id === turnoId)) throw new Error('Selecciona un turno válido.');
+            if (idsSeleccionados.has(turnoId)) throw new Error('No repitas un turno en la programación.');
+            idsSeleccionados.add(turnoId);
+            if (!Array.isArray(horario.dias) || horario.dias.length === 0) {
+                throw new Error('Selecciona al menos un día para cada turno.');
+            }
+            if (horario.dias.some(dia => !Number.isInteger(dia) || dia < 0 || dia > 6)) {
+                throw new Error('La selección de días no es válida.');
+            }
+            return {
+                turnoId: turnoId,
+                dias: [...new Set(horario.dias)].sort((a, b) => a - b)
+            };
+        });
         const programacion = {
-            turnoId: turnoId,
-            dias: [...new Set(datos.dias)].sort((a, b) => a - b),
+            turnos: turnosProgramados,
             semanaInicio: semana,
             alcance: datos.alcance
         };

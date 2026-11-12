@@ -20,43 +20,74 @@ async function main() {
     const week3 = '2026-11-23';
 
     await service.guardarProgramacion(90, week1, {
-        turnoId: 1, dias: [0, 1, 2, 3, 4], alcance: 'desde'
+        turnos: [{ turnoId: 1, dias: [0, 1, 2, 3, 4] }], alcance: 'desde'
     });
     const firstWeek = await service.getProgramacion(90, week1);
     const followingWeek = await service.getProgramacion(90, week2);
     assert.equal(firstWeek.alcance, 'desde');
-    assert.deepEqual(Array.from(followingWeek.dias), [0, 1, 2, 3, 4]);
-    assert.equal(followingWeek.turnoId, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(followingWeek.turnos)), [
+        { turnoId: 1, dias: [0, 1, 2, 3, 4] }
+    ]);
     assert.equal(followingWeek.semanaInicio, week2);
     console.log('[PASS] La primera programación queda vigente en la semana siguiente.');
 
     await service.guardarProgramacion(91, week1, {
-        turnoId: 1, dias: [0, 1, 2, 3, 4], alcance: 'desde'
+        turnos: [{ turnoId: 1, dias: [0, 1, 2, 3, 4] }], alcance: 'desde'
     });
     await service.guardarProgramacion(91, week2, {
-        turnoId: 2, dias: [1, 2, 3, 4, 5], alcance: 'semana'
+        turnos: [{ turnoId: 2, dias: [1, 2, 3, 4, 5] }], alcance: 'semana'
     });
     const exception = await service.getProgramacion(91, week2);
     const reverted = await service.getProgramacion(91, week3);
-    assert.equal(exception.turnoId, 2);
+    assert.deepEqual(JSON.parse(JSON.stringify(exception.turnos)), [
+        { turnoId: 2, dias: [1, 2, 3, 4, 5] }
+    ]);
     assert.equal(exception.alcance, 'semana');
-    assert.equal(reverted.turnoId, 1);
-    assert.deepEqual(Array.from(reverted.dias), [0, 1, 2, 3, 4]);
+    assert.deepEqual(JSON.parse(JSON.stringify(reverted.turnos)), [
+        { turnoId: 1, dias: [0, 1, 2, 3, 4] }
+    ]);
     assert.equal(reverted.alcance, 'desde');
     console.log('[PASS] La excepción semanal termina y la semana siguiente vuelve a la base.');
 
     await service.guardarProgramacion(91, week2, {
-        turnoId: 2, dias: [0, 1, 2, 3, 4, 5], alcance: 'desde'
+        turnos: [
+            { turnoId: 1, dias: [0, 1, 2, 3, 4] },
+            { turnoId: 2, dias: [0, 5, 6] }
+        ],
+        alcance: 'desde'
     });
     const updatedBase = await service.getProgramacion(91, week3);
-    assert.equal(updatedBase.turnoId, 2);
-    assert.deepEqual(Array.from(updatedBase.dias), [0, 1, 2, 3, 4, 5]);
-    console.log('[PASS] Cambiar el alcance a “desde” actualiza la base futura.');
+    assert.deepEqual(JSON.parse(JSON.stringify(updatedBase.turnos)), [
+        { turnoId: 1, dias: [0, 1, 2, 3, 4] },
+        { turnoId: 2, dias: [0, 5, 6] }
+    ]);
+    assert.ok(updatedBase.turnos.every(horario => horario.dias.includes(0)));
+    console.log('[PASS] La base futura permite Mañana y Tarde el mismo lunes.');
+
+    await assert.rejects(
+        service.guardarProgramacion(92, week1, { turnos: [], alcance: 'desde' }),
+        /Selecciona al menos un turno/
+    );
+    await assert.rejects(
+        service.guardarProgramacion(92, week1, {
+            turnos: [
+                { turnoId: 1, dias: [0] },
+                { turnoId: 1, dias: [1] }
+            ],
+            alcance: 'desde'
+        }),
+        /No repitas un turno/
+    );
+    console.log('[PASS] La validación exige turnos y evita duplicarlos.');
 
     assert.match(screenSource, /: 'desde'/);
+    assert.match(screenSource, /turnosSeleccionados/);
+    assert.match(screenSource, /program_turnos\[\]/);
+    assert.match(screenSource, /user-schedule-shift-days/);
     assert.match(viewSource, /program_base_hint/);
     assert.match(viewSource, /Esta será la programación base/);
-    console.log('[PASS] El modal establece la primera programación como base y lo informa al administrador.');
+    assert.match(viewSource, /Cada turno tiene sus propios días/);
+    console.log('[PASS] El modal permite configurar días independientes por turno.');
 }
 
 main().catch(error => {
