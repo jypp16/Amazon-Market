@@ -80,7 +80,13 @@ Si está asignado, el backend debe rechazar la operación con un mensaje que ind
 
 ### `getProgramacion(usuarioId, semanaInicio)`
 
-Devuelve la programación que rige para el vendedor y la semana solicitados, o `null` si no existe.
+**CA-04 — Continuidad de la programación:** se devuelve la programación que rige para el vendedor
+y la semana solicitados, o `null` si aún no existe una programación base ni una excepción para
+esa semana. La programación inicial se guarda como base vigente desde la semana seleccionada y
+continúa aplicándose a las semanas siguientes. Un cambio con alcance `semana` es una excepción
+temporal: solo rige esa semana y, al terminar, la consulta de la semana siguiente vuelve a
+heredar la programación base. Un alcance `desde` actualiza la base desde la semana indicada y
+reemplaza las excepciones futuras.
 
 ```json
 {
@@ -96,6 +102,12 @@ Devuelve la programación que rige para el vendedor y la semana solicitados, o `
 ### `guardarProgramacion(usuarioId, semanaInicio, { turnoId, dias, alcance })`
 
 Guarda la programación elegida por el administrador.
+
+Si `getProgramacion` devuelve `null`, la interfaz envía `alcance: "desde"` para establecer la
+programación inicial como base. Cuando ya hay una programación vigente, el administrador puede
+guardar solo una excepción semanal o cambiar la base desde la semana elegida. El backend debe
+resolver cada consulta usando la base más reciente anterior o igual a esa semana, salvo que haya
+una excepción explícita para la semana consultada.
 
 ```json
 {
@@ -202,3 +214,112 @@ Configurar `CAJA_WORKFLOWS_MOCK_SCENARIO` con `success`, `no_shift`, `outside_ho
 Los escenarios `no_shift` y `already_open` corresponden principalmente a Abrir caja; `stale`,
 `no_arqueos`, `concurrent_sale`, `close_outside_hours` y `connection_lost` corresponden a
 Arqueo y cierre.
+
+## Caja: consulta de sesiones
+
+En `Assets/js/cajaConsultaService.js`, la consulta de administrador ahora es de dos pasos para
+evitar escoger silenciosamente una caja cuando hay varias aperturas en la misma fecha. El filtro
+`date` representa la **fecha local de apertura** de la sesión. No es la fecha de cierre; el reporte
+de cierres conserva su filtro por fecha de cierre.
+
+### `listSessions({ date, seller_id })`
+
+Consulta las aperturas de un vendedor para el día de apertura indicado. El administrador elige
+explícitamente una de las sesiones antes de cargar resumen y movimientos.
+
+La interfaz muestra un filtro de turno sobre las sesiones encontradas únicamente si la lista
+contiene al menos dos turnos distintos. Si solo hay un turno, no muestra el filtro. Este filtro
+reduce las tarjetas visibles en el cliente; el administrador todavía debe elegir una sesión
+específica antes de abrir sus movimientos.
+
+```json
+[
+  {
+    "id": "session-123",
+    "seller": "Luis",
+    "turn": "Mañana",
+    "status": "Cerrada",
+    "opened_at": "2026-11-10T08:00:00-05:00",
+    "closed_at": "2026-11-10T15:00:00-05:00"
+  }
+]
+```
+
+Una sesión activa puede devolver `closed_at: null`. La lista está limitada a la fecha y vendedor
+solicitados; si no hay aperturas, se devuelve una lista vacía. No se combinan sesiones ni se
+selecciona automáticamente la última.
+
+### `query({ session_id, page, page_size })`
+
+Devuelve el resumen total de la sesión seleccionada, sus movimientos de la página pedida y datos
+de paginación. La respuesta incluye el objeto `session` con `session_id`, vendedor, turno, estado,
+`opened_at` y `closed_at`, además de `summary`, `movements` y `pagination`. Cada página conserva
+el mismo `session_id`; los totales corresponden a toda la sesión.
+
+Para vendedores, `getActiveSession({ page, page_size })` permanece limitado a su propia sesión
+activa y no expone filtros ni selección de otras sesiones.
+
+El mock `CAJA_CONSULTA_MOCK_SCENARIO=multiple_sessions` devuelve dos sesiones del mismo vendedor
+en la misma fecha (una cerrada y otra abierta) para verificar que el usuario seleccione cuál
+consultar.
+
+## Caja: correcciones de movimientos
+
+La pestaña **Corregir registro** en Movimientos de caja sirve solo para corregir un importe mal
+registrado con evidencia comprobable. No sirve para cuadrar un faltante físico: ese descuadre se
+documenta en el arqueo. El flujo conserva el original, registra una corrección vinculada y requiere
+credenciales de un administrador distinto del vendedor. La consulta de caja sigue siendo de solo
+lectura.
+
+### `listCorrectableMovements(sesionId)`
+
+Devuelve `{ "movements": [...], "corrections": [...] }`. `movements` contiene registros originales
+confirmados y elegibles de la sesión, con `id`, `type`, `label`, `amount`, `current_amount`,
+`reference`, `reason`, `recorded_at` y `status`. No debe incluir retiros omitidos ni correcciones
+como nuevos movimientos corregibles. `corrections` contiene registros adicionales vinculados con
+`id`, `original_movement_id`, `original_reference`, `original_amount`,
+`previous_corrected_amount`, `corrected_amount`, `reason`, `effect`, `status`, `recorded_at` y
+`responsible`. El original nunca se reemplaza ni elimina.
+
+### `requestCorrection({ request_id, session_id, original_movement_id, corrected_amount, reason, admin_username, admin_password })`
+
+`corrected_amount` es el importe total correcto que debió tener el original; no es el ajuste
+compensatorio. La interfaz no calcula el efecto financiero: el servidor valida que el error sea
+corregible, autentica y autoriza al administrador, conserva el registro original, registra el
+ajuste vinculado y devuelve el efecto y saldo resultantes.
+
+Respuesta confirmada:
+
+```json
+{
+  "type": "success",
+  "data": {
+    "correction": {
+      "id": "correction-123",
+      "original_movement_id": "movement-456",
+      "original_amount": 500,
+      "previous_corrected_amount": 500,
+      "corrected_amount": 50,
+      "reason": "El comprobante y la entrega confirman S/ 50,00",
+      "effect": "Resta S/ 450,00",
+      "status": "Autorizada",
+      "responsible": "admin"
+    },
+    "original_movement": {
+      "id": "movement-456",
+      "amount": 500,
+      "current_amount": 50
+    },
+    "balance": 300
+  }
+}
+```
+
+El backend debe volver a validar la sesión autenticada y su correspondencia con `session_id`, la propiedad,
+el estado del registro y la idempotencia de `request_id`; la comparación local de nombres de usuario es solo una protección
+de usabilidad, no autorización. Errores esperados: `MOVEMENT_NOT_FOUND`, `CORRECTION_NOT_ALLOWED`,
+`INVALID_AMOUNT`, `MOTIVE_REQUIRED`, `INVALID_ADMIN_CREDENTIALS`, `ADMIN_ROLE_REQUIRED` y
+`CASH_CLOSED`.
+
+El mock de Movimientos incluye un original de ingreso y sus correcciones en el historial visible.
+La cifra de saldo y el efecto devueltos por el mock simulan la respuesta del servidor.

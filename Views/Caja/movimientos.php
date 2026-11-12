@@ -40,6 +40,10 @@ $tiposEgreso = [
                 role="tab" aria-selected="false" aria-controls="cash_expense_panel" tabindex="-1">
                 Egreso
             </button>
+            <button type="button" class="cash-movements-tab" id="cash_correction_tab"
+                role="tab" aria-selected="false" aria-controls="cash_correction_panel" tabindex="-1">
+                Corregir registro
+            </button>
         </div>
 
         <div class="cash-movements-layout">
@@ -170,6 +174,85 @@ $tiposEgreso = [
                         <button class="btn btn-cash-primary" type="submit" id="cash_expense_submit">Confirmar egreso</button>
                     </div>
                 </form>
+
+                <form class="cash-movement-card cash-movement-form" id="cash_correction_form"
+                    role="tabpanel" aria-labelledby="cash_correction_tab" aria-hidden="true" hidden novalidate>
+                    <h3>Solicitar corrección de un registro</h3>
+                    <p class="cash-correction-warning">
+                        Úsalo solo para un error de registro comprobable. Un faltante físico se documenta mediante arqueo;
+                        no se crea un egreso para forzar que los saldos coincidan.
+                    </p>
+
+                    <div class="cash-movement-field">
+                        <label for="cash_correction_original">Registro original</label>
+                        <select id="cash_correction_original" name="original_movement_id"
+                            aria-describedby="cash_correction_original_help cash_correction_original_error">
+                            <option value="">Selecciona el movimiento que se registró mal</option>
+                        </select>
+                        <small id="cash_correction_original_help">El registro original se conserva y queda vinculado a la corrección.</small>
+                        <span class="cash-movement-error" id="cash_correction_original_error" aria-live="polite"></span>
+                    </div>
+                    <p class="cash-correction-original-detail" id="cash_correction_original_detail" hidden></p>
+
+                    <div class="cash-movement-fields-grid">
+                        <div class="cash-movement-field">
+                            <label for="cash_correction_amount">Importe correcto total (S/)</label>
+                            <input type="text" id="cash_correction_amount" name="corrected_amount"
+                                inputmode="decimal" autocomplete="off" placeholder="0,00"
+                                aria-describedby="cash_correction_amount_help cash_correction_amount_error">
+                            <small id="cash_correction_amount_help">Indica el importe que debió tener el registro original.</small>
+                            <span class="cash-movement-error" id="cash_correction_amount_error" aria-live="polite"></span>
+                        </div>
+                        <div class="cash-movement-field">
+                            <label for="cash_correction_admin">Usuario administrador que autoriza</label>
+                            <input type="text" id="cash_correction_admin" name="admin_username"
+                                autocomplete="username" aria-describedby="cash_correction_admin_error">
+                            <span class="cash-movement-error" id="cash_correction_admin_error" aria-live="polite"></span>
+                        </div>
+                    </div>
+
+                    <div class="cash-movement-field">
+                        <label for="cash_correction_password">Contraseña del administrador</label>
+                        <input type="password" id="cash_correction_password" name="admin_password"
+                            autocomplete="current-password" aria-describedby="cash_correction_password_error">
+                        <span class="cash-movement-error" id="cash_correction_password_error" aria-live="polite"></span>
+                    </div>
+
+                    <div class="cash-movement-field">
+                        <label for="cash_correction_reason">Motivo y evidencia del error</label>
+                        <textarea id="cash_correction_reason" name="reason" rows="3"
+                            aria-describedby="cash_correction_reason_help cash_correction_reason_error"></textarea>
+                        <small id="cash_correction_reason_help">Describe qué dato se registró mal y la evidencia del importe correcto.</small>
+                        <span class="cash-movement-error" id="cash_correction_reason_error" aria-live="polite"></span>
+                    </div>
+
+                    <p class="cash-correction-notice">
+                        La corrección se guarda como un registro adicional vinculado. No se reemplaza ni elimina el original;
+                        el efecto en el saldo lo confirma el servidor.
+                    </p>
+                    <div class="cash-movement-feedback" id="cash_correction_feedback" role="status" aria-live="polite" hidden></div>
+                    <div class="cash-movement-actions">
+                        <button class="btn btn-secondary" type="reset" id="cash_correction_cancel">Cancelar</button>
+                        <button class="btn btn-cash-primary" type="submit" id="cash_correction_submit">Solicitar corrección</button>
+                    </div>
+
+                    <section class="cash-correction-history" aria-labelledby="cash_correction_history_title">
+                        <h4 id="cash_correction_history_title">Originales y correcciones vinculadas</h4>
+                        <div class="cash-correction-history-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Registro</th>
+                                        <th scope="col">Referencia</th>
+                                        <th scope="col">Importe</th>
+                                        <th scope="col">Motivo / efecto</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cash_correction_history_rows"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </form>
             </div>
 
             <aside class="cash-movement-card cash-balance-effect" aria-labelledby="cash_effect_title">
@@ -210,7 +293,9 @@ window.CAJA_MOVEMENTS_CONFIG = <?= json_encode([
     'mockEnabled' => (bool)$data['mock_enabled'],
     'mockScenario' => (string)$data['mock_scenario'],
     'mockLatencyMs' => (int)$data['mock_latency_ms'],
-    'expenseTypes' => $tiposEgreso
+    'expenseTypes' => $tiposEgreso,
+    'sellerUsername' => $_SESSION['username'] ?? $_SESSION['user'] ?? '',
+    'sessionId' => $data['session_id'] ?? null
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
 </script>
 

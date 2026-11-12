@@ -30,7 +30,7 @@
     };
     var allowedScenarios = [
         'admin_data', 'admin_empty', 'seller_active', 'seller_no_cash',
-        'access_denied', 'no_movements', 'multiple_pages', 'server_error'
+        'access_denied', 'no_movements', 'multiple_pages', 'multiple_sessions', 'server_error'
     ];
 
     function clone(value) {
@@ -79,23 +79,54 @@
         };
     }
 
-    function makeResult(filters, page) {
-        if (scenario === 'admin_empty') {
-            return { type: 'empty', session: null, summary: null, movements: [], pagination: { page: page, page_size: pageSize, total_pages: 0, total_movements: 0 } };
+    function sessionsFor(filters) {
+        if (scenario === 'admin_empty') return [];
+        if (scenario === 'multiple_sessions') {
+            return [
+                {
+                    id: 'session-luis-morning',
+                    seller: 'Luis',
+                    turn: 'Mañana',
+                    status: 'Cerrada',
+                    opened_at: filters.date + 'T08:00:00-05:00',
+                    closed_at: filters.date + 'T11:00:00-05:00'
+                },
+                {
+                    id: 'session-luis-evening',
+                    seller: 'Luis',
+                    turn: 'Tarde',
+                    status: 'Abierta',
+                    opened_at: filters.date + 'T16:00:00-05:00',
+                    closed_at: null
+                }
+            ];
         }
+        return [{
+            id: 'session-' + filters.seller_id + '-' + filters.date,
+            seller: (sellers.find(function (item) { return item.id === filters.seller_id; }) || {}).name || 'Luis',
+            turn: 'Turno mañana',
+            status: 'Abierta',
+            opened_at: filters.date + 'T08:00:00-05:00',
+            closed_at: null
+        }];
+    }
+
+    function makeResult(filters, page) {
         if (scenario === 'access_denied') return { type: 'access_denied' };
 
+        var sessions = sessionsFor(filters);
+        var selectedSession = sessions.find(function (item) { return item.id === filters.session_id; })
+            || sessions[0];
+        if (!selectedSession) {
+            return { type: 'empty', session: null, summary: null, movements: [], pagination: { page: page, page_size: pageSize, total_pages: 0, total_movements: 0 } };
+        }
         var noMovements = scenario === 'no_movements';
         var movements = noMovements ? [] : allMovements(filters.date);
         var start = (page - 1) * pageSize;
         var rows = movements.slice(start, start + pageSize);
         return {
             type: 'result',
-            session: {
-                seller: (sellers.find(function (item) { return item.id === filters.seller_id; }) || {}).name || 'Luis',
-                turn: 'Turno mañana',
-                status: 'Abierta'
-            },
+            session: Object.assign({}, selectedSession, { session_id: selectedSession.id }),
             summary: sessionSummary(noMovements),
             movements: rows,
             pagination: {
@@ -121,9 +152,16 @@
         }
         if (scenario === 'server_error') return fail('error');
         if (scenario === 'access_denied') return fail('access_denied');
-        // TODO: Backend must define which session to return when a seller has multiple sessions on a date.
-        // An empty result belongs to this exact date/vendor pair; never fall back to another session.
         return delay(makeResult(filters, Number(filters.page) || 1));
+    }
+
+    function mockListSessions(filters) {
+        if (!allowedScenarios.includes(scenario)) {
+            return Promise.reject(new Error('CAJA_CONSULTA_MOCK_SCENARIO no es un escenario válido.'));
+        }
+        if (scenario === 'server_error') return Promise.reject(new Error('No se pudieron cargar las sesiones.'));
+        if (scenario === 'access_denied') return delay({ type: 'access_denied' });
+        return delay(sessionsFor(filters));
     }
 
     function mockActiveSession(filters) {
@@ -168,6 +206,17 @@
 
     global.CajaConsultaService = {
         typeLabels: typeLabels,
+        listSessions: function (filters) {
+            if (mockEnabled) return mockListSessions(filters);
+            var query = 'date=' + encodeURIComponent(filters.date)
+                + '&seller_id=' + encodeURIComponent(filters.seller_id);
+            return apiRequest('caja/consulta/sesiones?' + query, { method: 'GET' }).then(function (data) {
+                if (data.type === 'access_denied') return data;
+                if (data.type === 'empty') return [];
+                if (!Array.isArray(data)) throw new Error('El servicio no devolvió la lista de sesiones.');
+                return data;
+            });
+        },
         listSellers: function () {
             if (mockEnabled) return mockListSellers();
             return apiRequest('caja/consulta/vendedores', { method: 'GET' }).then(function (data) {
@@ -179,8 +228,7 @@
         query: function (filters) {
             if (mockEnabled) return mockQuery(filters).then(normalizeResult);
             var query = [
-                'date=' + encodeURIComponent(filters.date),
-                'seller_id=' + encodeURIComponent(filters.seller_id),
+                'session_id=' + encodeURIComponent(filters.session_id),
                 'page=' + encodeURIComponent(filters.page),
                 'page_size=' + encodeURIComponent(pageSize)
             ].join('&');

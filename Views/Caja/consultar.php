@@ -13,6 +13,7 @@ require_once 'Views/Header.php';
             <label for="cash_query_date">Fecha</label>
             <input type="date" id="cash_query_date" name="date"
                 value="<?= e($data['default_date']) ?>" required>
+            <small>La fecha corresponde al día de apertura de la sesión.</small>
         </div>
         <div class="cash-query-filter">
             <label for="cash_query_seller">Vendedor</label>
@@ -21,11 +22,24 @@ require_once 'Views/Header.php';
             </select>
             <span class="cash-query-field-error" id="cash_query_seller_error" aria-live="polite"></span>
         </div>
+        <div class="cash-query-filter cash-query-turn-filter" id="cash_query_turn_filter" hidden>
+            <label for="cash_query_turn">Turno</label>
+            <select id="cash_query_turn" name="turn">
+                <option value="">Todos los turnos</option>
+            </select>
+        </div>
         <div class="cash-query-filter-actions">
             <button class="btn btn-secondary" type="reset" id="cash_query_clear">Limpiar filtros</button>
             <button class="btn btn-cash-primary" type="submit" id="cash_query_submit">Consultar</button>
         </div>
     </form>
+
+    <section class="cash-query-sessions" id="cash_query_sessions" aria-labelledby="cash_query_sessions_title"
+        aria-live="polite" hidden>
+        <h3 id="cash_query_sessions_title">Sesiones encontradas</h3>
+        <p>Selecciona la caja que quieres consultar. No se combinan saldos de distintas sesiones.</p>
+        <div class="cash-query-session-list" id="cash_query_session_options"></div>
+    </section>
     <?php endif; ?>
 
     <section class="cash-query-message" id="cash_query_loading" role="status" hidden>
@@ -47,6 +61,7 @@ require_once 'Views/Header.php';
     </section>
 
     <section class="cash-query-results" id="cash_query_results" aria-live="polite" hidden>
+        <p class="cash-query-selected-session" id="cash_query_selected_session"></p>
         <div class="cash-query-summary" aria-label="Resumen de la sesión">
             <article class="cash-query-summary-card">
                 <span>Saldo inicial</span>

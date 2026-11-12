@@ -52,13 +52,26 @@ const UsuariosHorariosService = (() => {
         });
     }
 
+    function guardarBaseEjemplo(usuarioId, semanaInicio, turnoId, dias) {
+        const semana = fechaSemana(semanaInicio);
+        reglasDesde.push({
+            usuarioId: String(usuarioId),
+            semanaInicio: semana,
+            programacion: {
+                turnoId: turnoId,
+                dias: dias,
+                semanaInicio: semana,
+                alcance: 'desde'
+            }
+        });
+    }
+
     const semanaActual = fechaSemana(fechaIso(new Date()));
     const semanaAnterior = desplazarSemana(semanaActual, -1);
-    guardarEjemplo(4, semanaActual, 1, [0, 1, 2, 3, 4]);
-    guardarEjemplo(4, semanaAnterior, 1, [0, 1, 2, 3, 4]);
+    guardarBaseEjemplo(4, semanaAnterior, 1, [0, 1, 2, 3, 4]);
+    guardarBaseEjemplo(6, semanaAnterior, 2, [0, 1, 2, 3, 4]);
     guardarEjemplo(6, semanaActual, 2, [0, 1, 2, 3, 4, 5]);
-    guardarEjemplo(6, semanaAnterior, 2, [0, 1, 2, 3, 4]);
-    guardarEjemplo(7, semanaActual, 1, [2, 3, 4]);
+    guardarBaseEjemplo(7, semanaActual, 1, [2, 3, 4]);
 
     // TODO backend: mantener el endpoint vigente de usuarios hasta integrar el contrato consolidado.
     async function getUsuarios(busqueda = '') {

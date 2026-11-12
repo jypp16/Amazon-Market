@@ -100,6 +100,10 @@ body.user-schedule-modal-open { overflow: hidden; }
 .user-schedule-apply legend { margin-bottom: 2px; }
 .user-schedule-apply label { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 12px; cursor: pointer; }
 .user-schedule-apply input { accent-color: #3478f6; }
+.user-schedule-base-hint {
+    margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+    background: #eef4ff; color: var(--primary-color); font-size: 11px; line-height: 1.5;
+}
 .user-schedule-summary { min-height: 18px; margin-top: 8px; color: var(--text-secondary); font-size: 12px; }
 .user-schedule-dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 14px; }
 .user-schedule-button {

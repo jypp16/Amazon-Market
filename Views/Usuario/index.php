@@ -99,6 +99,9 @@
             <label><input type="radio" name="program_scope" value="desde"> Desde esta semana en adelante</label>
         </fieldset>
 
+        <p class="user-schedule-base-hint" id="program_base_hint" hidden>
+            Esta será la programación base y seguirá vigente en las semanas siguientes, salvo que se programe un cambio.
+        </p>
         <p class="user-schedule-summary" id="program_schedule_summary" aria-live="polite"></p>
         <footer class="user-schedule-dialog-actions">
             <button type="button" class="user-schedule-button user-schedule-button-secondary" data-close-schedule>Cancelar</button>

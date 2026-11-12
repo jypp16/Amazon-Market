@@ -9,6 +9,10 @@
     var dateInput = document.getElementById('cash_query_date');
     var sellerInput = document.getElementById('cash_query_seller');
     var submitButton = document.getElementById('cash_query_submit');
+    var sessionPicker = document.getElementById('cash_query_sessions');
+    var sessionOptions = document.getElementById('cash_query_session_options');
+    var turnFilter = document.getElementById('cash_query_turn_filter');
+    var turnSelect = document.getElementById('cash_query_turn');
     var results = document.getElementById('cash_query_results');
     var loading = document.getElementById('cash_query_loading');
     var error = document.getElementById('cash_query_error');
@@ -21,6 +25,9 @@
     var currentRequest = null;
     var isLoading = false;
     var requestSequence = 0;
+    var currentView = 'sessions';
+    var availableSessions = [];
+    var currentTurnSelection = '';
 
     if (!service || !statusChip) return;
 
@@ -53,10 +60,16 @@
         requestSequence += 1;
         isLoading = false;
         currentRequest = null;
+        currentTurnSelection = '';
         totalPages = 0;
         totalMovements = 0;
         currentPage = 1;
         results.hidden = true;
+        if (sessionPicker) sessionPicker.hidden = true;
+        if (turnFilter) turnFilter.hidden = true;
+        if (turnSelect) turnSelect.value = '';
+        if (sessionOptions) sessionOptions.replaceChildren();
+        availableSessions = [];
         error.hidden = true;
         denied.hidden = true;
         empty.hidden = true;
@@ -68,6 +81,9 @@
 
     function setSummaryLoading() {
         results.hidden = false;
+        if (sessionPicker) sessionPicker.hidden = true;
+        if (turnFilter) turnFilter.hidden = true;
+        availableSessions = [];
         loading.hidden = false;
         error.hidden = true;
         denied.hidden = true;
@@ -249,6 +265,18 @@
         denied.hidden = true;
         error.hidden = true;
         results.hidden = false;
+        if (isAdministrator && result.session) {
+            var sessionDateLabel = result.session.status || 'Estado desconocido';
+            var openedAt = result.session.opened_at || result.session.openedAt || '—';
+            var closedAt = result.session.closed_at || result.session.closedAt || 'Abierta';
+            document.getElementById('cash_query_selected_session').textContent =
+                (result.session.seller || 'Vendedor') + ' · ' + (result.session.turn || 'Turno')
+                + ' · ' + sessionDateLabel + ' · Apertura: ' + formatMovementDateTime({ date_time: openedAt })
+                + ' · Cierre: ' + (closedAt === 'Abierta'
+                    ? 'Abierta' : formatMovementDateTime({ date_time: closedAt }));
+        } else {
+            document.getElementById('cash_query_selected_session').textContent = '';
+        }
         renderSummary(result.summary);
         renderMovements(result.movements);
         renderPagination(result.pagination || {});
@@ -276,11 +304,17 @@
                 date: dateInput.value,
                 seller_id: sellerInput.value
             };
-            request = { date: base.date, seller_id: base.seller_id, page: page };
+            request = {
+                date: base.date,
+                seller_id: base.seller_id,
+                session_id: base.session_id,
+                page: page
+            };
         } else {
             request = Object.assign({}, currentRequest || {}, { page: page });
         }
         currentRequest = request;
+        currentView = 'results';
         requestSequence += 1;
         var sequence = requestSequence;
         setSummaryLoading();
@@ -288,6 +322,121 @@
             return isAdministrator ? service.query(request) : service.getActiveSession(request);
         }).then(function (result) {
             if (sequence === requestSequence) renderResult(result);
+        }).catch(function () {
+            if (sequence === requestSequence) showError();
+        });
+    }
+
+    function sessionTurnKey(session) {
+        var turn = String(session.turn || '').trim();
+        if (!turn) return null;
+        return session.turn_id !== undefined && session.turn_id !== null
+            ? 'id:' + String(session.turn_id)
+            : 'name:' + turn.toLocaleLowerCase('es');
+    }
+
+    function renderSessionChoiceCards() {
+        var selectedTurn = turnSelect ? turnSelect.value : '';
+        var sessions = availableSessions.filter(function (session) {
+            return !selectedTurn || sessionTurnKey(session) === selectedTurn;
+        });
+        sessionOptions.replaceChildren();
+        sessions.forEach(function (session) {
+            var card = document.createElement('article');
+            card.className = 'cash-query-session-option';
+            var heading = document.createElement('h4');
+            heading.textContent = (session.seller || 'Vendedor') + ' · ' + (session.turn || 'Turno');
+            var detail = document.createElement('p');
+            var openedAt = session.opened_at || session.openedAt || '—';
+            var closedAt = session.closed_at || session.closedAt || 'Abierta';
+            detail.textContent = (session.status || 'Estado desconocido')
+                + ' · Apertura: ' + formatMovementDateTime({ date_time: openedAt })
+                + ' · Cierre: ' + (closedAt === 'Abierta'
+                    ? 'Abierta' : formatMovementDateTime({ date_time: closedAt }));
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-cash-primary';
+            button.textContent = 'Consultar esta sesión';
+            button.addEventListener('click', function () {
+                var selectedFilters = Object.assign({}, currentRequest, {
+                    session_id: session.id || session.session_id
+                });
+                requestPage(1, selectedFilters);
+            });
+            card.appendChild(heading);
+            card.appendChild(detail);
+            card.appendChild(button);
+            sessionOptions.appendChild(card);
+        });
+        sessionPicker.hidden = false;
+        document.getElementById('cash_query_page_status').textContent =
+            sessions.length + (sessions.length === 1 ? ' sesión encontrada.' : ' sesiones encontradas.');
+    }
+
+    function renderSessionChoices(sessions) {
+        loading.hidden = true;
+        error.hidden = true;
+        denied.hidden = true;
+        results.hidden = true;
+        empty.hidden = true;
+        isLoading = false;
+        if (submitButton) submitButton.disabled = false;
+        if (!sessions.length) {
+            renderResult({ type: 'empty' });
+            return;
+        }
+
+        availableSessions = sessions.slice();
+        var preferredTurn = currentTurnSelection;
+        var distinctTurns = new Map();
+        availableSessions.forEach(function (session) {
+            var key = sessionTurnKey(session);
+            if (key && !distinctTurns.has(key)) {
+                distinctTurns.set(key, String(session.turn).trim());
+            }
+        });
+        if (turnSelect) {
+            turnSelect.replaceChildren();
+            var allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = 'Todos los turnos';
+            turnSelect.appendChild(allOption);
+            distinctTurns.forEach(function (label, key) {
+                var option = document.createElement('option');
+                option.value = key;
+                option.textContent = label;
+                turnSelect.appendChild(option);
+            });
+        }
+        if (turnFilter) turnFilter.hidden = distinctTurns.size < 2;
+        currentTurnSelection = distinctTurns.size >= 2 && distinctTurns.has(preferredTurn)
+            ? preferredTurn : '';
+        if (turnSelect) turnSelect.value = currentTurnSelection;
+        renderSessionChoiceCards();
+        currentView = 'sessions';
+    }
+
+    function requestSessions(selectedFilters) {
+        if (isLoading) return;
+        var selected = selectedFilters || {
+            date: dateInput.value,
+            seller_id: sellerInput.value
+        };
+        currentRequest = { date: selected.date, seller_id: selected.seller_id };
+        currentView = 'sessions';
+        requestSequence += 1;
+        var sequence = requestSequence;
+        setSummaryLoading();
+        Promise.resolve().then(function () {
+            return service.listSessions(currentRequest);
+        }).then(function (response) {
+            if (sequence !== requestSequence) return;
+            if (response && response.type === 'access_denied') {
+                renderResult(response);
+                return;
+            }
+            if (!Array.isArray(response)) throw new Error('No se recibió una lista válida de sesiones.');
+            renderSessionChoices(response);
         }).catch(function () {
             if (sequence === requestSequence) showError();
         });
@@ -308,7 +457,7 @@
             sellerInput.focus();
             return;
         }
-        requestPage(1, { date: dateInput.value, seller_id: sellerInput.value });
+        requestSessions({ date: dateInput.value, seller_id: sellerInput.value });
     }
 
     function loadSellerView() {
@@ -331,6 +480,13 @@
     if (isAdministrator) {
         initializeAdmin();
         filters.addEventListener('submit', queryAdmin);
+        if (turnSelect) turnSelect.addEventListener('change', function () {
+            currentTurnSelection = turnSelect.value;
+            renderSessionChoiceCards();
+        });
+        [dateInput, sellerInput].forEach(function (input) {
+            input.addEventListener('change', clearResult);
+        });
         filters.addEventListener('reset', function () {
             window.setTimeout(function () {
                 sellerInput.value = '';
@@ -338,6 +494,7 @@
                 document.getElementById('cash_query_seller_error').textContent = '';
                 sellerInput.removeAttribute('aria-invalid');
                 clearResult();
+                if (sessionOptions) sessionOptions.replaceChildren();
             }, 0);
         });
     } else {
@@ -348,6 +505,10 @@
         if (!currentRequest) {
             if (isAdministrator) initializeAdmin();
             else loadSellerView();
+            return;
+        }
+        if (isAdministrator && currentView === 'sessions') {
+            requestSessions(currentRequest);
             return;
         }
         if (isAdministrator) requestPage(currentRequest.page || 1);

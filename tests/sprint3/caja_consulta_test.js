@@ -71,6 +71,8 @@ function createScreen(isAdministrator, screenService) {
     };
     const ids = [
         'cash_query_filters', 'cash_query_date', 'cash_query_seller', 'cash_query_submit',
+        'cash_query_sessions', 'cash_query_session_options', 'cash_query_turn_filter',
+        'cash_query_turn',
         'cash_query_results', 'cash_query_loading', 'cash_query_error', 'cash_query_denied',
         'cash_query_no_session', 'cash_consulta_status', 'cash_query_empty_title',
         'cash_query_empty_text', 'cash_query_open_link', 'cash_query_opening',
@@ -132,7 +134,7 @@ async function testAdministratorSessionAndEmptyDate() {
     const sellers = await service.listSellers();
     assert.ok(sellers.length >= 1);
     const result = await service.query({
-        date: '2026-11-10', seller_id: sellers[0].id, page: 1
+        date: '2026-11-10', seller_id: sellers[0].id, session_id: 'session-luis-2026-11-10', page: 1
     });
     assert.equal(result.type, 'result');
     assert.equal(result.session.seller, 'Luis');
@@ -141,12 +143,33 @@ async function testAdministratorSessionAndEmptyDate() {
     assert.equal(result.movements[3].effect, 'Sin efecto: ya reflejado en la apertura');
     assert.equal(result.movements[0].date, '2026-11-10');
 
-    const empty = await createService('admin_empty').query({
-        date: '2026-01-01', seller_id: 'seller-luis', page: 1
+    const empty = await createService('admin_empty').listSessions({
+        date: '2026-01-01', seller_id: 'seller-luis'
     });
-    assert.equal(empty.type, 'empty');
-    assert.equal(empty.pagination.total_movements, 0);
-    console.log('[PASS] Administrador consulta vendedor/fecha y no reemplaza resultados vacíos por otra fecha.');
+    assert.equal(empty.length, 0);
+    console.log('[PASS] Administrador recibe solo sesiones de la fecha y vendedor consultados.');
+}
+
+async function testMultipleSessionsNeedExplicitSelection() {
+    const service = createService('multiple_sessions');
+    const sessions = await service.listSessions({
+        date: '2026-11-10', seller_id: 'seller-luis'
+    });
+    assert.equal(sessions.length, 2);
+    assert.equal(sessions[0].status, 'Cerrada');
+    assert.equal(sessions[1].status, 'Abierta');
+    assert.notEqual(sessions[0].id, sessions[1].id);
+    const first = await service.query({
+        date: '2026-11-10', seller_id: 'seller-luis',
+        session_id: sessions[0].id, page: 1
+    });
+    const second = await service.query({
+        date: '2026-11-10', seller_id: 'seller-luis',
+        session_id: sessions[1].id, page: 1
+    });
+    assert.equal(first.session.session_id, sessions[0].id);
+    assert.equal(second.session.session_id, sessions[1].id);
+    console.log('[PASS] Mock de varias cajas exige seleccionar una sesión específica.');
 }
 
 async function testSellerAndNoMovements() {
@@ -200,6 +223,9 @@ async function testApiAdapterAndOptions() {
         if (endpoint.startsWith('caja/consulta/vendedores')) {
             return Promise.resolve({ ok: true, status: 200, data: { data: [{ id: 's1', name: 'Vendedor Uno' }] } });
         }
+        if (endpoint.startsWith('caja/consulta/sesiones')) {
+            return Promise.resolve({ ok: true, status: 200, data: { data: [{ id: 'session-1', status: 'Cerrada' }] } });
+        }
         return Promise.resolve({ ok: true, status: 200, data: { data: {
             session: { seller: 'Vendedor Uno', turn: 'Tarde' },
             summary: { opening_balance: 1, cash_sales: 2, income: 3, expenses: 4, current_balance: 2, card: 5, yape_plin: 6 },
@@ -208,16 +234,25 @@ async function testApiAdapterAndOptions() {
         } } });
     });
     assert.equal((await service.listSellers())[0].id, 's1');
+    const sessions = await service.listSessions({ date: '2026-11-10', seller_id: 's1' });
+    assert.equal(sessions[0].id, 'session-1');
     const result = await service.query({
-        date: '2026-11-10', seller_id: 's1', page: 2
+        date: '2026-11-10', seller_id: 's1', session_id: 'session-1', page: 2
     });
     assert.equal(result.pagination.total_movements, 32);
     assert.match(calls[1].endpoint, /date=2026-11-10/);
     assert.match(calls[1].endpoint, /seller_id=s1/);
-    assert.match(calls[1].endpoint, /page=2/);
+    assert.match(calls[2].endpoint, /session_id=session-1/);
+    assert.match(calls[2].endpoint, /page=2/);
 
     assert.match(viewSource, /Saldo y movimientos de la sesión\. Solo lectura\./);
     assert.match(viewSource, /Fecha y hora/);
+    assert.match(viewSource, /id="cash_query_turn_filter"/);
+    const filterFormStart = viewSource.indexOf('<form class="cash-query-filters"');
+    const filterFormEnd = viewSource.indexOf('</form>', filterFormStart);
+    const turnFilterPosition = viewSource.indexOf('id="cash_query_turn_filter"');
+    assert.ok(turnFilterPosition > filterFormStart && turnFilterPosition < filterFormEnd,
+        'The turn selector belongs beside date and seller in the search filters.');
     assert.match(viewSource, /scope="col"/);
     assert.match(viewSource, /aria-live="polite"/);
     assert.match(viewSource, /Limpiar filtros/);
@@ -233,9 +268,21 @@ async function testApiAdapterAndOptions() {
 
 async function testAdministratorScreenFlow() {
     const calls = [];
+    const sessionCalls = [];
     const screenService = {
         typeLabels: { cash_sale: 'Venta en efectivo', omitted_withdrawal: 'Retiro omitido' },
         listSellers: async () => [{ id: 's1', name: 'Luis' }, { id: 's2', name: 'María' }],
+        listSessions: async filters => {
+            sessionCalls.push(Object.assign({}, filters));
+            return [{
+                id: 'session-selected',
+                seller: 'Luis',
+                turn: 'Mañana',
+                status: 'Cerrada',
+                opened_at: '2026-11-09T08:00:00-05:00',
+                closed_at: '2026-11-09T15:00:00-05:00'
+            }];
+        },
         query: async filters => {
             calls.push(Object.assign({}, filters));
             return sampleResult(filters.page);
@@ -248,7 +295,16 @@ async function testAdministratorScreenFlow() {
     elements.cash_query_seller.value = 's2';
     await elements.cash_query_filters.dispatch('submit');
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(calls[0], { date: '2026-11-09', seller_id: 's2', page: 1 });
+    assert.deepEqual(sessionCalls[0], { date: '2026-11-09', seller_id: 's2' });
+    assert.equal(calls.length, 0, 'Admin must select a session before loading its movements');
+    assert.equal(elements.cash_query_sessions.hidden, false);
+    assert.equal(elements.cash_query_turn_filter.hidden, true,
+        'The turn filter stays hidden when the seller has only one turn.');
+    await elements.cash_query_session_options.children[0].children[2].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls[0], {
+        date: '2026-11-09', seller_id: 's2', session_id: 'session-selected', page: 1
+    });
     assert.equal(elements.cash_query_results.hidden, false);
     assert.equal(elements.cash_query_balance.textContent, 'S/ 300,00');
     assert.equal(elements.cash_query_sales.textContent, '+S/ 80,00');
@@ -257,7 +313,9 @@ async function testAdministratorScreenFlow() {
     elements.cash_query_seller.value = 's1';
     await elements.cash_query_next.dispatch('click');
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(calls[1], { date: '2026-11-09', seller_id: 's2', page: 2 });
+    assert.deepEqual(calls[1], {
+        date: '2026-11-09', seller_id: 's2', session_id: 'session-selected', page: 2
+    });
     assert.equal(elements.cash_query_page_status.textContent, 'Mostrando 1 de 3 movimientos · Página 2 de 2');
     assert.equal(elements.cash_query_rows.children[0].children[4].textContent,
         'Sin efecto: ya reflejado en la apertura');
@@ -268,7 +326,60 @@ async function testAdministratorScreenFlow() {
     assert.equal(elements.cash_query_results.hidden, true);
     assert.equal(elements.cash_query_seller.value, '');
     assert.equal(elements.cash_query_date.value, '2026-11-10');
+    assert.equal(elements.cash_query_sessions.hidden, true);
     console.log('[PASS] Administrador consulta bajo demanda, pagina con filtros fijos y limpia resultados.');
+}
+
+async function testTurnFilterOnlyWhenMultipleTurnsExist() {
+    const calls = [];
+    const sessions = [
+        {
+            id: 'session-morning', seller: 'Luis', turn: 'Mañana', status: 'Cerrada',
+            opened_at: '2026-11-09T08:00:00-05:00', closed_at: '2026-11-09T15:00:00-05:00'
+        },
+        {
+            id: 'session-evening', seller: 'Luis', turn: 'Tarde', status: 'Abierta',
+            opened_at: '2026-11-09T16:00:00-05:00', closed_at: null
+        }
+    ];
+    const screenService = {
+        typeLabels: {},
+        listSellers: async () => [{ id: 'seller-luis', name: 'Luis' }],
+        listSessions: async () => sessions,
+        query: async filters => {
+            calls.push(Object.assign({}, filters));
+            return sampleResult(filters.page);
+        }
+    };
+    const { elements } = createScreen(true, screenService);
+    await new Promise(resolve => setImmediate(resolve));
+    elements.cash_query_seller.value = 'seller-luis';
+    await elements.cash_query_filters.dispatch('submit');
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(elements.cash_query_turn_filter.hidden, false);
+    assert.equal(elements.cash_query_session_options.children.length, 2);
+    assert.equal(elements.cash_query_turn.children.length, 3);
+    elements.cash_query_turn.value = 'name:tarde';
+    await elements.cash_query_turn.dispatch('change');
+    assert.equal(elements.cash_query_session_options.children.length, 1);
+    assert.match(elements.cash_query_session_options.children[0].children[0].textContent, /Tarde/);
+
+    await elements.cash_query_session_options.children[0].children[2].dispatch('click');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls[0].session_id, 'session-evening');
+    console.log('[PASS] El filtro aparece con turnos mañana y tarde y conserva la selección de sesión.');
+
+    const sameTurnService = Object.assign({}, screenService, {
+        listSessions: async () => sessions.map(session => Object.assign({}, session, { turn: 'Mañana' }))
+    });
+    const sameTurnScreen = createScreen(true, sameTurnService);
+    await new Promise(resolve => setImmediate(resolve));
+    sameTurnScreen.elements.cash_query_seller.value = 'seller-luis';
+    await sameTurnScreen.elements.cash_query_filters.dispatch('submit');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sameTurnScreen.elements.cash_query_turn_filter.hidden, true);
+    console.log('[PASS] El filtro permanece oculto cuando las sesiones disponibles comparten un solo turno.');
 }
 
 async function testSellerScreenFlow() {
@@ -294,10 +405,12 @@ async function testSellerScreenFlow() {
 
 async function main() {
     await testAdministratorSessionAndEmptyDate();
+    await testMultipleSessionsNeedExplicitSelection();
     await testSellerAndNoMovements();
     await testAccessDeniedErrorAndPagination();
     await testApiAdapterAndOptions();
     await testAdministratorScreenFlow();
+    await testTurnFilterOnlyWhenMultipleTurnsExist();
     await testSellerScreenFlow();
 }
 
