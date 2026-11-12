@@ -18,6 +18,8 @@
     var openingFeedback = document.getElementById('cash_opening_feedback');
     var statusChip = document.getElementById('cash_opening_status');
     var scheduleStatus = document.getElementById('cash_schedule_status');
+    var scheduleNotice = document.getElementById('cash_opening_schedule_notice');
+    var alreadyOpenNotice = document.getElementById('cash_opening_already_open');
     var overlay = document.getElementById('cash_auth_overlay');
     var dialog = overlay.querySelector('[role="dialog"]');
     var authForm = document.getElementById('cash_auth_form');
@@ -33,6 +35,11 @@
     var isLoading = false;
     var returnFocus = null;
     var schedule = null;
+    var scheduleState = 'within_hours';
+    var openingUnavailable = false;
+    var openingConfig = window.CAJA_SERVICE_CONFIG || {};
+    var sellerId = openingConfig.sellerId;
+    var sellerUsername = openingConfig.sellerUsername || '';
 
     function formatAmount(amount) {
         return 'S/ ' + new Intl.NumberFormat('es-ES', {
@@ -56,10 +63,27 @@
         summaryDifferenceRow.className = 'cash-summary-difference is-' + state;
     }
 
+    function parseAmount() {
+        var value = cashInput.value.trim();
+        if (!/^\d+(?:[,.]\d{1,2})?$/.test(value)) return null;
+        var amount = Number(value.replace(',', '.'));
+        return Number.isFinite(amount) && amount >= 0 ? Math.round(amount * 100) / 100 : null;
+    }
+
+    function setOpeningFieldError(message) {
+        if (message) {
+            cashInput.setAttribute('aria-invalid', 'true');
+            document.getElementById('cash_counted_error').textContent = message;
+        } else {
+            cashInput.removeAttribute('aria-invalid');
+            document.getElementById('cash_counted_error').textContent = '';
+        }
+    }
+
     function updatePreview() {
-        var counted = cashInput.valueAsNumber;
-        var valid = cashInput.value !== '' && cashInput.validity.valid && Number.isFinite(counted);
-        openingButton.disabled = !valid || isLoading;
+        var counted = parseAmount();
+        var valid = counted !== null;
+        openingButton.disabled = !valid || isLoading || openingUnavailable;
         openingFeedback.hidden = true;
 
         if (!valid) {
@@ -74,6 +98,7 @@
             return;
         }
 
+        setOpeningFieldError('');
         var difference = counted - reference;
         var state = difference < 0 ? 'shortage' : (difference > 0 ? 'surplus' : 'balanced');
         var label = difference < 0 ? 'Faltante' : (difference > 0 ? 'Sobrante' : 'Sin diferencia');
@@ -106,27 +131,29 @@
 
     function setOutsideSchedule(times) {
         schedule = times || {};
+        if (scheduleState !== 'no_shift') {
+            scheduleState = 'outside_hours';
+            statusChip.textContent = 'Fuera de horario';
+            statusChip.classList.add('is-outside');
+            scheduleStatus.textContent = 'Fuera del horario';
+            scheduleStatus.classList.add('is-outside');
+            openingButton.textContent = 'Solicitar autorización';
+        }
+        if (scheduleState === 'no_shift') {
+            document.getElementById('cash_auth_warning').textContent =
+                'No tienes un turno programado para hoy. Un administrador debe autorizar esta apertura.';
+            return;
+        }
         var start = schedule.start || '—';
         var end = schedule.end || '—';
         document.getElementById('cash_auth_warning').textContent =
             'Estás abriendo caja fuera del horario de tu turno (' + start + ' – ' + end +
             '). Un administrador debe autorizar esta apertura.';
-        statusChip.textContent = 'Fuera de horario';
-        statusChip.classList.add('is-outside');
-        scheduleStatus.textContent = 'Fuera del horario';
-        scheduleStatus.classList.add('is-outside');
-    }
-
-    function clearOutsideSchedule() {
-        schedule = null;
-        statusChip.textContent = 'Sin caja abierta';
-        statusChip.classList.remove('is-outside');
-        scheduleStatus.textContent = 'Dentro del horario';
-        scheduleStatus.classList.remove('is-outside');
     }
 
     function openAuthorizationDialog(times) {
-        setOutsideSchedule(times);
+        if (times) schedule = times;
+        setOutsideSchedule(schedule);
         returnFocus = document.activeElement;
         authFeedback.hidden = true;
         clearFieldErrors();
@@ -181,10 +208,15 @@
         if (!overlay.hidden) closeAuthorizationDialog({ clearFields: true, force: true });
         openingButton.disabled = true;
         openingButton.textContent = 'Caja abierta';
+        cashInput.disabled = true;
+        alreadyOpenNotice.hidden = false;
+        openingUnavailable = true;
         statusChip.textContent = 'Caja abierta';
         statusChip.classList.remove('is-outside');
+        statusChip.classList.remove('is-no-turn');
         scheduleStatus.textContent = 'Caja abierta';
         scheduleStatus.classList.remove('is-outside');
+        scheduleStatus.classList.remove('is-no-turn');
         showOpeningFeedback('Ya tienes una caja abierta.', true);
     }
 
@@ -225,6 +257,7 @@
         openingButton.textContent = 'Caja abierta';
         statusChip.textContent = 'Caja abierta';
         statusChip.classList.remove('is-outside');
+        statusChip.classList.remove('is-no-turn');
         showOpeningFeedback(message, false);
 
         if (!overlay.hidden) {
@@ -253,7 +286,7 @@
     }
 
     function getRequestId() {
-        var amount = cashInput.valueAsNumber;
+        var amount = parseAmount();
         if (!openingRequestId || openingRequestAmount !== amount) {
             openingRequestId = CajaService.createRequestId();
             openingRequestAmount = amount;
@@ -271,6 +304,10 @@
         var firstInvalid = null;
         if (!usernameInput.value.trim()) {
             setFieldError(usernameInput, 'cash_admin_username_error', 'Completa este campo.');
+            firstInvalid = firstInvalid || usernameInput;
+        }
+        if (sellerUsername && usernameInput.value.trim().toLowerCase() === sellerUsername.toLowerCase()) {
+            setFieldError(usernameInput, 'cash_admin_username_error', 'Un vendedor no puede autorizarse a sí mismo.');
             firstInvalid = firstInvalid || usernameInput;
         }
         if (!passwordInput.value) {
@@ -296,21 +333,28 @@
             passwordInput.disabled = loading;
             reasonInput.disabled = loading;
         }
-        openingButton.disabled = loading || openingButton.textContent === 'Caja abierta'
-            || !cashInput.validity.valid || cashInput.value === '';
+        openingButton.disabled = loading || openingUnavailable || parseAmount() === null;
     }
 
     cashInput.addEventListener('input', function () {
-        if (openingRequestAmount !== null && cashInput.valueAsNumber !== openingRequestAmount) {
+        if (openingRequestAmount !== null && parseAmount() !== openingRequestAmount) {
             resetOpeningRequest();
         }
+        setOpeningFieldError('');
         updatePreview();
     });
 
     openingForm.addEventListener('submit', async function (event) {
         event.preventDefault();
-        if (isLoading || !cashInput.value || !cashInput.validity.valid) {
+        if (isLoading || openingUnavailable) return;
+        if (parseAmount() === null) {
+            setOpeningFieldError('Ingresa un monto desde cero con hasta dos decimales.');
+            cashInput.focus();
             updatePreview();
+            return;
+        }
+        if (scheduleState !== 'within_hours') {
+            openAuthorizationDialog(schedule);
             return;
         }
 
@@ -320,11 +364,12 @@
         try {
             var response = await CajaService.requestOpening({
                 request_id: getRequestId(),
-                cash_counted: cashInput.valueAsNumber
+                cash_counted: parseAmount()
             });
             handleOpeningResponse(response);
         } catch (error) {
             showOpeningFeedback('No se pudo completar la apertura. Inténtalo de nuevo.', true);
+            cashInput.focus();
         } finally {
             isLoading = false;
             if (openingButton.textContent !== 'Caja abierta') updatePreview();
@@ -338,10 +383,11 @@
         authFeedback.hidden = true;
         var payload = {
             request_id: getRequestId(),
-            cash_counted: cashInput.valueAsNumber,
+            cash_counted: parseAmount(),
             admin_username: usernameInput.value.trim(),
             admin_password: passwordInput.value,
-            exception_reason: reasonInput.value.trim()
+            exception_reason: reasonInput.value.trim(),
+            operation: 'open'
         };
         setLoading(true);
 
@@ -372,8 +418,7 @@
     });
 
     authCancel.addEventListener('click', function () {
-        closeAuthorizationDialog({ clearFields: true, resetRequest: true });
-        clearOutsideSchedule();
+        closeAuthorizationDialog({ clearFields: true });
     });
 
     document.addEventListener('keydown', function (event) {
@@ -381,8 +426,7 @@
         if (event.key === 'Escape') {
             event.preventDefault();
             if (!isLoading) {
-                closeAuthorizationDialog({ clearFields: true, resetRequest: true });
-                clearOutsideSchedule();
+                closeAuthorizationDialog({ clearFields: true });
             }
             return;
         }
@@ -413,5 +457,59 @@
     });
 
     document.body.appendChild(overlay);
-    updatePreview();
+
+    function renderContext(state, today) {
+        if (!state || !today) throw new Error('No se recibió el estado de apertura completo.');
+        reference = Number(state.reference_amount);
+        if (!Number.isFinite(reference)) throw new Error('No se recibió la referencia del cierre anterior.');
+        openingForm.dataset.reference = String(reference);
+        document.getElementById('cash_reference_amount').textContent = formatAmount(reference);
+        document.getElementById('cash_reference_date').textContent = state.reference_date || '—';
+        document.getElementById('cash_reference_turn').textContent = state.reference_turn || '—';
+        document.getElementById('cash_summary_reference').textContent = formatAmount(reference);
+
+        var shift = today.shift || {};
+        schedule = shift;
+        scheduleState = today.status || (today.has_shift_today ? 'within_hours' : 'no_shift');
+        var isNoShift = scheduleState === 'no_shift';
+        var isOutside = scheduleState === 'outside_hours';
+        document.getElementById('cash_summary_turn').textContent = isNoShift
+            ? 'Sin programar' : (shift.label || shift.name || 'Turno');
+        scheduleStatus.textContent = isNoShift ? 'Sin turno hoy'
+            : (isOutside ? 'Fuera de horario' : 'Dentro del horario');
+        scheduleStatus.classList.toggle('is-outside', isOutside);
+        scheduleStatus.classList.toggle('is-no-turn', isNoShift);
+        statusChip.textContent = isNoShift ? 'Sin turno hoy'
+            : (isOutside ? 'Fuera de horario' : 'Sin caja abierta');
+        statusChip.classList.toggle('is-outside', isOutside);
+        statusChip.classList.toggle('is-no-turn', isNoShift);
+        openingButton.textContent = isOutside || isNoShift ? 'Solicitar autorización' : 'Confirmar apertura';
+        if (isNoShift) {
+            scheduleNotice.textContent =
+                'No tienes un turno programado para hoy. Un administrador debe autorizar esta apertura.';
+            scheduleNotice.hidden = false;
+        }
+
+        if (state.is_open) {
+            showAlreadyOpen();
+            return;
+        }
+        cashInput.value = String(state.counted_amount === undefined ? '' : state.counted_amount).replace('.', ',');
+        updatePreview();
+    }
+
+    Promise.all([
+        typeof CajaService.getEstadoCaja === 'function'
+            ? CajaService.getEstadoCaja(sellerId)
+            : Promise.resolve({ is_open: false, reference_amount: reference, counted_amount: cashInput.value }),
+        typeof CajaService.getTurnoDeHoy === 'function'
+            ? CajaService.getTurnoDeHoy(sellerId)
+            : Promise.resolve({ status: 'within_hours', shift: { label: 'Turno' } })
+    ]).then(function (results) {
+        renderContext(results[0], results[1]);
+        cashInput.focus();
+    }).catch(function () {
+        showOpeningFeedback('No se pudo cargar la información de caja. Inténtalo de nuevo.', true);
+        cashInput.focus();
+    });
 }());

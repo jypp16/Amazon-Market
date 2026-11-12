@@ -113,6 +113,44 @@
         return '';
     }
 
+    function formatMovementDateTime(movement) {
+        var dateTime = movement.date_time || movement.datetime || movement.occurred_at
+            || movement.created_at || movement.fecha_hora;
+        if (dateTime) {
+            var rawDateTime = String(dateTime);
+            var localDateTime = rawDateTime.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?$/);
+            if (localDateTime) {
+                return localDateTime[3] + '/' + localDateTime[2] + '/' + localDateTime[1]
+                    + ' ' + localDateTime[4] + ':' + localDateTime[5];
+            }
+            if (/^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}$/.test(rawDateTime)) return rawDateTime;
+            var parsedDateTime = new Date(rawDateTime);
+            if (!Number.isNaN(parsedDateTime.getTime())) {
+                return new Intl.DateTimeFormat('es-PE', {
+                    timeZone: 'America/Lima',
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).format(parsedDateTime).replace(',', '');
+            }
+            return String(dateTime);
+        }
+
+        var date = movement.date || movement.movement_date || movement.fecha;
+        var time = movement.time || movement.hora;
+        if (date && time) {
+            var isoDate = String(date).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            var displayDate = isoDate
+                ? isoDate[3] + '/' + isoDate[2] + '/' + isoDate[1]
+                : String(date);
+            return displayDate + ' ' + time;
+        }
+        return time || '—';
+    }
+
     function renderMovements(movements) {
         var body = document.getElementById('cash_query_rows');
         body.replaceChildren();
@@ -128,7 +166,7 @@
             var typeKey = movement.type || '';
             var sign = amountSign(movement);
 
-            time.textContent = movement.time || '—';
+            time.textContent = formatMovementDateTime(movement);
             typeBadge.className = 'cash-query-type ' + (typeStyles[typeKey] || 'is-unknown');
             typeBadge.textContent = service.typeLabels[typeKey] || movement.type_label || typeKey || 'Otro';
             type.appendChild(typeBadge);

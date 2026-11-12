@@ -1,18 +1,10 @@
 (function (global) {
     'use strict';
 
-    var config = global.CAJA_SERVICE_CONFIG || {};
-    var mockEnabled = config.mockEnabled === true;
-    var mockScenario = config.mockScenario || 'authorization_required';
-    var mockReferenceAmount = Number(config.referenceAmount);
-    var allowedScenarios = [
-        'success',
-        'authorization_required',
-        'invalid_credentials',
-        'motive_required',
-        'already_open',
-        'server_error'
-    ];
+    function useDemo() {
+        return Boolean(global.CajaDemoService
+            && (!global.CAJA_WORKFLOWS_CONFIG || global.CAJA_WORKFLOWS_CONFIG.mockEnabled !== false));
+    }
 
     function normalizeResponse(response) {
         var body = response && response.data ? response.data : {};
@@ -44,42 +36,35 @@
         return { type: 'error' };
     }
 
-    function mockResponse(payload) {
-        if (!allowedScenarios.includes(mockScenario)) {
-            return Promise.reject(new Error('CAJA_MOCK_SCENARIO no es un escenario válido.'));
-        }
+    function responseData(response) {
+        var body = response && response.data ? response.data : {};
+        return body.data || body;
+    }
 
-        var hasAuthorization = Object.prototype.hasOwnProperty.call(payload, 'admin_username');
-        var now = new Date().toISOString();
-        var opened = {
-            type: 'opened',
-            data: {
-                opening_balance: Number(payload.cash_counted),
-                opening_difference: Number(payload.cash_counted) - mockReferenceAmount,
-                opened_at: now
-            }
+    function normalizeShift(response) {
+        var data = responseData(response);
+        var shift = data.shift || data.turn || null;
+        return {
+            status: data.status || (data.within_hours ? 'within_hours' : 'outside_hours'),
+            has_shift_today: data.has_shift_today !== undefined
+                ? Boolean(data.has_shift_today) : Boolean(shift),
+            shift: shift
         };
-        var result;
+    }
 
-        if (mockScenario === 'success') result = opened;
-        else if (mockScenario === 'already_open') result = { type: 'already_open' };
-        else if (mockScenario === 'server_error' && hasAuthorization) result = { type: 'error' };
-        else if (mockScenario === 'invalid_credentials' && hasAuthorization) result = { type: 'authorization_denied' };
-        else if (mockScenario === 'motive_required' && hasAuthorization) result = { type: 'motive_required' };
-        else if (hasAuthorization) result = opened;
-        else result = {
-            type: 'authorization_required',
-            schedule: { start: '08:00', end: '14:00' }
+    function normalizeOpeningState(response) {
+        var data = responseData(response);
+        return {
+            is_open: Boolean(data.is_open || data.open),
+            reference_amount: Number(data.reference_amount),
+            reference_date: data.reference_date || data.previous_close_date || '',
+            reference_turn: data.reference_turn || data.previous_close_turn || '',
+            counted_amount: Number(data.counted_amount !== undefined
+                ? data.counted_amount : data.opening_balance)
         };
-
-        return new Promise(function (resolve) {
-            global.setTimeout(function () { resolve(result); }, 180);
-        });
     }
 
     function send(payload) {
-        if (mockEnabled) return mockResponse(payload);
-
         // TODO: Confirmar endpoint, contrato y autorización de administrador sin cambiar la sesión del vendedor.
         return Api.request('caja/abrir', {
             method: 'POST',
@@ -100,10 +85,26 @@
 
     global.CajaService = {
         createRequestId: createRequestId,
+        getTurnoDeHoy: function (vendedorId) {
+            if (useDemo()) return global.CajaDemoService.getTurnoDeHoy(vendedorId);
+            // TODO: Confirmar endpoint y contrato del turno del vendedor.
+            return Api.request('caja/turno-hoy?vendedor_id=' + encodeURIComponent(vendedorId), { method: 'GET' })
+                .then(normalizeShift);
+        },
+        getEstadoCaja: function (vendedorId) {
+            if (useDemo()) return global.CajaDemoService.getEstadoCaja(vendedorId);
+            // TODO: Confirmar endpoint y contrato de la sesión activa del vendedor.
+            return Api.request('caja/estado?vendedor_id=' + encodeURIComponent(vendedorId), { method: 'GET' })
+                .then(normalizeOpeningState);
+        },
         requestOpening: function (payload) {
+            if (useDemo()) return global.CajaDemoService.guardarApertura(payload);
             return send(payload);
         },
         authorizeAndOpen: function (payload) {
+            if (useDemo()) return global.CajaDemoService.solicitarAutorizacion(
+                Object.assign({ operation: 'open' }, payload)
+            );
             return send(payload);
         }
     };

@@ -78,7 +78,7 @@ require_once 'Views/Header.php';
                 <table class="cash-query-table" aria-labelledby="cash_query_table_title">
                     <thead>
                         <tr>
-                            <th scope="col">Hora</th>
+                            <th scope="col">Fecha y hora</th>
                             <th scope="col">Tipo</th>
                             <th scope="col">Motivo o referencia</th>
                             <th scope="col">Importe</th>

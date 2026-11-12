@@ -121,8 +121,8 @@ function sampleResult(page) {
             current_balance: 300, card: 90, yape_plin: 0
         },
         movements: page === 1
-            ? [{ id: 'm1', time: '09:00', type: 'cash_sale', amount: 80, effect: 'Suma', reference: 'Boleta' }]
-            : [{ id: 'm2', time: '10:00', type: 'omitted_withdrawal', amount: 100, effect: 'Sin efecto: ya reflejado en la apertura' }],
+            ? [{ id: 'm1', date: '2026-11-10', time: '09:00', type: 'cash_sale', amount: 80, effect: 'Suma', reference: 'Boleta' }]
+            : [{ id: 'm2', date: '2026-11-09', time: '10:00', type: 'omitted_withdrawal', amount: 100, effect: 'Sin efecto: ya reflejado en la apertura' }],
         pagination: { page, total_pages: 2, total_movements: 3 }
     };
 }
@@ -139,6 +139,7 @@ async function testAdministratorSessionAndEmptyDate() {
     assert.equal(result.summary.current_balance, 300);
     assert.equal(result.movements.length, 4);
     assert.equal(result.movements[3].effect, 'Sin efecto: ya reflejado en la apertura');
+    assert.equal(result.movements[0].date, '2026-11-10');
 
     const empty = await createService('admin_empty').query({
         date: '2026-01-01', seller_id: 'seller-luis', page: 1
@@ -216,6 +217,7 @@ async function testApiAdapterAndOptions() {
     assert.match(calls[1].endpoint, /page=2/);
 
     assert.match(viewSource, /Saldo y movimientos de la sesión\. Solo lectura\./);
+    assert.match(viewSource, /Fecha y hora/);
     assert.match(viewSource, /scope="col"/);
     assert.match(viewSource, /aria-live="polite"/);
     assert.match(viewSource, /Limpiar filtros/);
@@ -259,6 +261,7 @@ async function testAdministratorScreenFlow() {
     assert.equal(elements.cash_query_page_status.textContent, 'Mostrando 1 de 3 movimientos · Página 2 de 2');
     assert.equal(elements.cash_query_rows.children[0].children[4].textContent,
         'Sin efecto: ya reflejado en la apertura');
+    assert.equal(elements.cash_query_rows.children[0].children[0].textContent, '09/11/2026 10:00');
 
     await elements.cash_query_filters.dispatch('reset');
     await new Promise(resolve => setTimeout(resolve, 1));

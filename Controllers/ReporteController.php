@@ -80,10 +80,10 @@ class ReporteController extends Controller {
                 'digital_sales' => 0.00,
                 'has_omitted_withdrawal' => true,
                 'movements' => [
-                    ['time' => '09:40', 'type' => 'Venta en efectivo', 'reference' => 'Boleta B001-000120', 'amount' => 80.00, 'seller' => 'Luis', 'administrator' => '—'],
-                    ['time' => '10:15', 'type' => 'Inyección', 'reference' => 'Cambio para caja', 'amount' => 50.00, 'seller' => 'Luis', 'administrator' => 'Admin (entregó)'],
-                    ['time' => '11:30', 'type' => 'Retiro', 'reference' => 'Pago a proveedor', 'amount' => -30.00, 'seller' => 'Luis', 'administrator' => 'Admin (recibió)'],
-                    ['time' => '11:45', 'type' => 'Retiro omitido', 'reference' => 'Vinculado al turno 19/10 tarde · cierre original conservado', 'amount' => 300.00, 'seller' => 'Luis', 'administrator' => 'Admin (recibió)']
+                    ['date' => '20/10/2026', 'time' => '09:40', 'type' => 'Venta en efectivo', 'reference' => 'Boleta B001-000120', 'amount' => 80.00, 'seller' => 'Luis', 'administrator' => '—'],
+                    ['date' => '20/10/2026', 'time' => '10:15', 'type' => 'Inyección', 'reference' => 'Cambio para caja', 'amount' => 50.00, 'seller' => 'Luis', 'administrator' => 'Admin (entregó)'],
+                    ['date' => '20/10/2026', 'time' => '11:30', 'type' => 'Retiro', 'reference' => 'Pago a proveedor', 'amount' => -30.00, 'seller' => 'Luis', 'administrator' => 'Admin (recibió)'],
+                    ['date' => '20/10/2026', 'time' => '11:45', 'type' => 'Retiro omitido', 'reference' => 'Vinculado al turno 19/10 tarde · cierre original conservado', 'amount' => 300.00, 'seller' => 'Luis', 'administrator' => 'Admin (recibió)']
                 ]
             ],
             [
@@ -109,7 +109,7 @@ class ReporteController extends Controller {
                 'digital_sales' => 40.00,
                 'has_omitted_withdrawal' => true,
                 'movements' => [
-                    ['time' => '20:50', 'type' => 'Retiro omitido', 'reference' => 'Vinculado al turno 18/10 mañana · cierre original conservado', 'amount' => 300.00, 'seller' => 'Marta', 'administrator' => 'Admin (recibió)']
+                    ['date' => '19/10/2026', 'time' => '20:50', 'type' => 'Retiro omitido', 'reference' => 'Vinculado al turno 18/10 mañana · cierre original conservado', 'amount' => 300.00, 'seller' => 'Marta', 'administrator' => 'Admin (recibió)']
                 ]
             ],
             [

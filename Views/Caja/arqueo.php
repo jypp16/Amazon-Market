@@ -79,7 +79,7 @@ $auth_help_text = 'Obligatorio. La autorización vale una sola vez, solo para es
                     <h3 id="cash_history_title">Historial de arqueos</h3>
                     <div class="cash-count-table-wrap">
                         <table class="cash-count-table">
-                            <thead><tr><th scope="col">Hora</th><th scope="col">Contado</th><th scope="col">Diferencia</th><th scope="col">Estado</th></tr></thead>
+                            <thead><tr><th scope="col">Fecha y hora</th><th scope="col">Contado</th><th scope="col">Diferencia</th><th scope="col">Estado</th></tr></thead>
                             <tbody id="cash_count_history"></tbody>
                         </table>
                     </div>
@@ -88,6 +88,7 @@ $auth_help_text = 'Obligatorio. La autorización vale una sola vez, solo para es
 
                 <section class="cash-opening-card cash-count-card cash-close-card" aria-labelledby="cash_close_title">
                     <h3 id="cash_close_title">Cerrar caja</h3>
+                    <div class="cash-close-schedule-notice" id="cash_close_schedule_notice" hidden></div>
                     <ul class="cash-close-checklist">
                         <li id="cash_close_ownership">Sesión abierta y propia</li>
                         <li id="cash_close_arqueo_status">Debes realizar un arqueo nuevo antes de cerrar.</li>
@@ -97,7 +98,7 @@ $auth_help_text = 'Obligatorio. La autorización vale una sola vez, solo para es
                     <p class="cash-count-feedback" id="cash_close_feedback" role="status" aria-live="polite" hidden></p>
                     <div class="cash-opening-actions">
                         <a class="btn btn-secondary" href="<?= BASE_URL ?>/Home">Cancelar</a>
-                        <button class="btn btn-cash-primary" type="button" id="cash_close_confirm" disabled>Confirmar cierre</button>
+                        <button class="btn btn-cash-primary" type="button" id="cash_close_confirm">Confirmar cierre</button>
                     </div>
                 </section>
             </div>
@@ -111,6 +112,16 @@ window.CAJA_ARQUEO_CONFIG = <?= json_encode([
     'mockEnabled' => (bool)$data['mock_enabled'],
     'mockScenario' => (string)$data['mock_scenario'],
     'mockLatencyMs' => (int)$data['mock_latency_ms']
+], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+window.CAJA_WORKFLOWS_CONFIG = <?= json_encode([
+    'mockEnabled' => (($workflowMockEnabled = getenv('CAJA_WORKFLOWS_MOCK_ENABLED')) === false)
+        ? true : filter_var($workflowMockEnabled, FILTER_VALIDATE_BOOLEAN),
+    'scenario' => (($workflowScenario = getenv('CAJA_WORKFLOWS_MOCK_SCENARIO')) === false || $workflowScenario === '')
+        ? ((bool)($data['mock_enabled'] ?? false) ? (string)($data['mock_scenario'] ?? 'success') : 'success')
+        : $workflowScenario,
+    'sellerId' => $_SESSION['idUser'] ?? $_SESSION['id_usuario'] ?? $_SESSION['id'] ?? 'vendedor-demo',
+    'sellerName' => $_SESSION['nombre'] ?? 'Vendedor',
+    'sellerUsername' => $_SESSION['username'] ?? ''
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
 </script>
 <?php require_once 'Views/Footer.php'; ?>
