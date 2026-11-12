@@ -6,7 +6,7 @@ Este contrato describe los datos que la interfaz consume y envía. La implementa
 
 - Los identificadores `usuarioId` y `turnoId` son números.
 - Las fechas `semanaInicio` usan `YYYY-MM-DD` y siempre representan el lunes de la semana seleccionada.
-- `dias` es una lista de índices: lunes `0`, martes `1`, miércoles `2`, jueves `3`, viernes `4`, sábado `5`, domingo `6`.
+- Cada elemento de `turnos` contiene `turnoId` y `dias`; `dias` usa índices: lunes `0`, martes `1`, miércoles `2`, jueves `3`, viernes `4`, sábado `5`, domingo `6`.
 - Las horas usan formato de 24 horas `HH:mm`.
 - Los errores deben rechazarse con un mensaje claro para que la interfaz los anuncie y conserve los datos del formulario.
 
@@ -90,16 +90,18 @@ reemplaza las excepciones futuras.
 
 ```json
 {
-  "turnoId": 1,
-  "dias": [0, 1, 2, 3, 4],
+  "turnos": [
+    { "turnoId": 1, "dias": [0, 1, 2, 3, 4] },
+    { "turnoId": 2, "dias": [0, 1, 2, 3, 4] }
+  ],
   "semanaInicio": "2026-11-09",
   "alcance": "semana"
 }
 ```
 
-`alcance` es `semana` para una programación semanal, o `desde` para una programación aplicada desde esa semana en adelante. El servidor decide qué programación rige; el frontend solicita el dato para la semana y lo muestra.
+Una programación puede contener uno o varios turnos, cada uno con sus propios días. Los días pueden coincidir entre turnos; por ejemplo, el vendedor puede trabajar Mañana y Tarde el lunes. `alcance` es `semana` para una programación semanal, o `desde` para una programación aplicada desde esa semana en adelante. El servidor decide qué programación rige; el frontend solicita el dato para la semana y lo muestra.
 
-### `guardarProgramacion(usuarioId, semanaInicio, { turnoId, dias, alcance })`
+### `guardarProgramacion(usuarioId, semanaInicio, { turnos, alcance })`
 
 Guarda la programación elegida por el administrador.
 
@@ -113,15 +115,17 @@ una excepción explícita para la semana consultada.
 {
   "usuarioId": 4,
   "semanaInicio": "2026-11-09",
-  "turnoId": 1,
-  "dias": [0, 1, 2, 3, 4],
+  "turnos": [
+    { "turnoId": 1, "dias": [0, 1, 2, 3, 4] },
+    { "turnoId": 2, "dias": [0, 1, 2, 3, 4] }
+  ],
   "alcance": "semana"
 }
 ```
 
-`alcance` acepta `semana` o `desde`. Respuesta esperada: programación confirmada por el servidor con `turnoId`, `dias`, `semanaInicio` y `alcance`.
+`alcance` acepta `semana` o `desde`. Respuesta esperada: programación confirmada por el servidor con `turnos`, `semanaInicio` y `alcance`. Cada `turnoId` debe ser único dentro de la programación y cada turno debe tener al menos un día válido. Se permiten días coincidentes entre turnos.
 
-El servidor vuelve a validar que el usuario sea vendedor, el turno exista y los días sean válidos. La interfaz valida por comodidad, pero no sustituye las validaciones del servidor.
+El servidor vuelve a validar que el usuario sea vendedor, que cada turno exista y aparezca una sola vez, y que cada turno tenga al menos un día válido. La interfaz valida por comodidad, pero no sustituye las validaciones del servidor.
 
 ## Caja: apertura, arqueo y cierre
 

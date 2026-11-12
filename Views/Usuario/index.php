@@ -82,15 +82,12 @@
         </section>
 
         <fieldset class="user-schedule-fieldset">
-            <legend>Turno fijo</legend>
-            <div class="user-schedule-shifts" id="program_shift_options" role="radiogroup" aria-label="Turno fijo"></div>
+            <legend>Turnos y días de atención</legend>
+            <p class="user-schedule-multi-shift-note">
+                Cada turno tiene sus propios días. Puedes asignar Mañana y Tarde al mismo día.
+            </p>
+            <div class="user-schedule-shifts" id="program_shift_options" role="group" aria-label="Turnos y días de atención"></div>
             <p class="user-schedule-error" id="program_shift_error" aria-live="polite"></p>
-        </fieldset>
-
-        <fieldset class="user-schedule-fieldset">
-            <legend>Días de atención</legend>
-            <div class="user-schedule-days" id="program_day_options"></div>
-            <p class="user-schedule-error" id="program_days_error" aria-live="polite"></p>
         </fieldset>
 
         <fieldset class="user-schedule-apply" id="program_apply_scope" hidden>

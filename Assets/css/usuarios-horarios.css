@@ -75,17 +75,22 @@ body.user-schedule-modal-open { overflow: hidden; }
 .user-schedule-previous p { margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
 .user-schedule-fieldset { min-width: 0; margin: 0 0 17px; padding: 0; border: 0; }
 .user-schedule-fieldset legend { margin-bottom: 8px; }
+.user-schedule-multi-shift-note { margin: -2px 0 9px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
 .user-schedule-shifts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .user-schedule-shift-option {
-    display: flex; min-width: 0; align-items: center; gap: 10px; padding: 11px 12px;
+    display: flex; min-width: 0; flex-direction: column; gap: 10px; padding: 11px 12px;
     border: 1px solid var(--border-color); border-radius: 9px; background: #fff; cursor: pointer;
 }
-.user-schedule-shift-option:has(input:checked) { border: 2px solid #4774ff; padding: 10px 11px; background: #eaf1ff; }
-.user-schedule-shift-option input { accent-color: #3478f6; }
+.user-schedule-shift-option.is-selected { border: 2px solid #4774ff; padding: 10px 11px; background: #eaf1ff; }
+.user-schedule-shift-header { display: flex; align-items: center; gap: 10px; }
+.user-schedule-shift-header input { flex: 0 0 auto; accent-color: #3478f6; }
 .user-schedule-shift-option span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .user-schedule-shift-option strong { color: var(--primary-color); font-size: 12px; }
 .user-schedule-shift-option small { color: var(--text-secondary); font-size: 11px; }
-.user-schedule-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.user-schedule-shift-days { display: flex; flex-wrap: wrap; gap: 5px; }
+.user-schedule-shift-day { width: 30px; height: 32px; border-radius: 7px; font-size: 10px; }
+.user-schedule-shift-day:disabled { opacity: .45; cursor: not-allowed; }
+.user-schedule-shift-option .user-schedule-error { margin-top: -5px; }
 .user-schedule-day {
     width: 42px; height: 42px; border: 1px solid var(--border-color); border-radius: 9px;
     background: #fff; color: var(--text-secondary); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
@@ -104,6 +109,7 @@ body.user-schedule-modal-open { overflow: hidden; }
     margin-top: 12px; padding: 10px 12px; border-radius: 8px;
     background: #eef4ff; color: var(--primary-color); font-size: 11px; line-height: 1.5;
 }
+.user-schedule-entry + .user-schedule-entry { margin-top: 7px; padding-top: 6px; border-top: 1px solid #e8edf3; }
 .user-schedule-summary { min-height: 18px; margin-top: 8px; color: var(--text-secondary); font-size: 12px; }
 .user-schedule-dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 14px; }
 .user-schedule-button {

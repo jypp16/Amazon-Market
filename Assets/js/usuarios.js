@@ -21,8 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const overlayTurnos = document.getElementById('manage_shifts_modal');
     const diaIndices = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
     const diaNombres = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    const diasSeleccionados = new Set();
-    let turnoSeleccionado = '';
+    const turnosSeleccionados = new Map();
 
     async function cargarUsuarios(busqueda = '') {
         try {
@@ -197,23 +196,36 @@ document.addEventListener('DOMContentLoaded', () => {
             celda.appendChild(sinProgramar);
             return;
         }
-        const turno = turnos.find(item => Number(item.id) === Number(programacion.turnoId));
-        if (!turno) {
-            celda.textContent = 'Sin programar';
+        const horarios = normalizarTurnosProgramados(programacion)
+            .map(horario => ({
+                horario: horario,
+                turno: turnos.find(item => Number(item.id) === Number(horario.turnoId))
+            }))
+            .filter(item => item.turno);
+        if (!horarios.length) {
+            const sinProgramar = document.createElement('span');
+            sinProgramar.className = 'user-schedule-badge is-unset';
+            sinProgramar.innerHTML = '<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Sin programar';
+            celda.appendChild(sinProgramar);
             return;
         }
-        const badge = document.createElement('span');
-        badge.className = 'user-schedule-badge';
-        badge.textContent = turno.nombre + ' · ' + turno.inicio + '–' + turno.fin;
-        const dias = document.createElement('div');
-        dias.className = 'user-schedule-days-mini';
-        diaIndices.forEach((dia, indice) => {
-            const cuadrito = document.createElement('span');
-            cuadrito.textContent = dia;
-            if (programacion.dias.includes(indice)) cuadrito.classList.add('is-active');
-            dias.appendChild(cuadrito);
+        horarios.forEach(({ horario, turno }) => {
+            const entrada = document.createElement('div');
+            entrada.className = 'user-schedule-entry';
+            const badge = document.createElement('span');
+            badge.className = 'user-schedule-badge';
+            badge.textContent = turno.nombre + ' · ' + turno.inicio + '–' + turno.fin;
+            const dias = document.createElement('div');
+            dias.className = 'user-schedule-days-mini';
+            diaIndices.forEach((dia, indice) => {
+                const cuadrito = document.createElement('span');
+                cuadrito.textContent = dia;
+                if (horario.dias.includes(indice)) cuadrito.classList.add('is-active');
+                dias.appendChild(cuadrito);
+            });
+            entrada.append(badge, dias);
+            celda.appendChild(entrada);
         });
-        celda.append(badge, dias);
     }
 
     function esVendedor(usuario) {
@@ -297,20 +309,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function resumenProgramacion(programacion, incluirTurno = true) {
         if (!programacion) return 'La semana anterior no tiene programación';
-        const turno = turnos.find(item => Number(item.id) === Number(programacion.turnoId));
-        const dias = programacion.dias.map(indice => diaIndices[indice]).join(' ');
-        return (incluirTurno && turno ? turno.nombre + ' · ' : '') + dias;
+        const resumenes = normalizarTurnosProgramados(programacion).map(horario => {
+            const turno = turnos.find(item => Number(item.id) === Number(horario.turnoId));
+            const dias = horario.dias.map(indice => diaIndices[indice]).join(' ');
+            return (incluirTurno && turno ? turno.nombre + ' · ' : '') + dias;
+        });
+        return resumenes.length ? resumenes.join(' | ') : 'La semana no tiene turnos programados';
+    }
+
+    function normalizarTurnosProgramados(programacion) {
+        if (Array.isArray(programacion.turnos)) {
+            return programacion.turnos.map(horario => ({
+                turnoId: Number(horario.turnoId),
+                dias: Array.isArray(horario.dias) ? horario.dias.slice() : []
+            }));
+        }
+        if (programacion.turnoId !== undefined && Array.isArray(programacion.dias)) {
+            return [{ turnoId: Number(programacion.turnoId), dias: programacion.dias.slice() }];
+        }
+        return [];
     }
 
     async function abrirModalProgramacion(usuario, boton) {
         usuarioProgramado = usuario;
         semanaModal = semanaLista;
-        turnoSeleccionado = '';
-        diasSeleccionados.clear();
+        turnosSeleccionados.clear();
         document.getElementById('program_schedule_user').textContent =
             (usuario.nombre || '') + ' · ' + (usuario.username || '');
         document.getElementById('program_shift_error').textContent = '';
-        document.getElementById('program_days_error').textContent = '';
         modalRegreso = boton;
         await cargarSemanaModal();
         abrirOverlay(overlayProgramacion, overlayProgramacion.querySelector('[data-close-schedule]'));
@@ -322,9 +348,10 @@ document.addEventListener('DOMContentLoaded', () => {
             UsuariosHorariosService.getProgramacion(usuarioProgramado.id_usuario, semanaModal),
             UsuariosHorariosService.getProgramacion(usuarioProgramado.id_usuario, moverSemana(semanaModal, -1))
         ]);
-        turnoSeleccionado = programacionSemana ? String(programacionSemana.turnoId) : '';
-        diasSeleccionados.clear();
-        if (programacionSemana) programacionSemana.dias.forEach(dia => diasSeleccionados.add(dia));
+        turnosSeleccionados.clear();
+        normalizarTurnosProgramados(programacionSemana || {}).forEach(horario => {
+            turnosSeleccionados.set(String(horario.turnoId), new Set(horario.dias));
+        });
         renderizarProgramacionModal();
     }
 
@@ -339,46 +366,69 @@ document.addEventListener('DOMContentLoaded', () => {
         const opcionesTurno = document.getElementById('program_shift_options');
         opcionesTurno.textContent = '';
         turnos.forEach(turno => {
-            const label = document.createElement('label');
-            label.className = 'user-schedule-shift-option';
-            const radio = document.createElement('input');
-            radio.type = 'radio';
-            radio.name = 'program_turno';
-            radio.value = String(turno.id);
-            radio.checked = turnoSeleccionado === String(turno.id);
-            radio.addEventListener('change', () => {
-                turnoSeleccionado = radio.value;
-                document.getElementById('program_shift_error').textContent = '';
-                actualizarResumenProgramacion();
-            });
+            const turnoId = String(turno.id);
+            const selectedDays = turnosSeleccionados.get(turnoId);
+            const tarjeta = document.createElement('article');
+            tarjeta.className = 'user-schedule-shift-option';
+            const encabezado = document.createElement('label');
+            encabezado.className = 'user-schedule-shift-header';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.name = 'program_turnos[]';
+            checkbox.value = turnoId;
+            checkbox.checked = Boolean(selectedDays);
             const texto = document.createElement('span');
             const nombre = document.createElement('strong');
             nombre.textContent = turno.nombre;
             const horas = document.createElement('small');
             horas.textContent = turno.inicio + '–' + turno.fin;
             texto.append(nombre, horas);
-            label.append(radio, texto);
-            opcionesTurno.appendChild(label);
-        });
+            encabezado.append(checkbox, texto);
 
-        const opcionesDia = document.getElementById('program_day_options');
-        opcionesDia.textContent = '';
-        diaIndices.forEach((dia, indice) => {
-            const boton = document.createElement('button');
-            boton.type = 'button';
-            boton.className = 'user-schedule-day';
-            boton.textContent = dia;
-            boton.title = diaNombres[indice];
-            boton.setAttribute('aria-label', diaNombres[indice]);
-            boton.setAttribute('aria-pressed', diasSeleccionados.has(indice) ? 'true' : 'false');
-            boton.addEventListener('click', () => {
-                if (diasSeleccionados.has(indice)) diasSeleccionados.delete(indice);
-                else diasSeleccionados.add(indice);
-                boton.setAttribute('aria-pressed', diasSeleccionados.has(indice) ? 'true' : 'false');
-                document.getElementById('program_days_error').textContent = '';
+            const opcionesDia = document.createElement('div');
+            opcionesDia.className = 'user-schedule-shift-days';
+            opcionesDia.setAttribute('aria-label', 'Días de atención para ' + turno.nombre);
+            const botonesDia = [];
+            diaIndices.forEach((dia, indice) => {
+                const boton = document.createElement('button');
+                boton.type = 'button';
+                boton.className = 'user-schedule-day user-schedule-shift-day';
+                boton.textContent = dia;
+                boton.title = diaNombres[indice];
+                boton.setAttribute('aria-label', diaNombres[indice] + ' · ' + turno.nombre);
+                boton.setAttribute('aria-pressed', selectedDays && selectedDays.has(indice) ? 'true' : 'false');
+                boton.disabled = !selectedDays;
+                botonesDia.push(boton);
+                opcionesDia.appendChild(boton);
+            });
+
+            const errorDias = document.createElement('p');
+            errorDias.className = 'user-schedule-error';
+            errorDias.id = 'program_days_error_' + turnoId;
+            errorDias.setAttribute('aria-live', 'polite');
+            tarjeta.append(encabezado, opcionesDia, errorDias);
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) turnosSeleccionados.set(turnoId, new Set());
+                else turnosSeleccionados.delete(turnoId);
+                tarjeta.classList.toggle('is-selected', checkbox.checked);
+                botonesDia.forEach(botonDia => { botonDia.disabled = !checkbox.checked; });
+                errorDias.textContent = '';
+                document.getElementById('program_shift_error').textContent = '';
                 actualizarResumenProgramacion();
             });
-            opcionesDia.appendChild(boton);
+            botonesDia.forEach((boton, indice) => {
+                boton.addEventListener('click', () => {
+                    const dias = turnosSeleccionados.get(turnoId);
+                    if (!dias) return;
+                    if (dias.has(indice)) dias.delete(indice);
+                    else dias.add(indice);
+                    boton.setAttribute('aria-pressed', dias.has(indice) ? 'true' : 'false');
+                    errorDias.textContent = '';
+                    actualizarResumenProgramacion();
+                });
+            });
+            tarjeta.classList.toggle('is-selected', Boolean(selectedDays));
+            opcionesTurno.appendChild(tarjeta);
         });
 
         const aplicar = document.getElementById('program_apply_scope');
@@ -387,25 +437,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const soloSemana = aplicar.querySelector('input[value="semana"]');
         if (soloSemana) soloSemana.checked = true;
         document.getElementById('program_shift_error').textContent = '';
-        document.getElementById('program_days_error').textContent = '';
         actualizarResumenProgramacion();
     }
 
     function actualizarResumenProgramacion() {
-        const turno = turnos.find(item => String(item.id) === turnoSeleccionado);
         const resumen = document.getElementById('program_schedule_summary');
-        resumen.textContent = turno
-            ? 'Turno ' + turno.nombre.toLocaleLowerCase('es') + ', ' + diasSeleccionados.size
-                + (diasSeleccionados.size === 1 ? ' día por semana.' : ' días por semana.')
-            : 'Selecciona un turno y los días de atención.';
+        const descripciones = [...turnosSeleccionados.entries()].map(([turnoId, dias]) => {
+            const turno = turnos.find(item => String(item.id) === turnoId);
+            if (!turno) return '';
+            return turno.nombre + ': ' + dias.size
+                + (dias.size === 1 ? ' día por semana' : ' días por semana');
+        }).filter(Boolean);
+        resumen.textContent = descripciones.length
+            ? descripciones.join(' · ') + '.'
+            : 'Selecciona uno o más turnos y sus días de atención.';
     }
 
     async function guardarHorarioProgramado() {
         const errorTurno = document.getElementById('program_shift_error');
-        const errorDias = document.getElementById('program_days_error');
-        errorTurno.textContent = turnoSeleccionado ? '' : 'Selecciona un turno';
-        errorDias.textContent = diasSeleccionados.size ? '' : 'Selecciona al menos un día';
-        if (!turnoSeleccionado || !diasSeleccionados.size) return;
+        const horariosSeleccionados = [...turnosSeleccionados.entries()];
+        errorTurno.textContent = horariosSeleccionados.length ? '' : 'Selecciona al menos un turno';
+        let hayDiasVacios = false;
+        horariosSeleccionados.forEach(([turnoId, dias]) => {
+            const errorDias = document.getElementById('program_days_error_' + turnoId);
+            errorDias.textContent = dias.size ? '' : 'Selecciona al menos un día para este turno';
+            if (!dias.size) hayDiasVacios = true;
+        });
+        if (!horariosSeleccionados.length || hayDiasVacios) return;
 
         const boton = document.getElementById('program_save');
         boton.disabled = true;
@@ -416,7 +474,13 @@ document.addEventListener('DOMContentLoaded', () => {
             await UsuariosHorariosService.guardarProgramacion(
                 usuarioProgramado.id_usuario,
                 semanaModal,
-                { turnoId: Number(turnoSeleccionado), dias: [...diasSeleccionados].sort((a, b) => a - b), alcance: alcance }
+                {
+                    turnos: horariosSeleccionados.map(([turnoId, dias]) => ({
+                        turnoId: Number(turnoId),
+                        dias: [...dias].sort((a, b) => a - b)
+                    })),
+                    alcance: alcance
+                }
             );
             await cargarProgramacionesDeFilas(usuariosActuales);
             renderizarTabla(usuariosActuales);
@@ -639,9 +703,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         document.getElementById('program_copy_previous').addEventListener('click', () => {
             if (!programacionAnterior) return;
-            turnoSeleccionado = String(programacionAnterior.turnoId);
-            diasSeleccionados.clear();
-            programacionAnterior.dias.forEach(dia => diasSeleccionados.add(dia));
+            turnosSeleccionados.clear();
+            normalizarTurnosProgramados(programacionAnterior).forEach(horario => {
+                turnosSeleccionados.set(String(horario.turnoId), new Set(horario.dias));
+            });
             renderizarProgramacionModal();
         });
         document.getElementById('program_save').addEventListener('click', guardarHorarioProgramado);
