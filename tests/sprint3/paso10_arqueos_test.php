@@ -261,6 +261,39 @@ function cerrarSesionFixture(PDO $pdo, int $idSesion): void
         $idArqueo = (int)$pdo->lastInsertId();
         $pdo->prepare('UPDATE sesion_caja SET id_ultimo_arqueo = :a WHERE id_sesion_caja = :s')->execute([':a' => $idArqueo, ':s' => $idSesion]);
     }
+    $stmtAnt = $pdo->prepare(
+        "SELECT (NOW() < DATE_SUB(fecha_hora_salida_referencia, INTERVAL 15 MINUTE)) AS es_anticipado,
+                TIME(fecha_hora_salida_referencia) AS hora_salida_referencia,
+                fecha_hora_salida_referencia,
+                GREATEST(16, CEIL(TIMESTAMPDIFF(SECOND, NOW(), fecha_hora_salida_referencia) / 60)) AS mins
+           FROM sesion_caja
+          WHERE id_sesion_caja = :s"
+    );
+    $stmtAnt->execute([':s' => $idSesion]);
+    $ant = $stmtAnt->fetch();
+    if ($ant && (int)$ant['es_anticipado'] === 1) {
+        $idAdmin = (int)$pdo->query("SELECT id_usuario FROM usuario WHERE id_rol = 1 AND estado = 1 ORDER BY id_usuario ASC LIMIT 1")->fetchColumn();
+        if ($idAdmin > 0) {
+            $pdo->prepare(
+                "INSERT INTO autorizacion_caja (
+                    id_sesion_caja, tipo_operacion, id_usuario_vendedor, id_usuario_admin,
+                    motivo, hora_salida_referencia, fecha_hora_salida_referencia,
+                    hora_cierre_real, minutos_anticipacion
+                 ) VALUES (
+                    :s, 'CIERRE_ANTICIPADO', :v, :a,
+                    'Cierre fixture prueba paso 10', :hs, :fhs,
+                    NOW(), :m
+                 )"
+            )->execute([
+                ':s'   => $idSesion,
+                ':v'   => (int)$sesion['id_usuario_vendedor'],
+                ':a'   => $idAdmin,
+                ':hs'  => $ant['hora_salida_referencia'],
+                ':fhs' => $ant['fecha_hora_salida_referencia'],
+                ':m'   => (int)$ant['mins'],
+            ]);
+        }
+    }
     $pdo->prepare(
         "UPDATE sesion_caja
             SET id_arqueo_cierre = :a,
@@ -767,9 +800,10 @@ try {
 
     // Pruebas de límites horarios exactos via CajaService::setClockProvider
     $cajaSvc = new \Services\CajaService($pdo);
-    $pdo->prepare("UPDATE sesion_caja SET fecha_hora_salida_referencia = '2026-11-12 12:00:00', hora_fin_referencia = '12:00:00' WHERE id_sesion_caja = ?")->execute([$idSesOp]);
+    $salidaRefStr = (string)$pdo->query("SELECT fecha_hora_salida_referencia FROM sesion_caja WHERE id_sesion_caja = {$idSesOp}")->fetchColumn();
+    $salidaRefDt  = new DateTimeImmutable($salidaRefStr, new DateTimeZone('America/Lima'));
 
-    $cajaSvc->setClockProvider(fn () => new DateTimeImmutable('2026-11-12 11:44:59', new DateTimeZone('America/Lima')));
+    $cajaSvc->setClockProvider(fn () => $salidaRefDt->modify('-15 minutes -1 second'));
     $sch1144 = $cajaSvc->consultarEstadoArqueo((int)$vend1['id_usuario'], [])['data']['schedule'];
     assertSameVal(true, $sch1144['requires_authorization'], 'Horario', '11:44:59 para salida 12:00 -> requires_authorization=true');
     assertTrue($sch1144['reason'] !== null, 'Horario', '11:44:59 tiene reason no nulo');
@@ -787,7 +821,7 @@ try {
     $idArqSvcEarly = (int)($resSvcBeforeMargin['response']['data']['arqueo']['id'] ?? 0);
     assertSameVal('VIGENTE', $pdo->query("SELECT estado FROM arqueo_caja WHERE id_arqueo_caja = {$idArqSvcEarly}")->fetchColumn(), 'Horario', 'guardarArqueo antes del margen persiste VIGENTE en BD');
 
-    $cajaSvc->setClockProvider(fn () => new DateTimeImmutable('2026-11-12 11:45:00', new DateTimeZone('America/Lima')));
+    $cajaSvc->setClockProvider(fn () => $salidaRefDt->modify('-15 minutes'));
     $sch1145 = $cajaSvc->consultarEstadoArqueo((int)$vend1['id_usuario'], [])['data']['schedule'];
     assertSameVal(false, $sch1145['requires_authorization'], 'Horario', '11:45:00 para salida 12:00 -> requires_authorization=false');
     assertSameVal(null, $sch1145['reason'], 'Horario', '11:45:00 reason=null');
@@ -799,12 +833,12 @@ try {
     ], null, $vend1);
     assertSameVal(201, $resSvcAtMargin['http_code'] ?? null, 'Horario', 'guardarArqueo en el instante del margen (11:45:00) -> 201');
 
-    $cajaSvc->setClockProvider(fn () => new DateTimeImmutable('2026-11-12 12:35:00', new DateTimeZone('America/Lima')));
+    $cajaSvc->setClockProvider(fn () => $salidaRefDt->modify('+35 minutes'));
     $sch1235 = $cajaSvc->consultarEstadoArqueo((int)$vend1['id_usuario'], [])['data']['schedule'];
     assertSameVal(false, $sch1235['requires_authorization'], 'Horario', '12:35:00 después de salida -> requires_authorization=false');
 
     // Después de medianoche conserva salida original
-    $cajaSvc->setClockProvider(fn () => new DateTimeImmutable('2026-11-13 00:15:00', new DateTimeZone('America/Lima')));
+    $cajaSvc->setClockProvider(fn () => $salidaRefDt->modify('+1 day')->setTime(0, 15, 0));
     $schMidnight = $cajaSvc->consultarEstadoArqueo((int)$vend1['id_usuario'], [])['data']['schedule'];
     assertSameVal(false, $schMidnight['requires_authorization'], 'Horario', 'Después de medianoche conserva salida original -> false');
 

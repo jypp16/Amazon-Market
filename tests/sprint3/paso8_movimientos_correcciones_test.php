@@ -211,6 +211,36 @@ function cerrarSesionFixture(PDO $pdo, int $idSesion, float $contadoCierre, ?str
     $pdo->prepare('UPDATE sesion_caja SET id_ultimo_arqueo = :id_arq WHERE id_sesion_caja = :id_sesion')
         ->execute([':id_arq' => $idArqueo, ':id_sesion' => $idSesion]);
 
+    $salidaRefDt = new DateTimeImmutable((string)$sesion['fecha_hora_salida_referencia'], new DateTimeZone('America/Lima'));
+    $cierreEvalDt = new DateTimeImmutable($cierreStr, new DateTimeZone('America/Lima'));
+    $limiteMargenDt = $salidaRefDt->modify('-15 minutes');
+    if ($cierreEvalDt < $limiteMargenDt) {
+        $idAdmin = (int)$pdo->query("SELECT id_usuario FROM usuario WHERE id_rol = 1 AND estado = 1 ORDER BY id_usuario ASC LIMIT 1")->fetchColumn();
+        if ($idAdmin > 0) {
+            $diffSec = $salidaRefDt->getTimestamp() - $cierreEvalDt->getTimestamp();
+            $minsAnt = max(16, (int)ceil($diffSec / 60));
+            $pdo->prepare(
+                "INSERT INTO autorizacion_caja (
+                    id_sesion_caja, tipo_operacion, id_usuario_vendedor, id_usuario_admin,
+                    motivo, hora_salida_referencia, fecha_hora_salida_referencia,
+                    hora_cierre_real, minutos_anticipacion
+                 ) VALUES (
+                    :s, 'CIERRE_ANTICIPADO', :v, :a,
+                    'Cierre fixture prueba paso 8', :hs, :fhs,
+                    :hcr, :m
+                 )"
+            )->execute([
+                ':s'   => $idSesion,
+                ':v'   => $idVendedor,
+                ':a'   => $idAdmin,
+                ':hs'  => $salidaRefDt->format('H:i:s'),
+                ':fhs' => $salidaRefDt->format('Y-m-d H:i:s'),
+                ':hcr' => $cierreStr,
+                ':m'   => $minsAnt,
+            ]);
+        }
+    }
+
     $stmtU = $pdo->prepare(
         "UPDATE sesion_caja
             SET id_arqueo_cierre = :id_arq,
@@ -738,21 +768,21 @@ try {
     assertSameVal([], $ep12Vacio['json']['data'] ?? null, 'CONSULTAS', 'EP-12 primera sesión devuelve []');
 
     // Cerrar sesión V1 (0.00) para generar historial de 22 sesiones cerradas (para probar límite 20 de EP-12)
-    $salidaRefV1 = (string)$pdo->query("SELECT fecha_hora_salida_referencia FROM sesion_caja WHERE id_sesion_caja = {$sesionV1ZeroId}")->fetchColumn();
-    cerrarSesionFixture($pdo, $sesionV1ZeroId, 0.00, $salidaRefV1);
+    $baseDt = new DateTimeImmutable('now', new DateTimeZone('America/Lima'));
+    $cierreV1Zero = $baseDt->format('Y-m-d H:i:s');
+    cerrarSesionFixture($pdo, $sesionV1ZeroId, 0.00, $cierreV1Zero);
 
     // Crear 21 sesiones cerradas adicionales (algunas de V2) anteriores a la apertura actual
     $closedIds = [$sesionV1ZeroId];
-    $baseDt = new DateTimeImmutable($salidaRefV1, new DateTimeZone('America/Lima'));
     $prevClosedId = $sesionV1ZeroId;
     $prevContado = 0.00;
-    $prevCierre = $salidaRefV1;
+    $prevCierre = $cierreV1Zero;
     for ($k = 1; $k <= 21; $k++) {
         $vId = ($k % 2 === 0) ? $idVendB : $idVendA;
         $esperado = 100.00 + $k;
         $contado = ($k === 21) ? 80.00 : $esperado; // última cerrada con faltante de 41.00 (121 - 80)
-        $apertura = $baseDt->modify("+{$k} minutes")->format('Y-m-d H:i:s');
-        $cierre = $baseDt->modify("+{$k} minutes +30 seconds")->format('Y-m-d H:i:s');
+        $apertura = $baseDt->modify("+{$k} seconds")->format('Y-m-d H:i:s');
+        $cierre = $apertura;
         $salidaRef = $apertura;
         $diffApertura = round($esperado - $prevContado, 2);
         $stmtIns = $pdo->prepare(
@@ -790,6 +820,9 @@ try {
         $prevContado = $contado;
         $prevCierre = $cierre;
     }
+
+    // Esperar a que el reloj real supere el último cierre simulado (+21s) antes de abrir la sesión operativa
+    sleep(22);
 
     // Vendedor 1 abre nueva sesión operativa con 200.00
     $openV1Op = httpRequest($serverUrl1, 'POST', '/api/caja/abrir', [

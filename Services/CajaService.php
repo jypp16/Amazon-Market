@@ -2554,15 +2554,49 @@ class CajaService
                 $exceptionReasonNorm
             ): array {
                 $cajaTx = new CajaModel($pdoTx);
-                // Mismo orden de bloqueo que apertura: guardia física primero, luego sesion_caja.
+                // Mismo orden de bloqueo que apertura: guardia física primero, luego sesion_caja y luego arqueo_caja.
                 $cajaTx->bloquearGuardiaCajaFisica();
-                $sesion = $this->exigirSesionPropiaAbierta($cajaTx, $idVendedor, true);
+
+                $idSesionArqueo = $cajaTx->obtenerIdSesionPorArqueoId($arqueoId);
+                if ($idSesionArqueo === null) {
+                    throw new InventarioException(
+                        'El arqueo especificado no existe.',
+                        'ARQUEO_MISSING',
+                        409
+                    );
+                }
+
+                $sesion = $cajaTx->obtenerSesionPorIdParaCierre($idSesionArqueo, true);
+                if ($sesion === null) {
+                    throw new InventarioException(
+                        'El arqueo especificado no existe.',
+                        'ARQUEO_MISSING',
+                        409
+                    );
+                }
+
+                if ((int)$sesion['id_usuario_vendedor'] !== $idVendedor) {
+                    throw new InventarioException(
+                        'No tiene permisos para cerrar una sesión de caja perteneciente a otro vendedor.',
+                        'SESSION_NOT_OWNED',
+                        403
+                    );
+                }
+
+                if ((string)$sesion['estado'] !== 'ABIERTA') {
+                    throw new InventarioException(
+                        'La sesión de caja ya se encuentra cerrada.',
+                        'CASH_SESSION_CLOSED',
+                        409
+                    );
+                }
+
                 $idSesion = (int)$sesion['id_sesion_caja'];
 
                 $arqueo = $cajaTx->obtenerArqueoPorId($arqueoId, true);
                 if ($arqueo === null || (int)$arqueo['id_sesion_caja'] !== $idSesion) {
                     throw new InventarioException(
-                        'El arqueo especificado no existe para la sesión de caja actual.',
+                        'El arqueo especificado no existe para la sesión de caja seleccionada.',
                         'ARQUEO_MISSING',
                         409
                     );
@@ -2673,7 +2707,7 @@ class CajaService
                     'seller'             => $sellerName,
                     'turn'               => $turnName,
                     'reference_schedule' => [
-                        'shift_id'   => (int)$sesion['id_turno_referencia'],
+                        'shift_id'   => (int)$sesion['id_turno'],
                         'shift_name' => $turnName,
                         'start'      => $startHm,
                         'end'        => $endHm,
@@ -2683,8 +2717,10 @@ class CajaService
                     'closed_at'          => $ahoraIso,
                     'arqueo_id'          => $arqueoId,
                     'summary'            => [
-                        'opening_fund'       => $this->decimalDbANumero((string)$sesion['monto_apertura']),
-                        'opening_difference' => $this->decimalDbANumero((string)$sesion['diferencia_apertura']),
+                        'opening_fund'       => $this->decimalDbANumero((string)$sesion['saldo_inicial']),
+                        'opening_difference' => $sesion['diferencia_apertura'] !== null
+                            ? $this->decimalDbANumero((string)$sesion['diferencia_apertura'])
+                            : null,
                         'cash_sales'         => $this->decimalDbANumero((string)$sesion['total_ventas_efectivo']),
                         'card'               => $this->decimalDbANumero((string)$sesion['total_ventas_tarjeta']),
                         'yape_plin'          => $this->decimalDbANumero((string)$sesion['total_ventas_yape_plin']),

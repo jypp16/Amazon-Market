@@ -168,20 +168,14 @@ class ControlSolicitudService {
         $esTransaccionPropia = !$this->pdo->inTransaction();
 
         try {
-            if ($esTransaccionPropia) {
-                $this->pdo->beginTransaction();
-            }
-
             // 2. Consultar si existe registro previo para (id_usuario, tipo_operacion, referencia_solicitud)
+            // Se consulta antes de beginTransaction() (bajo GET_LOCK) para no fijar la instantánea MVCC
+            // de REPEATABLE READ antes de que la operación adquiera sus bloqueos FOR UPDATE.
             $sqlSelect = 'SELECT id_solicitud, hash_payload, estado_solicitud, codigo_http, respuesta_json
                             FROM control_solicitud_idempotencia
                            WHERE id_usuario = :id_usuario
                              AND tipo_operacion = :tipo_operacion
                              AND referencia_solicitud = :referencia_solicitud';
-            // GET_LOCK above serializes the exact (user, operation, reference) key.
-            // A locking read for a missing key takes a gap lock under InnoDB
-            // REPEATABLE READ; concurrent requests with different new references
-            // can then deadlock while inserting into the same unique-index gap.
             $stmtSelect = $this->pdo->prepare($sqlSelect);
             $stmtSelect->execute([
                 ':id_usuario' => $idUsuario,
@@ -193,25 +187,16 @@ class ControlSolicitudService {
             if ($existente) {
                 // Caso A: Misma referencia pero datos diferentes -> rechazar conflicto 409
                 if (!hash_equals((string)$existente['hash_payload'], $hashPayload)) {
-                    if ($esTransaccionPropia && $this->pdo->inTransaction()) {
-                        $this->pdo->rollBack();
-                    }
                     throw InventarioException::conflictoIdempotencia($referenciaValida);
                 }
 
                 // Caso B: Solicitud aún marcada en procesamiento -> informar estado 409 sin duplicar
                 if ($existente['estado_solicitud'] === 'EN_PROCESO') {
-                    if ($esTransaccionPropia && $this->pdo->inTransaction()) {
-                        $this->pdo->rollBack();
-                    }
                     throw InventarioException::solicitudEnProceso($referenciaValida);
                 }
 
                 // Caso C: Solicitud ya confirmada con los mismos datos -> recuperar resultado original (200 OK)
                 if ($existente['estado_solicitud'] === 'CONFIRMADA') {
-                    if ($esTransaccionPropia && $this->pdo->inTransaction()) {
-                        $this->pdo->commit();
-                    }
                     $guardado = json_decode((string)$existente['respuesta_json'], true) ?: [];
                     $respuestaReplay = [
                         'status' => true,
@@ -226,7 +211,13 @@ class ControlSolicitudService {
                         'response' => $respuestaReplay,
                     ];
                 }
+            }
 
+            if ($esTransaccionPropia) {
+                $this->pdo->beginTransaction();
+            }
+
+            if ($existente) {
                 // Si un intento anterior había quedado en FALLIDA, reactivarlo a EN_PROCESO dentro de esta transacción
                 $stmtReactivar = $this->pdo->prepare(
                     'UPDATE control_solicitud_idempotencia

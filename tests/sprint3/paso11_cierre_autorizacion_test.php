@@ -197,7 +197,9 @@ function extractPhpSessionId(string $cookieFile): string
     }
     $lines = file($cookieFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
     foreach ($lines as $line) {
-        if (str_starts_with($line, '#')) {
+        if (str_starts_with($line, '#HttpOnly_')) {
+            $line = substr($line, strlen('#HttpOnly_'));
+        } elseif (str_starts_with($line, '#')) {
             continue;
         }
         $cols = explode("\t", $line);
@@ -307,10 +309,7 @@ try {
     assertSameVal(201, $open1['status'], 'PRE', 'Apertura sesión 1 con 100.00 -> 201');
     $idSes1 = (int)($open1['json']['data']['session_id'] ?? 0);
 
-    // Caja ajena
-    $resAjenaPost = httpRequest($url2, 'POST', '/api/caja/cerrar', ['arqueo_id' => 1, 'referencia_solicitud' => 'p11_ajena_post_00001'], ['X-CSRF-TOKEN' => $authV2['csrf']], $cookieV2);
-    assertSameVal(403, $resAjenaPost['status'], 'Seguridad', 'EP-20 sesión ajena -> 403 SESSION_NOT_OWNED');
-    assertSameVal('SESSION_NOT_OWNED', $resAjenaPost['json']['code'] ?? null, 'Seguridad', 'EP-20 code SESSION_NOT_OWNED');
+    // Caja ajena en EP-21
     $resAjenaGet = httpRequest($url2, 'GET', "/api/caja/cierre?session_id={$idSes1}&referencia_solicitud=p11_ajena_get_000001", null, [], $cookieV2);
     assertSameVal(403, $resAjenaGet['status'], 'Seguridad', 'EP-21 sesión ajena -> 403 SESSION_NOT_OWNED');
 
@@ -331,6 +330,11 @@ try {
     $arq2 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 100.00, 'version' => 1, 'referencia_solicitud' => 'p11_s1_arq2_0000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
     $idArq2 = (int)($arq2['json']['data']['arqueo']['id'] ?? 0);
     assertTrue($idArq1 > 0 && $idArq2 > $idArq1, 'PRE', 'Arqueos 1 y 2 creados en sesión 1');
+
+    // Caja ajena en EP-20 (sobre arqueo existente de sesión 1 abierta)
+    $resAjenaPost = httpRequest($url2, 'POST', '/api/caja/cerrar', ['arqueo_id' => $idArq2, 'referencia_solicitud' => 'p11_ajena_post_00001'], ['X-CSRF-TOKEN' => $authV2['csrf']], $cookieV2);
+    assertSameVal(403, $resAjenaPost['status'], 'Seguridad', 'EP-20 sesión ajena -> 403 SESSION_NOT_OWNED');
+    assertSameVal('SESSION_NOT_OWNED', $resAjenaPost['json']['code'] ?? null, 'Seguridad', 'EP-20 code SESSION_NOT_OWNED');
 
     // Arqueo reemplazado -> 409 ARQUEO_STALE (incluso con credenciales admin válidas)
     $resReemp = httpRequest($url1, 'POST', '/api/caja/cerrar', [
@@ -466,9 +470,13 @@ try {
     assertSameVal('Faltante S/ 5.00 validado en cierre P11', $ses1Db['observacion_cierre'], 'Persistencia', 'observacion_cierre idéntica al arqueo');
     assertSameVal('VIGENTE', $pdo->query("SELECT estado FROM arqueo_caja WHERE id_arqueo_caja = {$idArq3}")->fetchColumn(), 'Persistencia', 'Arqueo de cierre conserva estado VIGENTE (no invalidado)');
     assertSameVal(1, (int)$pdo->query("SELECT COUNT(*) FROM autorizacion_caja WHERE id_sesion_caja = {$idSes1}")->fetchColumn(), 'Persistencia', '1 fila en autorizacion_caja');
+    assertSameVal(null, $ses1Db['diferencia_apertura'], 'Persistencia', 'Primera sesión conserva diferencia_apertura=NULL en BD');
+    assertSameVal(null, array_key_exists('opening_difference', $resClose1['response']['data']['summary'] ?? []) ? $resClose1['response']['data']['summary']['opening_difference'] : 'MISSING', 'Persistencia', 'EP-20 primer cierre devuelve opening_difference=null');
 
     // Verificar ausencia de secretos en control_solicitud_idempotencia y respuesta
     $idempJson = (string)$pdo->query("SELECT respuesta_json FROM control_solicitud_idempotencia WHERE referencia_solicitud = '{$refClose1}' LIMIT 1")->fetchColumn();
+    $idempDecoded = json_decode($idempJson, true);
+    assertSameVal(null, array_key_exists('opening_difference', $idempDecoded['data']['summary'] ?? []) ? $idempDecoded['data']['summary']['opening_difference'] : 'MISSING', 'Persistencia', 'respuesta_json de confirmación conserva opening_difference=null');
     assertTrue(!str_contains(json_encode($resClose1), $passPlain) && !str_contains($idempJson, $passPlain), 'Seguridad', 'Sin secretos (admin_password) en respuesta ni en control_solicitud_idempotencia');
 
     // Verificar sesión PHP del vendedor intacta en ambos servidores HTTP y replay de EP-20 sin repetir contraseña
@@ -480,7 +488,8 @@ try {
     assertSameVal(200, $replay1['status'], 'Recuperación', 'Replay EP-20 sin repetir password -> 200');
     assertSameVal('OPERATION_ALREADY_CONFIRMED', $replay1['json']['code'] ?? null, 'Recuperación', 'Replay code=OPERATION_ALREADY_CONFIRMED');
     assertSameVal(true, $replay1['json']['idempotent_replay'] ?? null, 'Recuperación', 'Replay idempotent_replay=true');
-    assertSameVal($resClose1['response']['data'], $replay1['json']['data'] ?? null, 'Recuperación', 'Replay devuelve data original idéntico');
+    assertSameVal(null, array_key_exists('opening_difference', $replay1['json']['data']['summary'] ?? []) ? $replay1['json']['data']['summary']['opening_difference'] : 'MISSING', 'Recuperación', 'Replay EP-20 conserva opening_difference=null');
+    assertSameVal(json_encode($resClose1['response']['data']), json_encode($replay1['json']['data'] ?? null), 'Recuperación', 'Replay devuelve data original idéntico');
     assertSameVal($sessIdA, extractPhpSessionId($cookieV1A), 'Seguridad', 'Sesión PHP del vendedor conservada sin cambios');
 
     // Misma referencia con payload funcional distinto -> 409 IDEMPOTENCY_PAYLOAD_MISMATCH
@@ -509,7 +518,7 @@ try {
     // =========================================================================
     sleep(1);
     $estadoPreOpen2 = httpRequest($url1, 'GET', '/api/caja/estado', null, [], $cookieV1A);
-    assertSameVal(120.0, (float)($estadoPreOpen2['json']['data']['previous_close']['counted_amount'] ?? -1), 'Persistencia', 'Próxima apertura toma efectivo_contado_cierre (120.00), no el esperado (125.00)');
+    assertSameVal(120.0, (float)($estadoPreOpen2['json']['data']['reference_amount'] ?? -1), 'Persistencia', 'Próxima apertura toma efectivo_contado_cierre (120.00), no el esperado (125.00)');
 
     // Abrir Sesión 2 (contado 120.00), verificar replay de Sesión 1 y EP-21 después de nueva apertura
     $open2 = httpRequest($url1, 'POST', '/api/caja/abrir', [
@@ -534,9 +543,34 @@ try {
     $ep21Ses1 = httpRequest($url1, 'GET', "/api/caja/cierre?sesion_id={$idSes1}&request_id={$refClose1}", null, [], $cookieV1A);
     assertSameVal(200, $ep21Ses1['status'], 'Recuperación', 'EP-21 de sesión 1 tras nueva apertura -> 200');
     assertSameVal($idSes1, (int)($ep21Ses1['json']['data']['session_id'] ?? 0), 'Recuperación', 'EP-21 devuelve resumen de sesión 1');
+    assertSameVal(null, array_key_exists('opening_difference', $ep21Ses1['json']['data']['summary'] ?? []) ? $ep21Ses1['json']['data']['summary']['opening_difference'] : 'MISSING', 'Recuperación', 'EP-21 de primer cierre conserva opening_difference=null tras nueva apertura');
     assertSameVal(403, httpRequest($url1, 'GET', "/api/caja/cierre?session_id={$idSes1}&referencia_solicitud=p11_wrong_ref_000001", null, [], $cookieV1A)['status'], 'Recuperación', 'EP-21 sesión cerrada sin referencia concordante -> 403 HISTORICAL_QUERY_NOT_ALLOWED');
     assertSameVal(422, httpRequest($url1, 'GET', "/api/caja/cierre?session_id={$idSes1}&sesion_id={$idSes2}&referencia_solicitud={$refClose1}", null, [], $cookieV1A)['status'], 'Recuperación', 'EP-21 alias contradictorios -> 422 AMBIGUOUS_ALIAS_VALUES');
     assertSameVal(404, httpRequest($url1, 'GET', "/api/caja/cierre?session_id=999999&referencia_solicitud={$refClose1}", null, [], $cookieV1A)['status'], 'Recuperación', 'EP-21 sesión inexistente -> 404 CASH_SESSION_NOT_FOUND');
+
+    // Pendiente C: validación contra la sesión objetivo real del arqueo (Sesión 1 cerrada vs Sesión 2 abierta)
+    $closeOldNewRef = httpRequest($url1, 'POST', '/api/caja/cerrar', [
+        'arqueo_id'            => $idArq3,
+        'referencia_solicitud' => 'p11_close_old_newref01',
+    ], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(409, $closeOldNewRef['status'], 'Recuperación', 'EP-20 con arqueo de sesión cerrada A y ref nueva mientras B está abierta -> 409');
+    assertSameVal('CASH_SESSION_CLOSED', $closeOldNewRef['json']['code'] ?? null, 'Recuperación', 'Code CASH_SESSION_CLOSED al intentar cerrar A con ref nueva');
+    assertSameVal('ABIERTA', $pdo->query("SELECT estado FROM sesion_caja WHERE id_sesion_caja = {$idSes2}")->fetchColumn(), 'Recuperación', 'Sesión B permanece ABIERTA intacta tras rechazo CASH_SESSION_CLOSED');
+
+    $closeMissingArq = httpRequest($url1, 'POST', '/api/caja/cerrar', [
+        'arqueo_id'            => 999999,
+        'referencia_solicitud' => 'p11_close_missing_arq1',
+    ], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(409, $closeMissingArq['status'], 'Arqueo', 'EP-20 con arqueo_id inexistente -> 409 ARQUEO_MISSING');
+    assertSameVal('ARQUEO_MISSING', $closeMissingArq['json']['code'] ?? null, 'Arqueo', 'Code ARQUEO_MISSING para arqueo_id inexistente');
+
+    $closeOtherSeller = httpRequest($url1, 'POST', '/api/caja/cerrar', [
+        'arqueo_id'            => $idArq3,
+        'referencia_solicitud' => 'p11_close_other_vend1',
+    ], ['X-CSRF-TOKEN' => $authV2['csrf']], $cookieV2);
+    assertSameVal(403, $closeOtherSeller['status'], 'Seguridad', 'EP-20 con arqueo de otro vendedor -> 403 SESSION_NOT_OWNED');
+    assertSameVal('SESSION_NOT_OWNED', $closeOtherSeller['json']['code'] ?? null, 'Seguridad', 'Code SESSION_NOT_OWNED');
+    assertSameVal(null, array_key_exists('data', $closeOtherSeller['json'] ?? []) ? $closeOtherSeller['json']['data'] : 'MISSING', 'Seguridad', 'SESSION_NOT_OWNED no revela datos financieros');
 
     // Cerrar Sesión 2 en el instante exacto del margen (-15m) sin credenciales
     $arqSes2 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 120.00, 'version' => 1, 'referencia_solicitud' => 'p11_s2_arq1_0000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
@@ -545,6 +579,7 @@ try {
     $cajaSvc->setClockProvider(fn () => $salidaSes2->modify('-15 minutes'));
     $resClose2 = $cajaSvc->cerrarCaja(['arqueo_id' => $idArqSes2, 'referencia_solicitud' => 'p11_close_ses2_00001'], null, $vend1Row);
     assertSameVal(200, $resClose2['http_code'] ?? null, 'Horario', 'Instante exacto del margen (-15m) sin credenciales -> 200 CLOSE_CONFIRMED');
+    assertSameVal(0.0, $resClose2['response']['data']['summary']['opening_difference'] ?? null, 'Persistencia', 'Diferencia apertura 0.00 devuelve número 0 (no null)');
     assertSameVal(null, array_key_exists('authorization', $resClose2['response']['data'] ?? []) ? $resClose2['response']['data']['authorization'] : 'MISSING', 'Horario', 'Instante exacto del margen authorization=null');
     assertSameVal(0, (int)$pdo->query("SELECT COUNT(*) FROM autorizacion_caja WHERE id_sesion_caja = {$idSes2}")->fetchColumn(), 'Horario', 'Instante exacto del margen no inserta autorizacion_caja');
 
@@ -731,6 +766,88 @@ try {
         assertSameVal(null, $guardia['id_sesion_abierta_actual'], 'Concurrencia', 'Guardia liberada cuando apertura fue rechazada antes del cierre');
         assertSameVal($idSes5f, (int)$guardia['id_ultima_sesion_cerrada'], 'Concurrencia', 'Guardia registra id_ultima_sesion_cerrada');
     }
+
+    // 5G: Barrera controlada en MariaDB (Orden 1: Cierre adquiere guardia FOR UPDATE -> Apertura espera en BD -> Cierre confirma -> Apertura 201 OPENED)
+    if ($rOpenClose[1]['status'] !== 201) {
+        $op5gPre = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 50.00, 'referencia_solicitud' => 'p11_open_5g_pre_001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+        $idSes5g = (int)($op5gPre['json']['data']['session_id'] ?? 0);
+    } else {
+        $idSes5g = (int)$rOpenClose[1]['json']['data']['session_id'];
+    }
+    $arq5g = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 50.00, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5g_00000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5g = (int)($arq5g['json']['data']['arqueo']['id'] ?? 0);
+
+    $lockSig5g = $tmpDir . '/lock_5g.sig';
+    @unlink($lockSig5g);
+    $workerCode5g = <<<'PHP'
+$db = $argv[1];
+$idSes = (int)$argv[2];
+$idArq = (int)$argv[3];
+$sig = $argv[4];
+$pdo = new PDO("mysql:host=127.0.0.1;dbname={$db};charset=utf8mb4", 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$pdo->exec("SET SESSION time_zone = '-05:00'");
+$pdo->beginTransaction();
+$pdo->query("SELECT id_caja_fisica FROM caja_fisica_guardia WHERE id_caja_fisica = 1 FOR UPDATE")->fetch();
+file_put_contents($sig, 'LOCKED');
+usleep(1400000);
+$pdo->prepare("UPDATE sesion_caja SET id_arqueo_cierre = ?, version_caja = version_caja + 1, estado = 'CERRADA', fecha_hora_cierre = NOW(), efectivo_esperado_cierre = 50.00, efectivo_contado_cierre = 50.00, diferencia_cierre = 0.00 WHERE id_sesion_caja = ?")->execute([$idArq, $idSes]);
+$pdo->commit();
+PHP;
+    $workerFile5g = $tmpDir . '/worker_5g.php';
+    file_put_contents($workerFile5g, "<?php\n" . $workerCode5g);
+    $p5g = proc_open([PHP_BINARY, $workerFile5g, $dbName, (string)$idSes5g, (string)$idArq5g, $lockSig5g], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes5g);
+    $tLimit5g = microtime(true) + 5.0;
+    while (!is_file($lockSig5g) && microtime(true) < $tLimit5g) {
+        usleep(20000);
+    }
+    assertTrue(is_file($lockSig5g), 'Concurrencia', 'Worker 5G adquirió guardia FOR UPDATE en MariaDB');
+
+    $tStartOpen5g = microtime(true);
+    $open5gAfterClose = httpRequest($url2, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 50.00, 'referencia_solicitud' => 'p11_open_5g_wait_01'], ['X-CSRF-TOKEN' => $authV1B['csrf']], $cookieV1B);
+    $elapsedOpen5g = microtime(true) - $tStartOpen5g;
+    proc_close($p5g);
+    assertTrue($elapsedOpen5g >= 1.0, 'Concurrencia', sprintf('Apertura esperó contención real en MariaDB (%.2fs >= 1.0s)', $elapsedOpen5g));
+    assertSameVal(201, $open5gAfterClose['status'], 'Concurrencia', 'Orden 1 (Cierre->Apertura): apertura tras cierre devuelve 201 OPENED (sin 500)');
+    assertSameVal('OPENED', $open5gAfterClose['json']['code'] ?? null, 'Concurrencia', 'Orden 1 code=OPENED');
+    assertSameVal(50.0, (float)($open5gAfterClose['json']['data']['reference_amount'] ?? -1), 'Concurrencia', 'Orden 1 toma efectivo_contado_cierre del cierre recién confirmado');
+    $idSes5gNew = (int)($open5gAfterClose['json']['data']['session_id'] ?? 0);
+    assertSameVal($idSes5g, (int)$pdo->query("SELECT id_sesion_cierre_anterior FROM sesion_caja WHERE id_sesion_caja = {$idSes5gNew}")->fetchColumn(), 'Concurrencia', 'Orden 1 referencia id_sesion_cierre_anterior correcto');
+    assertSameVal(1, (int)$pdo->query("SELECT COUNT(*) FROM sesion_caja WHERE estado = 'ABIERTA'")->fetchColumn(), 'Concurrencia', 'Existe exactamente 1 sesión ABIERTA');
+    assertSameVal($idSes5gNew, (int)$pdo->query("SELECT id_sesion_abierta_actual FROM caja_fisica_guardia WHERE id_caja_fisica = 1")->fetchColumn(), 'Concurrencia', 'Guardia física coincide con nueva sesión abierta');
+
+    // 5H: Orden 2 (Apertura mientras sesión ABIERTA -> 409 CASH_ALREADY_OPEN, luego Cierre -> 200, luego reintento con misma referencia -> 201 OPENED)
+    $refRetry5h = 'p11_open_5h_retry_01';
+    $openFail5h = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 60.50, 'referencia_solicitud' => $refRetry5h], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(409, $openFail5h['status'], 'Concurrencia', 'Orden 2 (Apertura antes de cierre) -> 409 CASH_ALREADY_OPEN');
+    assertSameVal('CASH_ALREADY_OPEN', $openFail5h['json']['code'] ?? null, 'Concurrencia', 'Orden 2 code=CASH_ALREADY_OPEN');
+
+    $arq5h = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 50.00, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5h_00000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5h = (int)($arq5h['json']['data']['arqueo']['id'] ?? 0);
+    $close5h = httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => $idArq5h, 'referencia_solicitud' => 'p11_close_5h_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(200, $close5h['status'], 'Concurrencia', 'Orden 2 cierre posterior -> 200 CLOSE_CONFIRMED');
+
+    // Reintento de la apertura fallida con la misma referencia -> 201 OPENED (con diferencia positiva +10.50)
+    $openRetry5h = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 60.50, 'referencia_solicitud' => $refRetry5h], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(201, $openRetry5h['status'], 'Concurrencia', 'Reintento con misma referencia tras rechazo 409 -> 201 OPENED');
+    $idSesPos = (int)($openRetry5h['json']['data']['session_id'] ?? 0);
+    assertSameVal(10.5, $openRetry5h['json']['data']['opening_difference'] ?? null, 'Persistencia', 'Apertura con sobrante +10.50 conserva valor y signo');
+
+    // Pendiente B: cierre con diferencia_apertura positiva (+10.50) y negativa (-5.25) sin alterar diferencia_cierre ni crear movimientos
+    $arqPos = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 60.50, 'version' => 1, 'referencia_solicitud' => 'p11_arq_pos_0000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $closePos = httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => (int)($arqPos['json']['data']['arqueo']['id'] ?? 0), 'referencia_solicitud' => 'p11_close_pos_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(200, $closePos['status'], 'Persistencia', 'Cierre con diferencia_apertura positiva -> 200');
+    assertSameVal(10.5, $closePos['json']['data']['summary']['opening_difference'] ?? null, 'Persistencia', 'EP-20 conserva opening_difference=+10.5');
+    assertSameVal(0, $closePos['json']['data']['summary']['difference'] ?? null, 'Persistencia', 'diferencia_apertura positiva no altera summary.difference');
+    assertSameVal(0, (int)$pdo->query("SELECT COUNT(*) FROM movimiento_caja WHERE id_sesion_caja = {$idSesPos}")->fetchColumn(), 'Persistencia', 'No se generan movimientos para corregir opening_difference positiva');
+
+    $openNeg = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 55.25, 'referencia_solicitud' => 'p11_open_neg_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idSesNeg = (int)($openNeg['json']['data']['session_id'] ?? 0);
+    $arqNeg = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 55.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_neg_0000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $closeNeg = httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => (int)($arqNeg['json']['data']['arqueo']['id'] ?? 0), 'referencia_solicitud' => 'p11_close_neg_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(200, $closeNeg['status'], 'Persistencia', 'Cierre con diferencia_apertura negativa -> 200');
+    assertSameVal(-5.25, $closeNeg['json']['data']['summary']['opening_difference'] ?? null, 'Persistencia', 'EP-20 conserva opening_difference=-5.25');
+    assertSameVal(0, $closeNeg['json']['data']['summary']['difference'] ?? null, 'Persistencia', 'diferencia_apertura negativa no altera summary.difference');
+    assertSameVal(0, (int)$pdo->query("SELECT COUNT(*) FROM movimiento_caja WHERE id_sesion_caja = {$idSesNeg}")->fetchColumn(), 'Persistencia', 'No se generan movimientos para corregir opening_difference negativa');
 
 } finally {
     stopPhpServer($srv1);

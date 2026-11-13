@@ -69,6 +69,40 @@ try {
     $pdo->prepare('UPDATE sesion_caja SET id_ultimo_arqueo = :arq WHERE id_sesion_caja = :id')
         ->execute([':arq' => $idArqueo, ':id' => $idSesion]);
 
+    $stmtAnt = $pdo->prepare(
+        "SELECT (NOW() < DATE_SUB(fecha_hora_salida_referencia, INTERVAL 15 MINUTE)) AS es_anticipado,
+                TIME(fecha_hora_salida_referencia) AS hora_salida_referencia,
+                fecha_hora_salida_referencia,
+                GREATEST(16, CEIL(TIMESTAMPDIFF(SECOND, NOW(), fecha_hora_salida_referencia) / 60)) AS mins
+           FROM sesion_caja
+          WHERE id_sesion_caja = :id"
+    );
+    $stmtAnt->execute([':id' => $idSesion]);
+    $ant = $stmtAnt->fetch();
+    if ($ant && (int)$ant['es_anticipado'] === 1) {
+        $idAdmin = (int)$pdo->query("SELECT id_usuario FROM usuario WHERE id_rol = 1 AND estado = 1 ORDER BY id_usuario ASC LIMIT 1")->fetchColumn();
+        if ($idAdmin > 0) {
+            $pdo->prepare(
+                "INSERT INTO autorizacion_caja (
+                    id_sesion_caja, tipo_operacion, id_usuario_vendedor, id_usuario_admin,
+                    motivo, hora_salida_referencia, fecha_hora_salida_referencia,
+                    hora_cierre_real, minutos_anticipacion
+                 ) VALUES (
+                    :s, 'CIERRE_ANTICIPADO', :v, :a,
+                    'Cierre worker concurrencia paso 9', :hs, :fhs,
+                    NOW(), :m
+                 )"
+            )->execute([
+                ':s'   => $idSesion,
+                ':v'   => (int)$row['id_usuario_vendedor'],
+                ':a'   => $idAdmin,
+                ':hs'  => $ant['hora_salida_referencia'],
+                ':fhs' => $ant['fecha_hora_salida_referencia'],
+                ':m'   => (int)$ant['mins'],
+            ]);
+        }
+    }
+
     $stmtClose = $pdo->prepare(
         "UPDATE sesion_caja
             SET id_arqueo_cierre = :arq,

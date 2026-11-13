@@ -179,6 +179,62 @@ class CajaModel extends Model
     }
 
     /**
+     * Obtiene una sesión de caja específica por ID con todas las columnas requeridas para cierre.
+     */
+    public function obtenerSesionPorIdParaCierre(int $idSesion, bool $forUpdate = true): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    s.id_sesion_caja,
+                    s.id_caja_fisica,
+                    s.id_usuario_vendedor,
+                    s.id_turno,
+                    s.nombre_turno_referencia,
+                    TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
+                    TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
+                    s.fecha_hora_salida_referencia,
+                    s.es_suplencia,
+                    s.abierta_fuera_horario,
+                    s.fecha_hora_apertura,
+                    s.tiene_cierre_anterior,
+                    s.id_sesion_cierre_anterior,
+                    s.monto_referencia_cierre_anterior,
+                    s.fecha_hora_cierre_anterior_ref,
+                    s.nombre_turno_cierre_anterior_ref,
+                    s.saldo_inicial,
+                    s.diferencia_apertura,
+                    s.total_ventas_efectivo,
+                    s.total_ventas_tarjeta,
+                    s.total_ventas_yape_plin,
+                    s.total_ingresos,
+                    s.total_egresos,
+                    s.total_retiros_omitidos_declarados,
+                    s.efectivo_esperado_actual,
+                    s.id_ultimo_arqueo,
+                    s.version_caja,
+                    s.estado,
+                    s.id_solicitud_apertura
+                FROM sesion_caja s
+                WHERE s.id_sesion_caja = :id_sesion
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            return null;
+        }
+
+        $stmtSeller = $this->conect->prepare('SELECT nombre FROM usuario WHERE id_usuario = :id_usuario LIMIT 1');
+        $stmtSeller->execute([':id_usuario' => (int)$row['id_usuario_vendedor']]);
+        $sellerName = $stmtSeller->fetchColumn();
+        $row['seller_name'] = $sellerName !== false ? (string)$sellerName : '';
+
+        return $row;
+    }
+
+    /**
      * Obtiene el último cierre confirmado de la caja física única.
      */
     public function obtenerUltimoCierreConfirmado(bool $forUpdate = false): ?array
