@@ -109,17 +109,7 @@ $auth_help_text = 'Obligatorio. La autorización vale una sola vez, solo para es
 <?php require 'Views/Caja/_autorizacion.php'; ?>
 <script>
 window.CAJA_ARQUEO_CONFIG = <?= json_encode([
-    'mockEnabled' => (bool)$data['mock_enabled'],
-    'mockScenario' => (string)$data['mock_scenario'],
-    'mockLatencyMs' => (int)$data['mock_latency_ms']
-], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
-window.CAJA_WORKFLOWS_CONFIG = <?= json_encode([
-    'mockEnabled' => (($workflowMockEnabled = getenv('CAJA_WORKFLOWS_MOCK_ENABLED')) === false)
-        ? true : filter_var($workflowMockEnabled, FILTER_VALIDATE_BOOLEAN),
-    'scenario' => (($workflowScenario = getenv('CAJA_WORKFLOWS_MOCK_SCENARIO')) === false || $workflowScenario === '')
-        ? ((bool)($data['mock_enabled'] ?? false) ? (string)($data['mock_scenario'] ?? 'success') : 'success')
-        : $workflowScenario,
-    'sellerId' => $_SESSION['idUser'] ?? $_SESSION['id_usuario'] ?? $_SESSION['id'] ?? 'vendedor-demo',
+    'sellerId' => (int)($_SESSION['idUser'] ?? 0),
     'sellerName' => $_SESSION['nombre'] ?? 'Vendedor',
     'sellerUsername' => $_SESSION['username'] ?? ''
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;

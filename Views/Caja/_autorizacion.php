@@ -10,11 +10,11 @@ $auth_help_text = $auth_help_text ?? 'Obligatorio. La autorización vale una sol
         <div class="cash-auth-warning" id="cash_auth_warning"><?= e($auth_warning) ?></div>
         <form id="cash_auth_form" novalidate>
             <div class="cash-auth-field">
-                <label for="cash_admin_username">Administrador (usuario)</label>
-                <input type="text" id="cash_admin_username" name="admin_username"
-                    autocomplete="off" placeholder="Usuario del administrador"
-                    aria-describedby="cash_admin_username_error" required>
-                <span class="cash-auth-field-error" id="cash_admin_username_error" aria-live="polite"></span>
+                <label for="cash_admin_email">Correo del administrador</label>
+                <input type="email" id="cash_admin_email" name="admin_email"
+                    autocomplete="off" placeholder="admin@ejemplo.com"
+                    aria-describedby="cash_admin_email_error" required>
+                <span class="cash-auth-field-error" id="cash_admin_email_error" aria-live="polite"></span>
             </div>
             <div class="cash-auth-field">
                 <label for="cash_admin_password">Contraseña</label>

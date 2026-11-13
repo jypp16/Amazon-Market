@@ -1,111 +1,123 @@
 (function (global) {
     'use strict';
 
-    function useDemo() {
-        return Boolean(global.CajaDemoService
-            && (!global.CAJA_WORKFLOWS_CONFIG || global.CAJA_WORKFLOWS_CONFIG.mockEnabled !== false));
-    }
-
-    function normalizeResponse(response) {
-        var body = response && response.data ? response.data : {};
-        var data = body.data || {};
-        var code = body.code || data.code || (body.status === true ? 'OPENED' : 'INTERNAL_ERROR');
-
-        if (code === 'OPENED') {
-            return { type: 'opened', data: data };
-        }
-        if (code === 'AUTHORIZATION_REQUIRED') {
-            return {
-                type: 'authorization_required',
-                schedule: data.schedule || {
-                    start: data.shift_start,
-                    end: data.shift_end
-                }
-            };
-        }
-        if (code === 'CASH_ALREADY_OPEN') {
-            return { type: 'already_open' };
-        }
-        if (code === 'INVALID_ADMIN_CREDENTIALS' || code === 'ADMIN_ROLE_REQUIRED') {
-            return { type: 'authorization_denied' };
-        }
-        if (code === 'MOTIVE_REQUIRED') {
-            return { type: 'motive_required' };
-        }
-
-        return { type: 'error' };
-    }
-
     function responseData(response) {
         var body = response && response.data ? response.data : {};
-        return body.data || body;
+        return body.data !== undefined ? body.data : body;
     }
 
     function normalizeShift(response) {
-        var data = responseData(response);
-        var shift = data.shift || data.turn || null;
+        if (!response || !response.ok || !response.data || !response.data.status) {
+            var msg = (response && response.data && response.data.message)
+                ? response.data.message : 'No se pudo obtener la información de turnos.';
+            throw new Error(msg);
+        }
+        var data = responseData(response) || {};
+        var available = Array.isArray(data.available_shifts) ? data.available_shifts : [];
+        var scheduled = Array.isArray(data.scheduled_shifts) ? data.scheduled_shifts : [];
         return {
-            status: data.status || (data.within_hours ? 'within_hours' : 'outside_hours'),
-            has_shift_today: data.has_shift_today !== undefined
-                ? Boolean(data.has_shift_today) : Boolean(shift),
-            shift: shift
+            status: data.status || (data.has_shift_today ? 'within_hours' : 'no_shift'),
+            has_shift_today: Boolean(data.has_shift_today),
+            shift: data.shift || null,
+            scheduled_shifts: scheduled,
+            available_shifts: available,
+            recommended_shift_id: data.recommended_shift_id !== null && data.recommended_shift_id !== undefined
+                ? Number(data.recommended_shift_id)
+                : null,
+            server_date: data.server_date || '',
+            server_time: data.server_time || ''
         };
     }
 
     function normalizeOpeningState(response) {
-        var data = responseData(response);
+        if (!response || !response.ok || !response.data || !response.data.status) {
+            var msg = (response && response.data && response.data.message)
+                ? response.data.message : 'No se pudo obtener el estado actual de caja.';
+            throw new Error(msg);
+        }
+        var data = responseData(response) || {};
         return {
-            is_open: Boolean(data.is_open || data.open),
-            reference_amount: Number(data.reference_amount),
-            reference_date: data.reference_date || data.previous_close_date || '',
-            reference_turn: data.reference_turn || data.previous_close_turn || '',
-            counted_amount: Number(data.counted_amount !== undefined
-                ? data.counted_amount : data.opening_balance)
+            is_open: Boolean(data.is_open),
+            is_owner: Boolean(data.is_owner),
+            session_id: data.session_id !== null && data.session_id !== undefined ? Number(data.session_id) : null,
+            has_previous_close: Boolean(data.has_previous_close),
+            reference_amount: data.reference_amount !== null && data.reference_amount !== undefined
+                ? Number(data.reference_amount)
+                : null,
+            reference_date: data.reference_date || null,
+            reference_turn: data.reference_turn || null,
+            counted_amount: data.counted_amount !== null && data.counted_amount !== undefined
+                ? Number(data.counted_amount)
+                : null,
+            occupied_by: data.occupied_by || null
         };
     }
 
-    function send(payload) {
-        // TODO: Confirmar endpoint, contrato y autorización de administrador sin cambiar la sesión del vendedor.
-        return Api.request('caja/abrir', {
-            method: 'POST',
-            headers: { 'X-Request-Reference': payload.request_id },
-            body: payload
-        }).then(function (response) {
-            if (!response) throw new Error('No se recibió una respuesta del servicio de caja.');
-            return normalizeResponse(response);
-        });
-    }
+    function normalizeOpeningResponse(response) {
+        var body = response && response.data ? response.data : {};
+        var data = body.data || {};
+        var code = body.code || (body.status === true ? 'OPENED' : 'INTERNAL_ERROR');
 
-    function createRequestId() {
-        if (!global.crypto || typeof global.crypto.randomUUID !== 'function') {
-            throw new Error('Este navegador no permite generar un identificador seguro de solicitud.');
+        if (response.ok && body.status === true && (code === 'OPENED' || code === 'OPERATION_ALREADY_CONFIRMED')) {
+            Api.confirmarSolicitud('caja-abrir');
+            return {
+                type: 'opened',
+                code: code,
+                idempotent_replay: Boolean(body.idempotent_replay || data.idempotent_replay),
+                data: data,
+                message: body.message || 'Apertura confirmada.'
+            };
         }
-        return global.crypto.randomUUID();
+        if (code === 'CASH_ALREADY_OPEN') {
+            return { type: 'already_open', code: code, message: body.message || 'La caja física ya tiene una sesión abierta.' };
+        }
+        if (code === 'REQUEST_IN_PROGRESS') {
+            return { type: 'in_progress', code: code, message: body.message || 'La apertura se encuentra en proceso.' };
+        }
+        return {
+            type: 'error',
+            status: response.status,
+            code: code,
+            message: body.message || 'No se pudo completar la apertura.',
+            errors: body.errors || null
+        };
     }
 
     global.CajaService = {
-        createRequestId: createRequestId,
-        getTurnoDeHoy: function (vendedorId) {
-            if (useDemo()) return global.CajaDemoService.getTurnoDeHoy(vendedorId);
-            // TODO: Confirmar endpoint y contrato del turno del vendedor.
-            return Api.request('caja/turno-hoy?vendedor_id=' + encodeURIComponent(vendedorId), { method: 'GET' })
-                .then(normalizeShift);
+        getTurnoDeHoy: function () {
+            return Api.request('caja/turno-hoy', { method: 'GET' }).then(function (res) {
+                if (!res) throw new Error('Consulta de turno cancelada.');
+                return normalizeShift(res);
+            });
         },
-        getEstadoCaja: function (vendedorId) {
-            if (useDemo()) return global.CajaDemoService.getEstadoCaja(vendedorId);
-            // TODO: Confirmar endpoint y contrato de la sesión activa del vendedor.
-            return Api.request('caja/estado?vendedor_id=' + encodeURIComponent(vendedorId), { method: 'GET' })
-                .then(normalizeOpeningState);
+        getEstadoCaja: function () {
+            return Api.request('caja/estado', { method: 'GET' }).then(function (res) {
+                if (!res) throw new Error('Consulta de estado de caja cancelada.');
+                return normalizeOpeningState(res);
+            });
         },
-        requestOpening: function (payload) {
-            if (useDemo()) return global.CajaDemoService.guardarApertura(payload);
-            return send(payload);
-        },
-        authorizeAndOpen: function (payload) {
-            if (useDemo()) return global.CajaDemoService.solicitarAutorizacion(
-                Object.assign({ operation: 'open' }, payload)
-            );
-            return send(payload);
+        requestOpening: async function (payload) {
+            var base = {
+                shift_id: Number(payload.shift_id),
+                cash_counted: Number(payload.cash_counted)
+            };
+            var ref = await Api.referenciaSolicitud('caja-abrir', base);
+            var response = await Api.request('caja/abrir', {
+                method: 'POST',
+                headers: { 'X-Request-Reference': ref },
+                body: {
+                    shift_id: base.shift_id,
+                    cash_counted: base.cash_counted,
+                    referencia_solicitud: ref
+                }
+            });
+            if (!response) {
+                return {
+                    type: 'uncertain',
+                    message: 'La petición fue interrumpida. Puedes reintentar para recuperar el resultado.'
+                };
+            }
+            return normalizeOpeningResponse(response);
         }
     };
 }(window));

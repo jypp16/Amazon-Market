@@ -1,5 +1,5 @@
 <?php require_once "Views/Header.php"; ?>
-<?php $puedeProgramarHorarios = can('usuarios.editar') && can('usuarios.crear'); ?>
+<?php $puedeProgramarHorarios = ((int)($_SESSION['rol'] ?? 0) === 1) && can('turnos.programar'); ?>
 <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/usuarios-horarios.css?v=<?= filemtime(__DIR__ . '/../../Assets/css/usuarios-horarios.css') ?>">
 
 <div class="table-container-header">
@@ -170,6 +170,6 @@ const canProgramSchedules = <?= $puedeProgramarHorarios ? 'true' : 'false' ?>;
 </script>
 
 <?php if ($puedeProgramarHorarios): ?>
-<script src="<?= BASE_URL ?>/Assets/js/usuarios-horarios-mock.js?v=<?= filemtime(__DIR__ . '/../../Assets/js/usuarios-horarios-mock.js') ?>"></script>
+<script src="<?= BASE_URL ?>/Assets/js/usuariosHorariosService.js?v=<?= filemtime(__DIR__ . '/../../Assets/js/usuariosHorariosService.js') ?>"></script>
 <?php endif; ?>
 <?php require_once "Views/Footer.php"; ?>

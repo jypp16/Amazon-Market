@@ -194,28 +194,13 @@ $tiposEgreso = [
                     </div>
                     <p class="cash-correction-original-detail" id="cash_correction_original_detail" hidden></p>
 
-                    <div class="cash-movement-fields-grid">
-                        <div class="cash-movement-field">
-                            <label for="cash_correction_amount">Importe correcto total (S/)</label>
-                            <input type="text" id="cash_correction_amount" name="corrected_amount"
-                                inputmode="decimal" autocomplete="off" placeholder="0,00"
-                                aria-describedby="cash_correction_amount_help cash_correction_amount_error">
-                            <small id="cash_correction_amount_help">Indica el importe que debió tener el registro original.</small>
-                            <span class="cash-movement-error" id="cash_correction_amount_error" aria-live="polite"></span>
-                        </div>
-                        <div class="cash-movement-field">
-                            <label for="cash_correction_admin">Usuario administrador que autoriza</label>
-                            <input type="text" id="cash_correction_admin" name="admin_username"
-                                autocomplete="username" aria-describedby="cash_correction_admin_error">
-                            <span class="cash-movement-error" id="cash_correction_admin_error" aria-live="polite"></span>
-                        </div>
-                    </div>
-
                     <div class="cash-movement-field">
-                        <label for="cash_correction_password">Contraseña del administrador</label>
-                        <input type="password" id="cash_correction_password" name="admin_password"
-                            autocomplete="current-password" aria-describedby="cash_correction_password_error">
-                        <span class="cash-movement-error" id="cash_correction_password_error" aria-live="polite"></span>
+                        <label for="cash_correction_amount">Importe correcto total (S/)</label>
+                        <input type="text" id="cash_correction_amount" name="corrected_amount"
+                            inputmode="decimal" autocomplete="off" placeholder="0,00"
+                            aria-describedby="cash_correction_amount_help cash_correction_amount_error">
+                        <small id="cash_correction_amount_help">Indica el importe que debió tener el registro original (desde 0,00).</small>
+                        <span class="cash-movement-error" id="cash_correction_amount_error" aria-live="polite"></span>
                     </div>
 
                     <div class="cash-movement-field">
@@ -290,12 +275,8 @@ $tiposEgreso = [
 
 <script>
 window.CAJA_MOVEMENTS_CONFIG = <?= json_encode([
-    'mockEnabled' => (bool)$data['mock_enabled'],
-    'mockScenario' => (string)$data['mock_scenario'],
-    'mockLatencyMs' => (int)$data['mock_latency_ms'],
     'expenseTypes' => $tiposEgreso,
-    'sellerUsername' => $_SESSION['username'] ?? $_SESSION['user'] ?? '',
-    'sessionId' => $data['session_id'] ?? null
+    'sellerUsername' => $_SESSION['username'] ?? $_SESSION['user'] ?? ''
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
 </script>
 

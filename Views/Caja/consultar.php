@@ -122,9 +122,6 @@ require_once 'Views/Header.php';
 <script>
 window.CAJA_CONSULTA_CONFIG = <?= json_encode([
     'isAdministrator' => (bool)$data['is_administrator'],
-    'mockEnabled' => (bool)$data['mock_enabled'],
-    'mockScenario' => (string)$data['mock_scenario'],
-    'mockLatencyMs' => (int)$data['mock_latency_ms'],
     'pageSize' => (int)$data['page_size'],
     'defaultDate' => (string)$data['default_date']
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;

@@ -1,107 +1,120 @@
-<?php require_once 'Views/Header.php'; ?>
+<?php require 'Views/Header.php'; ?>
 
-<section class="close-report">
-    <header class="close-report-heading">
+<?php
+$defaultFrom = htmlspecialchars((string)($data['default_from'] ?? date('Y-m-d', strtotime('-30 days'))), ENT_QUOTES, 'UTF-8');
+$defaultTo = htmlspecialchars((string)($data['default_to'] ?? date('Y-m-d')), ENT_QUOTES, 'UTF-8');
+?>
+
+<main class="close-page">
+    <section class="close-header">
         <div>
+            <span class="close-badge">Reportes administrativos</span>
             <h1>Cierres de caja</h1>
-            <p>Revisa los cierres, identifica diferencias y exporta el período. Solo lectura.</p>
+            <p class="close-subtitle">Consulta los cierres registrados, filtra por fecha, turno o vendedor y abre el detalle completo de cada cierre.</p>
         </div>
-        <div class="close-report-export">
-            <button type="button" class="close-button close-button-pdf" disabled>Exportar PDF</button>
-            <button type="button" class="close-button close-button-excel" disabled>Exportar Excel</button>
+        <div class="close-header-actions">
+            <a class="close-button close-button-secondary" href="<?= BASE_URL ?>/Reporte">Volver a reportes</a>
         </div>
-    </header>
+    </section>
 
-    <form class="close-filter-card" aria-label="Filtros de cierres de caja">
-        <div class="close-filter-field">
-            <label for="close_from">Desde (obligatorio)</label>
-            <input id="close_from" type="date" value="2026-10-01">
-        </div>
-        <div class="close-filter-field">
-            <label for="close_to">Hasta (obligatorio)</label>
-            <input id="close_to" type="date" value="2026-10-20">
-        </div>
-        <div class="close-filter-field">
-            <label for="close_shift">Turno</label>
-            <select id="close_shift">
-                <option>Todos</option>
-                <option>Mañana</option>
-                <option>Tarde</option>
-            </select>
-        </div>
-        <div class="close-filter-field">
-            <label for="close_seller">Vendedor</label>
-            <select id="close_seller">
-                <option>Todos</option>
-                <option>Luis</option>
-                <option>Marta</option>
-            </select>
-        </div>
-        <div class="close-filter-actions">
-            <button type="reset" class="close-button">Limpiar filtros</button>
-            <button type="button" class="close-button close-button-primary" disabled>Consultar</button>
-        </div>
-    </form>
+    <div id="closures_feedback" class="close-alert" style="display: none;"></div>
 
-    <section class="close-table-card" aria-label="Cierres de caja del período">
-        <div class="close-table-scroll">
+    <section class="close-panel">
+        <div class="close-section-head">
+            <div>
+                <h2>Filtros del reporte</h2>
+                <p>Los totales reflejan todo el conjunto filtrado, independientemente de la página visible.</p>
+            </div>
+        </div>
+        <form id="closures_filter_form" class="close-filter-grid" autocomplete="off">
+            <div class="close-field">
+                <label for="closures_from">Desde</label>
+                <input id="closures_from" type="date" name="desde" value="<?= $defaultFrom ?>">
+            </div>
+            <div class="close-field">
+                <label for="closures_to">Hasta</label>
+                <input id="closures_to" type="date" name="hasta" value="<?= $defaultTo ?>">
+            </div>
+            <div class="close-field">
+                <label for="closures_turn">Turno</label>
+                <select id="closures_turn" name="turno_id">
+                    <option value="">Todos los turnos</option>
+                </select>
+            </div>
+            <div class="close-field">
+                <label for="closures_seller">Vendedor</label>
+                <select id="closures_seller" name="vendedor_id">
+                    <option value="">Todos los vendedores</option>
+                </select>
+            </div>
+            <div class="close-filter-actions">
+                <button id="closures_apply_btn" type="submit" class="close-button close-button-primary">Consultar</button>
+                <button id="closures_reset_btn" type="button" class="close-button close-button-secondary">Limpiar</button>
+            </div>
+        </form>
+    </section>
+
+    <section class="close-panel">
+        <div class="close-summary-grid">
+            <article class="close-metric">
+                <span class="close-metric-label">Cierres encontrados</span>
+                <strong id="closures_total_closures" class="close-metric-value">0</strong>
+            </article>
+            <article class="close-metric">
+                <span class="close-metric-label">Total esperado</span>
+                <strong id="closures_total_expected" class="close-metric-value">S/ 0.00</strong>
+            </article>
+            <article class="close-metric">
+                <span class="close-metric-label">Total contado</span>
+                <strong id="closures_total_counted" class="close-metric-value">S/ 0.00</strong>
+            </article>
+            <article class="close-metric">
+                <span class="close-metric-label">Diferencia neta de cierre</span>
+                <strong id="closures_total_diff" class="close-metric-value">S/ 0.00</strong>
+            </article>
+        </div>
+
+        <div class="close-table-wrap">
             <table class="close-table">
                 <thead>
                     <tr>
-                        <th scope="col">Cierre</th>
-                        <th scope="col">Vendedor</th>
-                        <th scope="col">Turno</th>
-                        <th scope="col">Efectivo esperado</th>
-                        <th scope="col">Efectivo contado</th>
-                        <th scope="col">Diferencia de cierre</th>
-                        <th scope="col">Diferencia de apertura</th>
-                        <th scope="col">Detalle</th>
+                        <th>Fecha y hora de cierre</th>
+                        <th>Vendedor</th>
+                        <th>Turno</th>
+                        <th>Fondo inicial</th>
+                        <th>Dif. apertura</th>
+                        <th>Esperado</th>
+                        <th>Contado</th>
+                        <th>Dif. cierre</th>
+                        <th>Detalle</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <?php foreach ($data['cierres'] as $cierre): ?>
-                    <?php
-                    $diferenciaCierre = (float)$cierre['closing_difference'];
-                    $diferenciaApertura = (float)$cierre['opening_difference'];
-                    ?>
+                <tbody id="closures_tbody">
                     <tr>
-                        <td><?= e($cierre['closed_at']) ?></td>
-                        <td><strong><?= e($cierre['seller']) ?></strong></td>
-                        <td><?= e($cierre['shift']) ?></td>
-                        <td><?= e('S/ ' . number_format((float)$cierre['expected'], 2, ',', '')) ?></td>
-                        <td><?= e('S/ ' . number_format((float)$cierre['counted'], 2, ',', '')) ?></td>
-                        <td>
-                            <strong class="<?= $diferenciaCierre < 0 ? 'is-negative' : ($diferenciaCierre > 0 ? 'is-positive' : '') ?>">
-                                <?= e(($diferenciaCierre < 0 ? '−' : ($diferenciaCierre > 0 ? '+' : '')) . 'S/ ' . number_format(abs($diferenciaCierre), 2, ',', '')) ?>
-                            </strong>
-                            <small><?= $diferenciaCierre < 0 ? 'Faltante' : ($diferenciaCierre > 0 ? 'Sobrante' : 'Sin diferencia') ?></small>
-                            <?php if (!empty($cierre['has_omitted_withdrawal'])): ?>
-                            <span class="close-inline-badge">Retiro omitido vinculado</span>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <span class="<?= $diferenciaApertura < 0 ? 'is-negative' : ($diferenciaApertura > 0 ? 'is-positive' : '') ?>">
-                                <?= e(($diferenciaApertura < 0 ? '−' : ($diferenciaApertura > 0 ? '+' : '')) . 'S/ ' . number_format(abs($diferenciaApertura), 2, ',', '')) ?>
-                            </span>
-                        </td>
-                        <td>
-                            <a class="close-button close-detail-link"
-                                href="<?= BASE_URL ?>/Reporte/detalleCierreCaja/<?= (int)$cierre['id'] ?>">Ver detalle</a>
-                        </td>
+                        <td colspan="9" class="close-empty">Cargando cierres de caja...</td>
                     </tr>
-                    <?php endforeach; ?>
                 </tbody>
             </table>
         </div>
-        <footer class="close-table-footer">
-            <p>Mostrando <?= count($data['cierres']) ?> de <?= count($data['cierres']) ?> cierres · La exportación incluye todos los cierres del filtro</p>
-            <nav class="close-pagination" aria-label="Paginación de cierres">
-                <button type="button" class="close-button" disabled>Anterior</button>
-                <span aria-current="page">1</span>
-                <button type="button" class="close-button" disabled>Siguiente</button>
-            </nav>
-        </footer>
-    </section>
-</section>
 
-<?php require_once 'Views/Footer.php'; ?>
+        <div class="close-pagination">
+            <span id="closures_pagination_info">Mostrando 0 de 0</span>
+            <div class="close-pagination-actions">
+                <button id="closures_prev_btn" type="button" class="close-button close-button-secondary" disabled>Anterior</button>
+                <button id="closures_next_btn" type="button" class="close-button close-button-secondary" disabled>Siguiente</button>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+    window.CAJA_REPORTES_CONFIG = {
+        mode: 'list',
+        baseUrl: <?= json_encode(BASE_URL, JSON_UNESCAPED_SLASHES) ?>,
+        defaultFrom: <?= json_encode($defaultFrom, JSON_UNESCAPED_SLASHES) ?>,
+        defaultTo: <?= json_encode($defaultTo, JSON_UNESCAPED_SLASHES) ?>
+    };
+</script>
+<script src="<?= BASE_URL ?>/Assets/js/reporteCierres.js"></script>
+
+<?php require 'Views/Footer.php'; ?>
