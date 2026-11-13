@@ -2840,4 +2840,823 @@ class CajaService
             403
         );
     }
+
+    // =========================================================================
+    // PASO 12: CONSULTAS DE SESIONES DE CAJA Y REPORTE DE CIERRES (EP-22..EP-24B)
+    // =========================================================================
+
+    /**
+     * EP-22: Consulta de sesión activa del vendedor autenticado (HU 17).
+     */
+    public function consultarActivaVendedor(int $idVendedorAutenticado, array $queryParams): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, ['page', 'page_size']);
+        [$page, $pageSize, $offset] = $this->resolverPaginacion($queryParams, 20, 100);
+
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+        try {
+            $sesionActiva = $this->cajaModel->obtenerSesionAbiertaActual(false);
+            if ($sesionActiva === null) {
+                $pdo->commit();
+                return [
+                    'status'  => true,
+                    'code'    => 'OK',
+                    'message' => 'No existe una sesión de caja abierta actualmente.',
+                    'data'    => [
+                        'has_active_session' => false,
+                        'session'            => null,
+                        'summary'            => null,
+                        'arqueos'            => [],
+                        'movements'          => [],
+                        'pagination'         => $this->construirPaginacion(0, $page, $pageSize),
+                    ],
+                ];
+            }
+
+            if ((int)$sesionActiva['id_usuario_vendedor'] !== $idVendedorAutenticado) {
+                $pdo->commit();
+                throw new InventarioException(
+                    'La sesión de caja abierta pertenece a otro vendedor.',
+                    'CASH_SESSION_OTHER_SELLER',
+                    409,
+                    ['active_seller_name' => [(string)($sesionActiva['seller_name'] ?? '')]]
+                );
+            }
+
+            $idSesion = (int)$sesionActiva['id_sesion_caja'];
+            $detalle = $this->cajaModel->obtenerSesionDetallePorId($idSesion);
+            $arqueosRaw = $this->cajaModel->listarArqueosPorSesionAsc($idSesion);
+            $totalMovs = $this->cajaModel->contarMovimientosSesion($idSesion);
+            $movsRaw = $totalMovs > 0
+                ? $this->cajaModel->listarMovimientosSesionPaginados($idSesion, $pageSize, $offset)
+                : [];
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Consulta de sesión activa obtenida correctamente.',
+            'data'    => [
+                'has_active_session' => true,
+                'session'            => $this->proyectarResumenCabeceraSesion($detalle),
+                'summary'            => $this->proyectarSummaryMonetarioSesion($detalle, false),
+                'arqueos'            => array_map([$this, 'formatearArqueoResource'], $arqueosRaw),
+                'movements'          => array_map([$this, 'proyectarMovimientoConsulta'], $movsRaw),
+                'pagination'         => $this->construirPaginacion($totalMovs, $page, $pageSize),
+            ],
+        ];
+    }
+
+    /**
+     * EP-23A: Lista vendedores activos para selector de consulta administrativa (HU 17).
+     */
+    public function listarVendedoresConsulta(array $queryParams): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, []);
+        $vendedores = $this->cajaModel->listarVendedoresParaConsulta();
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Vendedores obtenidos correctamente.',
+            'data'    => [
+                'sellers' => $vendedores,
+            ],
+        ];
+    }
+
+    /**
+     * EP-23B: Lista sesiones de caja por fecha y vendedor opcional (HU 17).
+     */
+    public function listarSesionesConsulta(array $queryParams): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, ['date', 'seller_id']);
+
+        $fecha = isset($queryParams['date']) && trim((string)$queryParams['date']) !== ''
+            ? $this->validarFechaIso((string)$queryParams['date'], 'date')
+            : $this->ahoraLima()->format('Y-m-d');
+
+        $sellerId = null;
+        if (array_key_exists('seller_id', $queryParams) && trim((string)$queryParams['seller_id']) !== '') {
+            $sellerId = $this->validarEnteroPositivoRequerido(
+                $queryParams['seller_id'],
+                true,
+                'seller_id',
+                'VALIDATION_ERROR',
+                'El parámetro seller_id debe ser un entero positivo.'
+            );
+        }
+
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+        try {
+            $rows = $this->cajaModel->listarSesionesPorFechaYVendedor($fecha, $sellerId);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $sessions = [];
+        foreach ($rows as $row) {
+            $sessions[] = [
+                'id'            => (int)$row['id_sesion_caja'],
+                'session_id'    => (int)$row['id_sesion_caja'],
+                'code'          => sprintf('SES-%04d', (int)$row['id_sesion_caja']),
+                'seller_id'     => (int)$row['id_usuario_vendedor'],
+                'seller_name'   => (string)$row['seller_name'],
+                'shift_id'      => (int)$row['id_turno'],
+                'turn'          => (string)$row['nombre_turno_referencia'],
+                'schedule'      => sprintf('%s - %s', (string)$row['hora_inicio_referencia'], (string)$row['hora_fin_referencia']),
+                'status'        => (string)$row['estado'],
+                'opened_at'     => $this->formatearIsoLima((string)$row['fecha_hora_apertura']),
+                'closed_at'     => $row['fecha_hora_cierre'] !== null ? $this->formatearIsoLima((string)$row['fecha_hora_cierre']) : null,
+                'opening_balance' => $this->decimalDbANumero((string)$row['saldo_inicial']),
+                'expected_cash' => $row['estado'] === 'CERRADA' && $row['efectivo_esperado_cierre'] !== null
+                    ? $this->decimalDbANumero((string)$row['efectivo_esperado_cierre'])
+                    : $this->decimalDbANumero((string)$row['efectivo_esperado_actual']),
+                'counted_cash'  => $row['efectivo_contado_cierre'] !== null
+                    ? $this->decimalDbANumero((string)$row['efectivo_contado_cierre'])
+                    : null,
+                'closing_difference' => $row['diferencia_cierre'] !== null
+                    ? $this->decimalDbANumero((string)$row['diferencia_cierre'])
+                    : null,
+            ];
+        }
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Sesiones de caja obtenidas correctamente.',
+            'data'    => [
+                'date'      => $fecha,
+                'seller_id' => $sellerId,
+                'sessions'  => $sessions,
+            ],
+        ];
+    }
+
+    /**
+     * EP-23C: Detalle completo de una sesión de caja para administración (HU 17 + HU 14).
+     */
+    public function consultarDetalleSesionAdmin(array $queryParams): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, ['session_id', 'page', 'page_size']);
+        if (!array_key_exists('session_id', $queryParams) || trim((string)$queryParams['session_id']) === '') {
+            throw new InventarioException(
+                'El parámetro session_id es obligatorio.',
+                'VALIDATION_ERROR',
+                422,
+                ['session_id' => ['El parámetro session_id es obligatorio.']]
+            );
+        }
+
+        $sessionId = $this->validarEnteroPositivoRequerido(
+            $queryParams['session_id'],
+            true,
+            'session_id',
+            'VALIDATION_ERROR',
+            'El parámetro session_id debe ser un entero positivo.'
+        );
+        [$page, $pageSize, $offset] = $this->resolverPaginacion($queryParams, 20, 100);
+
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+        try {
+            $detalle = $this->cajaModel->obtenerSesionDetallePorId($sessionId);
+            if ($detalle === null) {
+                $pdo->commit();
+                throw new InventarioException(
+                    'La sesión de caja solicitada no existe.',
+                    'CASH_SESSION_NOT_FOUND',
+                    404
+                );
+            }
+
+            $autorizacionesRaw = $this->cajaModel->listarAutorizacionesPorSesion($sessionId);
+            $arqueosRaw = $this->cajaModel->listarArqueosPorSesionAsc($sessionId);
+            $totalMovs = $this->cajaModel->contarMovimientosSesion($sessionId);
+            $movsRaw = $totalMovs > 0
+                ? $this->cajaModel->listarMovimientosSesionPaginados($sessionId, $pageSize, $offset)
+                : [];
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $autorizaciones = array_map([$this, 'proyectarAutorizacionCaja'], $autorizacionesRaw);
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Detalle de sesión de caja obtenido correctamente.',
+            'data'    => [
+                'session'        => $this->proyectarResumenCabeceraSesion($detalle),
+                'summary'        => $this->proyectarSummaryMonetarioSesion($detalle, true),
+                'authorizations' => $autorizaciones,
+                'authorization'  => !empty($autorizaciones) ? $autorizaciones[count($autorizaciones) - 1] : null,
+                'arqueos'        => array_map([$this, 'formatearArqueoResource'], $arqueosRaw),
+                'movements'      => array_map([$this, 'proyectarMovimientoConsulta'], $movsRaw),
+                'pagination'     => $this->construirPaginacion($totalMovs, $page, $pageSize),
+            ],
+        ];
+    }
+
+    /**
+     * EP-24A: Reporte administrativo de cierres de caja con snapshot inmutable y expiración de 30 minutos (HU 19).
+     */
+    public function reporteCierresCaja(array $queryParams, int $idAdminAutenticado): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, [
+            'from',
+            'to',
+            'seller_id',
+            'shift_id',
+            'snapshot_id',
+            'page',
+            'page_size',
+        ]);
+
+        [$page, $pageSize, $offset] = $this->resolverPaginacion($queryParams, 20, 100);
+        $ahora = $this->ahoraLima();
+        $ahoraDb = $ahora->format('Y-m-d H:i:s');
+        $nuevaExpiracion = $ahora->modify('+30 minutes')->format('Y-m-d H:i:s');
+
+        $hasSnapshot = array_key_exists('snapshot_id', $queryParams) && trim((string)$queryParams['snapshot_id']) !== '';
+        if ($hasSnapshot) {
+            $snapshotRef = trim((string)$queryParams['snapshot_id']);
+            $snapshot = $this->cajaModel->obtenerSnapshotCierresCajaParaUsuario($snapshotRef, $idAdminAutenticado);
+            if ($snapshot === null) {
+                throw new InventarioException(
+                    'El snapshot de consulta solicitado no existe.',
+                    'SNAPSHOT_NOT_FOUND',
+                    404
+                );
+            }
+
+            $expiraDt = new DateTimeImmutable((string)$snapshot['expira_en'], new DateTimeZone('America/Lima'));
+            if ($expiraDt <= $ahora) {
+                throw new InventarioException(
+                    'El snapshot de consulta ha expirado. Ejecute la consulta nuevamente.',
+                    'SNAPSHOT_EXPIRED',
+                    410
+                );
+            }
+
+            $filtrosSnapshot = json_decode((string)$snapshot['filtros_json'], true);
+            if (!is_array($filtrosSnapshot)) {
+                $filtrosSnapshot = [];
+            }
+
+            $tieneFiltroExplicito = array_key_exists('from', $queryParams)
+                || array_key_exists('to', $queryParams)
+                || array_key_exists('seller_id', $queryParams)
+                || array_key_exists('shift_id', $queryParams);
+            if ($tieneFiltroExplicito) {
+                $filtrosSolicitados = $this->normalizarFiltrosReporteCierres($queryParams, $ahora);
+                $hashSolicitado = hash('sha256', json_encode($filtrosSolicitados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                if (!hash_equals((string)$snapshot['hash_filtros'], $hashSolicitado)) {
+                    throw new InventarioException(
+                        'Los filtros proporcionados no coinciden con el snapshot_id indicado.',
+                        'SNAPSHOT_FILTER_MISMATCH',
+                        422,
+                        ['snapshot_id' => ['Los filtros no corresponden al snapshot indicado.']]
+                    );
+                }
+            }
+
+            $pdo = $this->pdo;
+            $pdo->beginTransaction();
+            try {
+                $this->cajaModel->renovarExpiracionSnapshot((int)$snapshot['id_snapshot'], $nuevaExpiracion);
+                $itemsRaw = $this->cajaModel->listarItemsSnapshotCierresCaja((int)$snapshot['id_snapshot'], $pageSize, $offset);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            $rows = [];
+            foreach ($itemsRaw as $itemRaw) {
+                $decoded = json_decode((string)$itemRaw['proyeccion_json'], true);
+                if (is_array($decoded)) {
+                    $rows[] = $decoded;
+                }
+            }
+
+            $totals = json_decode((string)$snapshot['resumen_json'], true);
+            $totalRegistros = (int)$snapshot['total_registros'];
+
+            return [
+                'status'  => true,
+                'code'    => 'OK',
+                'message' => 'Reporte de cierres de caja obtenido correctamente.',
+                'data'    => [
+                    'snapshot_id' => (string)$snapshot['referencia_consulta'],
+                    'expires_at'  => $this->formatearIsoLima($nuevaExpiracion),
+                    'filters'     => $filtrosSnapshot,
+                    'totals'      => is_array($totals) ? $totals : [],
+                    'rows'        => $rows,
+                    'items'       => $rows,
+                    'pagination'  => $this->construirPaginacion($totalRegistros, $page, $pageSize),
+                ],
+            ];
+        }
+
+        $filtros = $this->normalizarFiltrosReporteCierres($queryParams, $ahora);
+        $hashFiltros = hash('sha256', json_encode($filtros, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+        try {
+            $sesionesRaw = $this->cajaModel->listarSesionesCerradasParaReporte(
+                $filtros['from'],
+                $filtros['to'],
+                $filtros['seller_id'],
+                $filtros['shift_id']
+            );
+
+            $allRows = [];
+            $openingFundCents = 0;
+            $openingDiffCents = 0;
+            $cashSalesCents = 0;
+            $cardSalesCents = 0;
+            $yapePlinSalesCents = 0;
+            $incomeCents = 0;
+            $expensesCents = 0;
+            $expectedCashCents = 0;
+            $countedCashCents = 0;
+            $closingDiffCents = 0;
+
+            foreach ($sesionesRaw as $s) {
+                $idSesion = (int)$s['id_sesion_caja'];
+                $sOpening = self::parseDecimalACentimos((string)$s['saldo_inicial']);
+                $sOpenDiff = self::parseDecimalACentimos((string)$s['diferencia_apertura']);
+                $sCashSales = self::parseDecimalACentimos((string)$s['total_ventas_efectivo']);
+                $sCardSales = self::parseDecimalACentimos((string)$s['total_ventas_tarjeta']);
+                $sYapeSales = self::parseDecimalACentimos((string)$s['total_ventas_yape_plin']);
+                $sIncome = self::parseDecimalACentimos((string)$s['total_ingresos']);
+                $sExpenses = self::parseDecimalACentimos((string)$s['total_egresos']);
+                $sExpected = self::parseDecimalACentimos((string)($s['efectivo_esperado_cierre'] ?? '0.00'));
+                $sCounted = self::parseDecimalACentimos((string)($s['efectivo_contado_cierre'] ?? '0.00'));
+                $sCloseDiff = self::parseDecimalACentimos((string)($s['diferencia_cierre'] ?? '0.00'));
+
+                $openingFundCents += $sOpening;
+                $openingDiffCents += $sOpenDiff;
+                $cashSalesCents += $sCashSales;
+                $cardSalesCents += $sCardSales;
+                $yapePlinSalesCents += $sYapeSales;
+                $incomeCents += $sIncome;
+                $expensesCents += $sExpenses;
+                $expectedCashCents += $sExpected;
+                $countedCashCents += $sCounted;
+                $closingDiffCents += $sCloseDiff;
+
+                $cierreDt = new DateTimeImmutable((string)$s['fecha_hora_cierre'], new DateTimeZone('America/Lima'));
+                $authorizedByAdmin = $s['authorized_by_admin'] !== null ? (string)$s['authorized_by_admin'] : null;
+                $hasOmitted = ((int)($s['omitted_withdrawals_count'] ?? 0) > 0)
+                    || self::parseDecimalACentimos((string)$s['total_retiros_omitidos_declarados']) > 0;
+
+                $allRows[] = [
+                    'session_id'                    => $idSesion,
+                    'code'                          => sprintf('CIE-%04d', $idSesion),
+                    'closing_date'                  => $cierreDt->format('Y-m-d'),
+                    'closing_time'                  => $cierreDt->format('H:i:s'),
+                    'closed_at'                     => $this->formatearIsoLima((string)$s['fecha_hora_cierre']),
+                    'seller_id'                     => (int)$s['id_usuario_vendedor'],
+                    'seller_name'                   => (string)$s['seller_name'],
+                    'shift_id'                      => (int)$s['id_turno'],
+                    'turn'                          => (string)$s['nombre_turno_referencia'],
+                    'opening_fund'                  => round($sOpening / 100, 2),
+                    'opening_difference'            => round($sOpenDiff / 100, 2),
+                    'cash_sales'                    => round($sCashSales / 100, 2),
+                    'card_sales'                    => round($sCardSales / 100, 2),
+                    'yape_plin_sales'               => round($sYapeSales / 100, 2),
+                    'income'                        => round($sIncome / 100, 2),
+                    'expenses'                      => round($sExpenses / 100, 2),
+                    'expected_cash'                 => round($sExpected / 100, 2),
+                    'counted_cash'                  => round($sCounted / 100, 2),
+                    'closing_difference'            => round($sCloseDiff / 100, 2),
+                    'has_early_close_authorization' => $authorizedByAdmin !== null,
+                    'authorized_by_admin'           => $authorizedByAdmin,
+                    'has_omitted_withdrawals'       => $hasOmitted,
+                ];
+            }
+
+            $totalRegistros = count($allRows);
+            $totals = [
+                'total_closures'          => $totalRegistros,
+                'opening_fund_total'      => round($openingFundCents / 100, 2),
+                'opening_difference_net'  => round($openingDiffCents / 100, 2),
+                'cash_sales_total'        => round($cashSalesCents / 100, 2),
+                'card_sales_total'        => round($cardSalesCents / 100, 2),
+                'yape_plin_sales_total'   => round($yapePlinSalesCents / 100, 2),
+                'income_total'            => round($incomeCents / 100, 2),
+                'expenses_total'          => round($expensesCents / 100, 2),
+                'expected_cash_total'     => round($expectedCashCents / 100, 2),
+                'counted_cash_total'      => round($countedCashCents / 100, 2),
+                'closing_difference_net'  => round($closingDiffCents / 100, 2),
+            ];
+
+            $referenciaSnapshot = 'SNAP-CIE-' . bin2hex(random_bytes(8));
+            $this->cajaModel->crearSnapshotCierresCaja([
+                'referencia_consulta' => $referenciaSnapshot,
+                'id_usuario'          => $idAdminAutenticado,
+                'hash_filtros'        => $hashFiltros,
+                'filtros_json'        => json_encode($filtros, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'resumen_json'        => json_encode($totals, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'total_registros'     => $totalRegistros,
+                'exportable'          => $totalRegistros > 0 ? 1 : 0,
+                'creado_en'           => $ahoraDb,
+                'expira_en'           => $nuevaExpiracion,
+            ], $allRows);
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $rows = array_slice($allRows, $offset, $pageSize);
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Reporte de cierres de caja generado correctamente.',
+            'data'    => [
+                'snapshot_id' => $referenciaSnapshot,
+                'expires_at'  => $this->formatearIsoLima($nuevaExpiracion),
+                'filters'     => $filtros,
+                'totals'      => $totals,
+                'rows'        => $rows,
+                'items'       => $rows,
+                'pagination'  => $this->construirPaginacion($totalRegistros, $page, $pageSize),
+            ],
+        ];
+    }
+
+    /**
+     * EP-24B: Detalle completo de un cierre de caja específico (HU 19).
+     */
+    public function detalleCierreCaja($rawId, array $queryParams): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, ['page', 'page_size']);
+        $sessionId = $this->validarEnteroPositivoRequerido(
+            $rawId,
+            true,
+            'id',
+            'VALIDATION_ERROR',
+            'El identificador de cierre debe ser un entero positivo.'
+        );
+        [$page, $pageSize, $offset] = $this->resolverPaginacion($queryParams, 20, 100);
+
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+        try {
+            $detalle = $this->cajaModel->obtenerSesionDetallePorId($sessionId);
+            if ($detalle === null) {
+                $pdo->commit();
+                throw new InventarioException(
+                    'El cierre de caja solicitado no existe.',
+                    'CASH_SESSION_NOT_FOUND',
+                    404
+                );
+            }
+
+            if ((string)$detalle['estado'] !== 'CERRADA') {
+                $pdo->commit();
+                throw new InventarioException(
+                    'La sesión solicitada aún no ha sido cerrada.',
+                    'SESSION_NOT_CLOSED',
+                    409
+                );
+            }
+
+            $autorizacionesRaw = $this->cajaModel->listarAutorizacionesPorSesion($sessionId);
+            $arqueosRaw = $this->cajaModel->listarArqueosPorSesionAsc($sessionId);
+            $totalMovs = $this->cajaModel->contarMovimientosSesion($sessionId);
+            $movsRaw = $totalMovs > 0
+                ? $this->cajaModel->listarMovimientosSesionPaginados($sessionId, $pageSize, $offset)
+                : [];
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $autorizaciones = array_map([$this, 'proyectarAutorizacionCaja'], $autorizacionesRaw);
+        $closure = [
+            'session_id'         => (int)$detalle['id_sesion_caja'],
+            'code'               => sprintf('CIE-%04d', (int)$detalle['id_sesion_caja']),
+            'seller_id'          => (int)$detalle['id_usuario_vendedor'],
+            'seller_name'        => (string)$detalle['seller_name'],
+            'shift_id'           => (int)$detalle['id_turno'],
+            'turn'               => (string)$detalle['nombre_turno_referencia'],
+            'reference_schedule' => sprintf('%s - %s', (string)$detalle['hora_inicio_referencia'], (string)$detalle['hora_fin_referencia']),
+            'opened_at'          => $this->formatearIsoLima((string)$detalle['fecha_hora_apertura']),
+            'closed_at'          => $this->formatearIsoLima((string)$detalle['fecha_hora_cierre']),
+            'opening_fund'       => $this->decimalDbANumero((string)$detalle['saldo_inicial']),
+            'opening_difference' => $this->decimalDbANumero((string)$detalle['diferencia_apertura']),
+            'cash_sales'         => $this->decimalDbANumero((string)$detalle['total_ventas_efectivo']),
+            'card_sales'         => $this->decimalDbANumero((string)$detalle['total_ventas_tarjeta']),
+            'yape_plin_sales'    => $this->decimalDbANumero((string)$detalle['total_ventas_yape_plin']),
+            'income'             => $this->decimalDbANumero((string)$detalle['total_ingresos']),
+            'expenses'           => $this->decimalDbANumero((string)$detalle['total_egresos']),
+            'expected_cash'      => $this->decimalDbANumero((string)($detalle['efectivo_esperado_cierre'] ?? $detalle['efectivo_esperado_actual'])),
+            'counted_cash'       => $this->decimalDbANumero((string)($detalle['efectivo_contado_cierre'] ?? '0.00')),
+            'closing_difference' => $this->decimalDbANumero((string)($detalle['diferencia_cierre'] ?? '0.00')),
+            'observation'        => $detalle['observacion_cierre'] !== null ? (string)$detalle['observacion_cierre'] : null,
+            'is_supply_shift'    => (int)$detalle['es_suplencia'] === 1,
+            'opened_out_of_schedule' => (int)$detalle['abierta_fuera_horario'] === 1,
+        ];
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Detalle de cierre de caja obtenido correctamente.',
+            'data'    => [
+                'closure'       => $closure,
+                'authorization' => !empty($autorizaciones) ? $autorizaciones[count($autorizaciones) - 1] : null,
+                'arqueos'       => array_map([$this, 'formatearArqueoResource'], $arqueosRaw),
+                'movements'     => array_map([$this, 'proyectarMovimientoConsulta'], $movsRaw),
+                'pagination'    => $this->construirPaginacion($totalMovs, $page, $pageSize),
+            ],
+        ];
+    }
+
+    // =========================================================================
+    // HELPERS PRIVADOS PASO 12
+    // =========================================================================
+
+    private function validarQueryParamsPermitidos(array $queryParams, array $permitidos): void
+    {
+        $errores = [];
+        foreach (array_keys($queryParams) as $key) {
+            $k = (string)$key;
+            if ($k === 'url') {
+                continue;
+            }
+            if (!in_array($k, $permitidos, true)) {
+                $errores[$k] = ["El parámetro de consulta '{$key}' no está permitido."];
+            }
+        }
+        if (!empty($errores)) {
+            throw new InventarioException(
+                'Parámetros de consulta no permitidos.',
+                'VALIDATION_ERROR',
+                422,
+                $errores
+            );
+        }
+    }
+
+    private function resolverPaginacion(array $queryParams, int $defaultSize, int $maxSize): array
+    {
+        $page = 1;
+        if (array_key_exists('page', $queryParams) && trim((string)$queryParams['page']) !== '') {
+            $page = $this->validarEnteroPositivoRequerido(
+                $queryParams['page'],
+                true,
+                'page',
+                'VALIDATION_ERROR',
+                'El parámetro page debe ser un entero positivo.'
+            );
+        }
+
+        $pageSize = $defaultSize;
+        if (array_key_exists('page_size', $queryParams) && trim((string)$queryParams['page_size']) !== '') {
+            $pageSize = $this->validarEnteroPositivoRequerido(
+                $queryParams['page_size'],
+                true,
+                'page_size',
+                'VALIDATION_ERROR',
+                'El parámetro page_size debe ser un entero positivo.'
+            );
+            if ($pageSize > $maxSize) {
+                throw new InventarioException(
+                    "El parámetro page_size no puede ser mayor a {$maxSize}.",
+                    'VALIDATION_ERROR',
+                    422,
+                    ['page_size' => ["El parámetro page_size debe estar entre 1 y {$maxSize}."]]
+                );
+            }
+        }
+
+        return [$page, $pageSize, ($page - 1) * $pageSize];
+    }
+
+    private function construirPaginacion(int $total, int $page, int $pageSize): array
+    {
+        $totalPages = $total > 0 ? (int)ceil($total / $pageSize) : 0;
+        return [
+            'page'        => $page,
+            'page_size'   => $pageSize,
+            'total'       => $total,
+            'total_pages' => $totalPages,
+            'has_next'    => $page < $totalPages,
+            'has_prev'    => $page > 1 && $totalPages > 0,
+        ];
+    }
+
+    private function validarFechaIso(string $rawDate, string $campo): string
+    {
+        $rawDate = trim($rawDate);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawDate)) {
+            throw new InventarioException(
+                "El campo {$campo} debe tener formato YYYY-MM-DD.",
+                'VALIDATION_ERROR',
+                422,
+                [$campo => ["El campo {$campo} debe tener formato YYYY-MM-DD."]]
+            );
+        }
+        $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $rawDate, new DateTimeZone('America/Lima'));
+        if ($dt === false || $dt->format('Y-m-d') !== $rawDate) {
+            throw new InventarioException(
+                "El campo {$campo} no es una fecha válida.",
+                'VALIDATION_ERROR',
+                422,
+                [$campo => ["El campo {$campo} no es una fecha válida."]]
+            );
+        }
+
+        return $rawDate;
+    }
+
+    private function normalizarFiltrosReporteCierres(array $queryParams, DateTimeImmutable $ahora): array
+    {
+        $hoy = $ahora->format('Y-m-d');
+        $from = array_key_exists('from', $queryParams) && trim((string)$queryParams['from']) !== ''
+            ? $this->validarFechaIso((string)$queryParams['from'], 'from')
+            : $hoy;
+        $to = array_key_exists('to', $queryParams) && trim((string)$queryParams['to']) !== ''
+            ? $this->validarFechaIso((string)$queryParams['to'], 'to')
+            : $hoy;
+
+        if ($from > $to) {
+            throw new InventarioException(
+                'La fecha inicial (from) no puede ser mayor que la fecha final (to).',
+                'VALIDATION_ERROR',
+                422,
+                ['from' => ['La fecha inicial (from) no puede ser mayor que la fecha final (to).']]
+            );
+        }
+
+        $sellerId = null;
+        if (array_key_exists('seller_id', $queryParams) && trim((string)$queryParams['seller_id']) !== '') {
+            $sellerId = $this->validarEnteroPositivoRequerido(
+                $queryParams['seller_id'],
+                true,
+                'seller_id',
+                'VALIDATION_ERROR',
+                'El parámetro seller_id debe ser un entero positivo.'
+            );
+        }
+
+        $shiftId = null;
+        if (array_key_exists('shift_id', $queryParams) && trim((string)$queryParams['shift_id']) !== '') {
+            $shiftId = $this->validarEnteroPositivoRequerido(
+                $queryParams['shift_id'],
+                true,
+                'shift_id',
+                'VALIDATION_ERROR',
+                'El parámetro shift_id debe ser un entero positivo.'
+            );
+        }
+
+        return [
+            'from'      => $from,
+            'to'        => $to,
+            'seller_id' => $sellerId,
+            'shift_id'  => $shiftId,
+        ];
+    }
+
+    private function proyectarResumenCabeceraSesion(array $detalle): array
+    {
+        return [
+            'id'                     => (int)$detalle['id_sesion_caja'],
+            'session_id'             => (int)$detalle['id_sesion_caja'],
+            'code'                   => sprintf('SES-%04d', (int)$detalle['id_sesion_caja']),
+            'status'                 => (string)$detalle['estado'],
+            'seller_id'              => (int)$detalle['id_usuario_vendedor'],
+            'seller_name'            => (string)$detalle['seller_name'],
+            'shift_id'               => (int)$detalle['id_turno'],
+            'turn'                   => (string)$detalle['nombre_turno_referencia'],
+            'schedule'               => sprintf('%s - %s', (string)$detalle['hora_inicio_referencia'], (string)$detalle['hora_fin_referencia']),
+            'is_supply_shift'        => (int)$detalle['es_suplencia'] === 1,
+            'opened_out_of_schedule' => (int)$detalle['abierta_fuera_horario'] === 1,
+            'opened_at'              => $this->formatearIsoLima((string)$detalle['fecha_hora_apertura']),
+            'closed_at'              => $detalle['fecha_hora_cierre'] !== null ? $this->formatearIsoLima((string)$detalle['fecha_hora_cierre']) : null,
+            'reference_exit_at'      => $this->formatearIsoLima((string)$detalle['fecha_hora_salida_referencia']),
+            'version'                => (int)$detalle['version_caja'],
+        ];
+    }
+
+    private function proyectarSummaryMonetarioSesion(array $detalle, bool $incluirCierre): array
+    {
+        $summary = [
+            'opening_balance' => $this->decimalDbANumero((string)$detalle['saldo_inicial']),
+            'cash_sales'      => $this->decimalDbANumero((string)$detalle['total_ventas_efectivo']),
+            'income'          => $this->decimalDbANumero((string)$detalle['total_ingresos']),
+            'expenses'        => $this->decimalDbANumero((string)$detalle['total_egresos']),
+            'current_balance' => $this->decimalDbANumero((string)$detalle['efectivo_esperado_actual']),
+            'card'            => $this->decimalDbANumero((string)$detalle['total_ventas_tarjeta']),
+            'yape_plin'       => $this->decimalDbANumero((string)$detalle['total_ventas_yape_plin']),
+        ];
+
+        if ($incluirCierre) {
+            $summary['expected_cash'] = $detalle['efectivo_esperado_cierre'] !== null
+                ? $this->decimalDbANumero((string)$detalle['efectivo_esperado_cierre'])
+                : $this->decimalDbANumero((string)$detalle['efectivo_esperado_actual']);
+            $summary['counted_cash'] = $detalle['efectivo_contado_cierre'] !== null
+                ? $this->decimalDbANumero((string)$detalle['efectivo_contado_cierre'])
+                : null;
+            $summary['closing_difference'] = $detalle['diferencia_cierre'] !== null
+                ? $this->decimalDbANumero((string)$detalle['diferencia_cierre'])
+                : null;
+        }
+
+        return $summary;
+    }
+
+    private function proyectarAutorizacionCaja(array $a): array
+    {
+        return [
+            'id'                  => (int)$a['id_autorizacion_caja'],
+            'operation_type'      => (string)$a['tipo_operacion'],
+            'seller_id'           => (int)$a['id_usuario_vendedor'],
+            'seller_name'         => (string)$a['seller_name'],
+            'admin_id'            => (int)$a['id_usuario_admin'],
+            'authorized_by_admin' => (string)$a['admin_name'],
+            'reason'              => (string)$a['motivo'],
+            'reference_exit_time' => (string)$a['hora_salida_referencia'],
+            'actual_close_time'   => (string)$a['hora_cierre_real'],
+            'minutes_early'       => (int)$a['minutos_anticipacion'],
+            'authorized_at'       => $this->formatearIsoLima((string)$a['fecha_hora_autorizacion']),
+        ];
+    }
+
+    private function proyectarMovimientoConsulta(array $m): array
+    {
+        $mapTipos = [
+            'VENTA_EFECTIVO'   => 'cash_sale',
+            'INGRESO_MANUAL'   => 'manual_income',
+            'INYECCION_ADMIN'  => 'admin_injection',
+            'SALIDA_CAJA'      => 'cash_out',
+            'RETIRO_ADMIN'     => 'admin_withdrawal',
+            'RETIRO_OMITIDO'   => 'omitted_withdrawal',
+            'CORRECCION'       => 'correction',
+        ];
+        $tipoDb = (string)$m['tipo_movimiento'];
+        $tipoApi = $mapTipos[$tipoDb] ?? strtolower($tipoDb);
+        $referencia = $m['referencia_visible'] !== null && trim((string)$m['referencia_visible']) !== ''
+            ? (string)$m['referencia_visible']
+            : (string)$m['motivo'];
+
+        $item = [
+            'id'            => (int)$m['id_movimiento_caja'],
+            'type'          => $tipoApi,
+            'amount'        => $this->decimalDbANumero((string)$m['monto']),
+            'effect'        => $this->decimalDbANumero((string)$m['efecto_saldo']),
+            'reason'        => (string)$m['motivo'],
+            'reference'     => $referencia,
+            'registered_by' => (string)$m['registered_by_name'],
+            'authorized_by' => $m['authorized_by_name'] !== null ? (string)$m['authorized_by_name'] : null,
+            'sale_id'       => $m['id_venta'] !== null ? (int)$m['id_venta'] : null,
+            'created_at'    => $this->formatearIsoLima((string)$m['fecha_hora_registro']),
+        ];
+
+        if ($m['monto_corregido_actual'] !== null) {
+            $item['current_amount'] = $this->decimalDbANumero((string)$m['monto_corregido_actual']);
+        }
+        if ($tipoApi === 'omitted_withdrawal' && $m['id_sesion_origen_omitido'] !== null) {
+            $item['origin_session_id'] = (int)$m['id_sesion_origen_omitido'];
+        }
+        if ($tipoApi === 'correction') {
+            $item['original_movement_id'] = $m['corr_original_id'] !== null
+                ? (int)$m['corr_original_id']
+                : ($m['id_movimiento_original'] !== null ? (int)$m['id_movimiento_original'] : null);
+            $item['correction_id'] = $m['corr_id'] !== null ? (int)$m['corr_id'] : null;
+        }
+
+        return $item;
+    }
 }

@@ -19,13 +19,38 @@ class ReporteApiController extends ApiController {
     }
 
     public function get(?string $params = ""): void {
+        $tipo = trim((string)($params ?? ''), '/');
+        $input = $_GET;
+
+        if ($tipo === 'cierres-caja' || preg_match('#^cierres-caja/([^/]+)$#', $tipo, $matches)) {
+            $admin = $this->requireAdminActivo('reportes.cierres_caja');
+            try {
+                $cajaService = new \Services\CajaService();
+                if ($tipo === 'cierres-caja') {
+                    $res = $cajaService->reporteCierresCaja($input, (int)$admin['id_usuario']);
+                } else {
+                    $res = $cajaService->detalleCierreCaja($matches[1], $input);
+                }
+                $this->sendJsonResponse($res, 200);
+            } catch (InventarioException $e) {
+                $this->sendJsonResponse($e->toApiResponse(), $e->getHttpCode());
+            } catch (\Throwable $e) {
+                error_log('[ReporteApiController::get] ' . $e->getMessage());
+                $this->sendJsonResponse([
+                    'status'  => false,
+                    'code'    => 'INTERNAL_ERROR',
+                    'message' => 'Ocurrió un error interno al consultar el reporte de cierres de caja.',
+                    'errors'  => new \stdClass(),
+                    'data'    => null,
+                ], 500);
+            }
+            return;
+        }
+
         if (in_array($params, ['kardex', 'variaciones'], true)) {
             $this->requireAdminActivo();
         }
         $this->requirePermission('reportes.ver');
-
-        $tipo = $params ?? '';
-        $input = $_GET;
 
         switch ($tipo) {
             case 'ventas':

@@ -21,6 +21,10 @@ class CajaApiController extends ApiController
     protected function authorizeController(): void
     {
         $segmento = $this->extraerSegmentoCaja();
+        if (in_array($segmento, ['consulta/vendedores', 'consulta/sesiones', 'consulta'], true)) {
+            $this->requireAdminActivo('turnos.consultar_historico');
+            return;
+        }
         $permiso = $this->resolverPermisoPorSegmento($segmento);
         $this->requireVendedorActivo($permiso);
     }
@@ -67,6 +71,9 @@ class CajaApiController extends ApiController
         ], true)) {
             return 'turnos.cerrar';
         }
+        if ($segmento === 'consulta/activa') {
+            return 'turnos.acceder';
+        }
         return null;
     }
 
@@ -81,6 +88,36 @@ class CajaApiController extends ApiController
     public function get(?string $params = ''): void
     {
         $segmento = trim((string)$params, '/');
+        if (in_array($segmento, ['consulta/vendedores', 'consulta/sesiones', 'consulta'], true)) {
+            $this->requireAdminActivo('turnos.consultar_historico');
+            try {
+                if ($segmento === 'consulta/vendedores') {
+                    $res = $this->cajaService->listarVendedoresConsulta($_GET);
+                    $this->sendJsonResponse($res, 200);
+                }
+                if ($segmento === 'consulta/sesiones') {
+                    $res = $this->cajaService->listarSesionesConsulta($_GET);
+                    $this->sendJsonResponse($res, 200);
+                }
+                if ($segmento === 'consulta') {
+                    $res = $this->cajaService->consultarDetalleSesionAdmin($_GET);
+                    $this->sendJsonResponse($res, 200);
+                }
+            } catch (InventarioException $e) {
+                $this->sendJsonResponse($e->toApiResponse(), $e->getHttpCode());
+            } catch (Throwable $e) {
+                error_log('[CajaApiController::get] ' . $e->getMessage());
+                $this->sendJsonResponse([
+                    'status'  => false,
+                    'code'    => 'INTERNAL_ERROR',
+                    'message' => 'Ocurrió un error interno al consultar la caja.',
+                    'errors'  => new \stdClass(),
+                    'data'    => null,
+                ], 500);
+            }
+            return;
+        }
+
         $permiso = $this->resolverPermisoPorSegmento($segmento);
         $vendedor = $this->requireVendedorActivo($permiso);
 
@@ -127,6 +164,11 @@ class CajaApiController extends ApiController
 
             if ($segmento === 'cierre') {
                 $res = $this->cajaService->consultarCierre((int)$vendedor['id_usuario'], $_GET);
+                $this->sendJsonResponse($res, 200);
+            }
+
+            if ($segmento === 'consulta/activa') {
+                $res = $this->cajaService->consultarActivaVendedor((int)$vendedor['id_usuario'], $_GET);
                 $this->sendJsonResponse($res, 200);
             }
 

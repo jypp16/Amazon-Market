@@ -1017,4 +1017,445 @@ class CajaModel extends Model
             ':id_sesion_caja'           => (int)$datos['id_sesion_caja'],
         ]);
     }
+
+    /**
+     * Obtiene el detalle completo de una sesión de caja (abierta o cerrada) por ID.
+     */
+    public function obtenerSesionDetallePorId(int $idSesion): ?array
+    {
+        $sql = "SELECT
+                    s.id_sesion_caja,
+                    s.id_caja_fisica,
+                    s.id_usuario_vendedor,
+                    u.nombre AS seller_name,
+                    u.email AS seller_email,
+                    s.id_turno,
+                    s.nombre_turno_referencia,
+                    TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
+                    TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
+                    s.fecha_hora_salida_referencia,
+                    s.es_suplencia,
+                    s.abierta_fuera_horario,
+                    s.fecha_hora_apertura,
+                    s.tiene_cierre_anterior,
+                    s.id_sesion_cierre_anterior,
+                    s.monto_referencia_cierre_anterior,
+                    s.fecha_hora_cierre_anterior_ref,
+                    s.nombre_turno_cierre_anterior_ref,
+                    s.saldo_inicial,
+                    s.diferencia_apertura,
+                    s.total_ventas_efectivo,
+                    s.total_ventas_tarjeta,
+                    s.total_ventas_yape_plin,
+                    s.total_ingresos,
+                    s.total_egresos,
+                    s.total_retiros_omitidos_declarados,
+                    s.efectivo_esperado_actual,
+                    s.id_ultimo_arqueo,
+                    s.id_arqueo_cierre,
+                    s.fecha_hora_cierre,
+                    s.efectivo_esperado_cierre,
+                    s.efectivo_contado_cierre,
+                    s.diferencia_cierre,
+                    s.observacion_cierre,
+                    s.version_caja,
+                    s.estado
+                FROM sesion_caja s
+                INNER JOIN usuario u ON u.id_usuario = s.id_usuario_vendedor
+                WHERE s.id_sesion_caja = :id_sesion
+                LIMIT 1";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Lista vendedores activos para selector de consulta administrativa (EP-23A).
+     */
+    public function listarVendedoresParaConsulta(): array
+    {
+        $sql = "SELECT
+                    id_usuario AS id,
+                    nombre AS name,
+                    email
+                FROM usuario
+                WHERE id_rol = 2
+                  AND estado = 1
+                ORDER BY nombre ASC, id_usuario ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as &$row) {
+            $row['id'] = (int)$row['id'];
+            $row['name'] = (string)$row['name'];
+            $row['email'] = (string)$row['email'];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Lista sesiones de caja abiertas en una fecha específica (opcionalmente filtradas por vendedor) (EP-23B).
+     */
+    public function listarSesionesPorFechaYVendedor(string $fecha, ?int $idVendedor = null): array
+    {
+        $sql = "SELECT
+                    s.id_sesion_caja,
+                    s.id_usuario_vendedor,
+                    u.nombre AS seller_name,
+                    s.id_turno,
+                    s.nombre_turno_referencia,
+                    TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
+                    TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
+                    s.estado,
+                    s.fecha_hora_apertura,
+                    s.fecha_hora_cierre,
+                    s.saldo_inicial,
+                    s.efectivo_esperado_actual,
+                    s.efectivo_esperado_cierre,
+                    s.efectivo_contado_cierre,
+                    s.diferencia_cierre
+                FROM sesion_caja s
+                INNER JOIN usuario u ON u.id_usuario = s.id_usuario_vendedor
+                WHERE DATE(s.fecha_hora_apertura) = :fecha";
+
+        $params = [':fecha' => $fecha];
+        if ($idVendedor !== null) {
+            $sql .= " AND s.id_usuario_vendedor = :id_vendedor";
+            $params[':id_vendedor'] = $idVendedor;
+        }
+        $sql .= " ORDER BY s.fecha_hora_apertura ASC, s.id_sesion_caja ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Cuenta el total de movimientos de una sesión de caja.
+     */
+    public function contarMovimientosSesion(int $idSesion): int
+    {
+        $stmt = $this->conect->prepare(
+            'SELECT COUNT(*) FROM movimiento_caja WHERE id_sesion_caja = :id_sesion'
+        );
+        $stmt->execute([':id_sesion' => $idSesion]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Lista movimientos paginados de una sesión en orden cronológico ascendente.
+     */
+    public function listarMovimientosSesionPaginados(int $idSesion, int $limit, int $offset): array
+    {
+        $sql = "SELECT
+                    m.id_movimiento_caja,
+                    m.id_sesion_caja,
+                    m.tipo_movimiento,
+                    m.monto,
+                    m.efecto_saldo,
+                    m.motivo,
+                    m.referencia_visible,
+                    m.id_usuario_registro,
+                    ur.nombre AS registered_by_name,
+                    m.id_usuario_admin,
+                    ua.nombre AS authorized_by_name,
+                    m.id_venta,
+                    m.id_sesion_origen_omitido,
+                    m.id_movimiento_original,
+                    m.fecha_hora_registro,
+                    corr.id_correccion_caja AS corr_id,
+                    corr.id_movimiento_original AS corr_original_id,
+                    (SELECT c2.monto_corregido
+                       FROM correccion_movimiento_caja c2
+                      WHERE c2.id_movimiento_original = m.id_movimiento_caja
+                      ORDER BY c2.numero_eslabon DESC, c2.id_correccion_caja DESC
+                      LIMIT 1) AS monto_corregido_actual
+                FROM movimiento_caja m
+                INNER JOIN usuario ur ON ur.id_usuario = m.id_usuario_registro
+                LEFT JOIN usuario ua ON ua.id_usuario = m.id_usuario_admin
+                LEFT JOIN correccion_movimiento_caja corr ON corr.id_movimiento_correccion = m.id_movimiento_caja
+                WHERE m.id_sesion_caja = :id_sesion
+                ORDER BY m.fecha_hora_registro ASC, m.id_movimiento_caja ASC
+                LIMIT :limit OFFSET :offset";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->bindValue(':id_sesion', $idSesion, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Lista las autorizaciones de cierre anticipado de una sesión.
+     */
+    public function listarAutorizacionesPorSesion(int $idSesion): array
+    {
+        $sql = "SELECT
+                    a.id_autorizacion_caja,
+                    a.id_sesion_caja,
+                    a.tipo_operacion,
+                    a.id_usuario_vendedor,
+                    uv.nombre AS seller_name,
+                    a.id_usuario_admin,
+                    ua.nombre AS admin_name,
+                    a.motivo,
+                    TIME_FORMAT(a.hora_salida_referencia, '%H:%i') AS hora_salida_referencia,
+                    a.fecha_hora_salida_referencia,
+                    TIME_FORMAT(a.hora_cierre_real, '%H:%i') AS hora_cierre_real,
+                    a.minutos_anticipacion,
+                    a.fecha_hora_autorizacion
+                FROM autorizacion_caja a
+                INNER JOIN usuario uv ON uv.id_usuario = a.id_usuario_vendedor
+                INNER JOIN usuario ua ON ua.id_usuario = a.id_usuario_admin
+                WHERE a.id_sesion_caja = :id_sesion
+                ORDER BY a.fecha_hora_autorizacion ASC, a.id_autorizacion_caja ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Lista arqueos de una sesión en orden ascendente para consultas y detalle de cierre.
+     */
+    public function listarArqueosPorSesionAsc(int $idSesion): array
+    {
+        $sql = "SELECT
+                    a.id_arqueo_caja,
+                    a.id_sesion_caja,
+                    a.id_usuario_vendedor,
+                    u.nombre AS seller_name,
+                    a.version_caja_evaluada,
+                    a.monto_esperado,
+                    a.monto_contado,
+                    a.diferencia,
+                    a.observacion,
+                    a.estado,
+                    a.fecha_hora_arqueo
+                FROM arqueo_caja a
+                INNER JOIN usuario u ON u.id_usuario = a.id_usuario_vendedor
+                WHERE a.id_sesion_caja = :id_sesion
+                ORDER BY a.id_arqueo_caja ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Lista sesiones cerradas dentro de un rango de fechas de cierre para EP-24A.
+     */
+    public function listarSesionesCerradasParaReporte(
+        string $fechaDesde,
+        string $fechaHasta,
+        ?int $idVendedor = null,
+        ?int $idTurno = null
+    ): array {
+        $sql = "SELECT
+                    s.id_sesion_caja,
+                    s.id_usuario_vendedor,
+                    u.nombre AS seller_name,
+                    s.id_turno,
+                    s.nombre_turno_referencia,
+                    TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
+                    TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
+                    s.fecha_hora_apertura,
+                    s.fecha_hora_cierre,
+                    s.saldo_inicial,
+                    s.diferencia_apertura,
+                    s.total_ventas_efectivo,
+                    s.total_ventas_tarjeta,
+                    s.total_ventas_yape_plin,
+                    s.total_ingresos,
+                    s.total_egresos,
+                    s.total_retiros_omitidos_declarados,
+                    s.efectivo_esperado_cierre,
+                    s.efectivo_contado_cierre,
+                    s.diferencia_cierre,
+                    (SELECT ua.nombre
+                       FROM autorizacion_caja a
+                       INNER JOIN usuario ua ON ua.id_usuario = a.id_usuario_admin
+                      WHERE a.id_sesion_caja = s.id_sesion_caja
+                        AND a.tipo_operacion = 'CIERRE_ANTICIPADO'
+                      ORDER BY a.id_autorizacion_caja DESC
+                      LIMIT 1) AS authorized_by_admin,
+                    (SELECT COUNT(*)
+                       FROM movimiento_caja m
+                      WHERE m.id_sesion_caja = s.id_sesion_caja
+                        AND m.tipo_movimiento = 'RETIRO_OMITIDO') AS omitted_withdrawals_count
+                FROM sesion_caja s
+                INNER JOIN usuario u ON u.id_usuario = s.id_usuario_vendedor
+                WHERE s.estado = 'CERRADA'
+                  AND DATE(s.fecha_hora_cierre) BETWEEN :fecha_desde AND :fecha_hasta";
+
+        $params = [
+            ':fecha_desde' => $fechaDesde,
+            ':fecha_hasta' => $fechaHasta,
+        ];
+        if ($idVendedor !== null) {
+            $sql .= " AND s.id_usuario_vendedor = :id_vendedor";
+            $params[':id_vendedor'] = $idVendedor;
+        }
+        if ($idTurno !== null) {
+            $sql .= " AND s.id_turno = :id_turno";
+            $params[':id_turno'] = $idTurno;
+        }
+        $sql .= " ORDER BY s.fecha_hora_cierre DESC, s.id_sesion_caja DESC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Crea un snapshot inmutable de consulta de cierres de caja con sus ítems materializados.
+     */
+    public function crearSnapshotCierresCaja(array $snapshot, array $items): int
+    {
+        $sql = "INSERT INTO reporte_consulta_snapshot (
+                    referencia_consulta,
+                    id_usuario,
+                    tipo_reporte,
+                    hash_filtros,
+                    filtros_json,
+                    resumen_json,
+                    total_registros,
+                    exportable,
+                    creado_en,
+                    expira_en
+                ) VALUES (
+                    :referencia_consulta,
+                    :id_usuario,
+                    'cierres_caja',
+                    :hash_filtros,
+                    :filtros_json,
+                    :resumen_json,
+                    :total_registros,
+                    :exportable,
+                    :creado_en,
+                    :expira_en
+                )";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':referencia_consulta' => (string)$snapshot['referencia_consulta'],
+            ':id_usuario'          => (int)$snapshot['id_usuario'],
+            ':hash_filtros'        => (string)$snapshot['hash_filtros'],
+            ':filtros_json'        => (string)$snapshot['filtros_json'],
+            ':resumen_json'        => (string)$snapshot['resumen_json'],
+            ':total_registros'     => (int)$snapshot['total_registros'],
+            ':exportable'          => (int)$snapshot['exportable'],
+            ':creado_en'           => (string)$snapshot['creado_en'],
+            ':expira_en'           => (string)$snapshot['expira_en'],
+        ]);
+
+        $idSnapshot = (int)$this->conect->lastInsertId();
+
+        if (!empty($items)) {
+            $sqlItem = "INSERT INTO reporte_caja_snapshot_item (
+                            id_snapshot,
+                            orden_posicion,
+                            id_sesion_caja,
+                            proyeccion_json
+                        ) VALUES (
+                            :id_snapshot,
+                            :orden_posicion,
+                            :id_sesion_caja,
+                            :proyeccion_json
+                        )";
+            $stmtItem = $this->conect->prepare($sqlItem);
+            foreach ($items as $idx => $item) {
+                $stmtItem->execute([
+                    ':id_snapshot'     => $idSnapshot,
+                    ':orden_posicion'  => $idx + 1,
+                    ':id_sesion_caja'  => (int)$item['session_id'],
+                    ':proyeccion_json' => json_encode($item, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ]);
+            }
+        }
+
+        return $idSnapshot;
+    }
+
+    /**
+     * Obtiene un snapshot de cierres de caja por referencia_consulta perteneciente al usuario.
+     */
+    public function obtenerSnapshotCierresCajaParaUsuario(string $referenciaConsulta, int $idUsuario): ?array
+    {
+        $sql = "SELECT
+                    id_snapshot,
+                    referencia_consulta,
+                    id_usuario,
+                    tipo_reporte,
+                    hash_filtros,
+                    filtros_json,
+                    resumen_json,
+                    total_registros,
+                    exportable,
+                    creado_en,
+                    expira_en
+                FROM reporte_consulta_snapshot
+                WHERE referencia_consulta = :referencia_consulta
+                  AND id_usuario = :id_usuario
+                  AND tipo_reporte = 'cierres_caja'
+                LIMIT 1";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':referencia_consulta' => $referenciaConsulta,
+            ':id_usuario'          => $idUsuario,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Renueva la fecha de expiración de un snapshot vigente (sliding window 30 min).
+     */
+    public function renovarExpiracionSnapshot(int $idSnapshot, string $nuevaExpiracion): void
+    {
+        $stmt = $this->conect->prepare(
+            'UPDATE reporte_consulta_snapshot SET expira_en = :expira_en WHERE id_snapshot = :id_snapshot'
+        );
+        $stmt->execute([
+            ':expira_en'   => $nuevaExpiracion,
+            ':id_snapshot' => $idSnapshot,
+        ]);
+    }
+
+    /**
+     * Lista ítems paginados de un snapshot de cierres de caja en orden_posicion ASC.
+     */
+    public function listarItemsSnapshotCierresCaja(int $idSnapshot, int $limit, int $offset): array
+    {
+        $sql = "SELECT
+                    orden_posicion,
+                    id_sesion_caja,
+                    proyeccion_json
+                FROM reporte_caja_snapshot_item
+                WHERE id_snapshot = :id_snapshot
+                ORDER BY orden_posicion ASC
+                LIMIT :limit OFFSET :offset";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->bindValue(':id_snapshot', $idSnapshot, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }
