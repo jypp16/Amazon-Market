@@ -47,6 +47,13 @@ class CajaService
     private CajaModel $cajaModel;
     private ProgramacionService $programacionService;
     private ControlSolicitudService $controlSolicitudService;
+    /** @var callable|null */
+    private $clockProvider = null;
+
+    public function setClockProvider(?callable $clockProvider): void
+    {
+        $this->clockProvider = $clockProvider;
+    }
 
     public function __construct(?PDO $pdo = null)
     {
@@ -1964,7 +1971,7 @@ class CajaService
         ];
     }
 
-    private static function parseDecimalACentimos(string $valorDb): int
+    public static function parseDecimalACentimos(string $valorDb): int
     {
         $str = trim($valorDb);
         $negativo = str_starts_with($str, '-');
@@ -1978,7 +1985,7 @@ class CajaService
         return $negativo ? -$centimos : $centimos;
     }
 
-    private static function centimosADecimal(int $centimos): string
+    public static function centimosADecimal(int $centimos): string
     {
         $sign = $centimos < 0 ? '-' : '';
         $abs = abs($centimos);
@@ -1987,6 +1994,9 @@ class CajaService
 
     private function ahoraLima(): DateTimeImmutable
     {
+        if ($this->clockProvider !== null) {
+            return ($this->clockProvider)();
+        }
         return new DateTimeImmutable('now', new DateTimeZone(self::LIMA_TZ));
     }
 
@@ -1994,5 +2004,804 @@ class CajaService
     {
         $dt = new DateTimeImmutable($datetimeDb, new DateTimeZone(self::LIMA_TZ));
         return $dt->format('Y-m-d\TH:i:sP');
+    }
+
+    /**
+     * EP-17: GET /api/caja/arqueo/estado
+     */
+    public function consultarEstadoArqueo(int $idVendedorAutenticado, array $queryParams): array
+    {
+        $this->validarQuerySoloVendedorPropio($queryParams, $idVendedorAutenticado);
+
+        $startedRo = false;
+        if (!$this->pdo->inTransaction()) {
+            $this->pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $this->pdo->exec('START TRANSACTION READ ONLY');
+            $startedRo = true;
+        }
+
+        try {
+            $sesion = $this->cajaModel->obtenerSesionAbiertaActual(false);
+
+            if ($sesion === null || (int)$sesion['id_usuario_vendedor'] !== $idVendedorAutenticado) {
+                if ($startedRo) {
+                    $this->pdo->exec('COMMIT');
+                }
+                return [
+                    'status'  => true,
+                    'code'    => 'OK',
+                    'message' => 'Estado de arqueo obtenido correctamente.',
+                    'data'    => [
+                        'is_open'                              => ($sesion !== null),
+                        'is_owner'                             => false,
+                        'session_id'                           => null,
+                        'seller_id'                            => null,
+                        'seller'                               => null,
+                        'turn'                                 => null,
+                        'reference_schedule'                   => null,
+                        'opening_fund'                         => null,
+                        'cash_sales'                           => null,
+                        'income'                               => null,
+                        'expenses'                             => null,
+                        'expected'                             => null,
+                        'card'                                 => null,
+                        'yape_plin'                            => null,
+                        'omitted_withdrawals_zero_impact_total'=> null,
+                        'version'                              => null,
+                        'active_arqueo_id'                     => null,
+                        'has_valid_arqueo'                     => false,
+                        'history'                              => [],
+                        'schedule'                             => null,
+                        'closed_summary'                       => null,
+                    ],
+                ];
+            }
+
+            $idSesion = (int)$sesion['id_sesion_caja'];
+            $sellerName = $this->cajaModel->obtenerNombreUsuarioPorId($idVendedorAutenticado);
+            $arqueosRaw = $this->cajaModel->listarArqueosSesion($idSesion);
+
+            if ($startedRo) {
+                $this->pdo->exec('COMMIT');
+            }
+        } catch (\Throwable $e) {
+            if ($startedRo) {
+                try {
+                    $this->pdo->exec('ROLLBACK');
+                } catch (\Throwable $ignore) {
+                }
+            }
+            throw $e;
+        }
+
+        $history = array_map(fn (array $r): array => $this->formatearArqueoResource($r), $arqueosRaw);
+        $activeArqueoId = $this->resolverArqueoActivoId($sesion, $arqueosRaw);
+
+        $horaInicio = (string)$sesion['hora_inicio_referencia'];
+        $horaFin = (string)$sesion['hora_fin_referencia'];
+        $nombreTurno = (string)$sesion['nombre_turno_referencia'];
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Estado de arqueo obtenido correctamente.',
+            'data'    => [
+                'is_open'                              => true,
+                'is_owner'                             => true,
+                'session_id'                           => $idSesion,
+                'seller_id'                            => $idVendedorAutenticado,
+                'seller'                               => $sellerName,
+                'turn'                                 => $nombreTurno,
+                'reference_schedule'                   => [
+                    'shift_id'   => (int)$sesion['id_turno'],
+                    'shift_name' => $nombreTurno,
+                    'start'      => $horaInicio,
+                    'end'        => $horaFin,
+                    'label'      => "{$nombreTurno} · {$horaInicio}–{$horaFin}",
+                ],
+                'opening_fund'                         => $this->decimalDbANumero((string)$sesion['saldo_inicial']),
+                'cash_sales'                           => $this->decimalDbANumero((string)$sesion['total_ventas_efectivo']),
+                'income'                               => $this->decimalDbANumero((string)$sesion['total_ingresos']),
+                'expenses'                             => $this->decimalDbANumero((string)$sesion['total_egresos']),
+                'expected'                             => $this->decimalDbANumero((string)$sesion['efectivo_esperado_actual']),
+                'card'                                 => $this->decimalDbANumero((string)$sesion['total_ventas_tarjeta']),
+                'yape_plin'                            => $this->decimalDbANumero((string)$sesion['total_ventas_yape_plin']),
+                'omitted_withdrawals_zero_impact_total'=> $this->decimalDbANumero((string)$sesion['total_retiros_omitidos_declarados']),
+                'version'                              => (int)$sesion['version_caja'],
+                'active_arqueo_id'                     => $activeArqueoId,
+                'has_valid_arqueo'                     => ($activeArqueoId !== null),
+                'history'                              => $history,
+                'schedule'                             => $this->evaluarHorarioCierre($sesion),
+                'closed_summary'                       => null,
+            ],
+        ];
+    }
+
+    /**
+     * EP-18: GET /api/caja/arqueos
+     */
+    public function listarArqueos(int $idVendedorAutenticado, array $queryParams): array
+    {
+        $sessionIdParam = $this->resolverSessionIdQueryOpcional($queryParams);
+
+        if ($sessionIdParam === null) {
+            $sesion = $this->exigirSesionPropiaAbierta($this->cajaModel, $idVendedorAutenticado, false);
+        } else {
+            $sesionRow = $this->cajaModel->obtenerSesionCajaPorId($sessionIdParam);
+            if ($sesionRow === null) {
+                throw new InventarioException(
+                    'La sesión de caja solicitada no existe.',
+                    'CASH_SESSION_NOT_FOUND',
+                    404
+                );
+            }
+            if ((int)$sesionRow['id_usuario_vendedor'] !== $idVendedorAutenticado) {
+                throw new InventarioException(
+                    'La sesión de caja solicitada pertenece a otro vendedor.',
+                    'SESSION_NOT_OWNED',
+                    403
+                );
+            }
+            if ((string)$sesionRow['estado'] !== 'ABIERTA') {
+                throw new InventarioException(
+                    'La sesión de caja consultada ya se encuentra cerrada.',
+                    'CASH_SESSION_CLOSED',
+                    409
+                );
+            }
+            $sesion = $sesionRow;
+        }
+
+        $idSesion = (int)$sesion['id_sesion_caja'];
+        $arqueosRaw = $this->cajaModel->listarArqueosSesion($idSesion);
+        $history = array_map(fn (array $r): array => $this->formatearArqueoResource($r), $arqueosRaw);
+        $activeArqueoId = $this->resolverArqueoActivoId($sesion, $arqueosRaw);
+
+        return [
+            'status'  => true,
+            'code'    => 'OK',
+            'message' => 'Historial de arqueos obtenido correctamente.',
+            'data'    => [
+                'session_id'       => $idSesion,
+                'version'          => (int)$sesion['version_caja'],
+                'active_arqueo_id' => $activeArqueoId,
+                'history'          => $history,
+            ],
+        ];
+    }
+
+    /**
+     * EP-19: POST /api/caja/arqueo
+     */
+    public function guardarArqueo(
+        array $input,
+        ?string $headerReferencia,
+        array $vendedor,
+        ?string $rawCountedLiteral = null,
+        bool $countedDuplicado = false
+    ): array {
+        $idVendedor = (int)$vendedor['id_usuario'];
+
+        $this->validarCamposPermitidos($input, [
+            'referencia_solicitud',
+            'request_id',
+            'counted',
+            'observation',
+            'version',
+        ]);
+
+        $referencia = ControlSolicitudService::resolverReferenciaCuerpoOCabecera($input, $headerReferencia);
+
+        if ($countedDuplicado) {
+            throw new InventarioException(
+                'El campo counted no puede repetirse en la solicitud.',
+                'INVALID_AMOUNT',
+                422,
+                ['counted' => ['El campo counted no debe enviarse duplicado.']]
+            );
+        }
+
+        $countedParsed = self::validarImporteMonetario(
+            $input['counted'] ?? null,
+            array_key_exists('counted', $input),
+            'counted',
+            true,
+            $rawCountedLiteral
+        );
+        $countedDecimal = $countedParsed['normalizado'];
+        $countedCent = $countedParsed['centimos'];
+
+        $versionSolicitada = $this->validarEnteroPositivoRequerido(
+            $input['version'] ?? null,
+            array_key_exists('version', $input),
+            'version',
+            'VALIDATION_ERROR',
+            'La versión de caja debe ser un entero positivo.'
+        );
+
+        $observationNorm = $this->validarObservacionArqueo($input);
+
+        $payloadFuncional = [
+            'counted'     => $countedDecimal,
+            'observation' => $observationNorm,
+            'version'     => $versionSolicitada,
+        ];
+
+        $resIdemp = $this->controlSolicitudService->ejecutarConIdempotencia(
+            $idVendedor,
+            'CAJA_ARQUEO',
+            $referencia,
+            $payloadFuncional,
+            function (PDO $pdoTx, int $idSolicitud) use (
+                $idVendedor,
+                $countedDecimal,
+                $countedCent,
+                $versionSolicitada,
+                $observationNorm
+            ): array {
+                $cajaTx = new CajaModel($pdoTx);
+                $sesion = $this->exigirSesionPropiaAbierta($cajaTx, $idVendedor, true);
+                $idSesion = (int)$sesion['id_sesion_caja'];
+                $versionActual = (int)$sesion['version_caja'];
+                $expectedDecimal = (string)$sesion['efectivo_esperado_actual'];
+                $expectedCent = self::parseDecimalACentimos($expectedDecimal);
+
+                if ($versionActual !== $versionSolicitada) {
+                    throw new InventarioException(
+                        'La versión de la caja cambió antes de guardar el arqueo.',
+                        'CASH_CHANGED',
+                        409,
+                        [],
+                        [
+                            'expected' => round($expectedCent / 100, 2),
+                            'version'  => $versionActual,
+                        ]
+                    );
+                }
+
+                $diffCent = $countedCent - $expectedCent;
+                if ($diffCent !== 0 && $observationNorm === null) {
+                    throw new InventarioException(
+                        'Debe ingresar una observación cuando existe diferencia entre el efectivo contado y el esperado.',
+                        'OBSERVATION_REQUIRED',
+                        422,
+                        ['observation' => ['La observación es obligatoria cuando existe diferencia.']]
+                    );
+                }
+
+                $ahoraStr = $this->ahoraLima()->format('Y-m-d H:i:s');
+                $cajaTx->reemplazarArqueoVigenteSesion($idSesion, $ahoraStr);
+
+                $idArqueo = $cajaTx->insertarArqueoCaja([
+                    'id_sesion_caja'            => $idSesion,
+                    'id_usuario_vendedor'       => $idVendedor,
+                    'version_caja_evaluada'     => $versionActual,
+                    'monto_esperado'            => $expectedDecimal,
+                    'monto_contado'             => $countedDecimal,
+                    'diferencia'                => self::centimosADecimal($diffCent),
+                    'observacion'               => $observationNorm,
+                    'fecha_hora_arqueo'         => $ahoraStr,
+                    'id_solicitud_idempotencia' => $idSolicitud,
+                ]);
+
+                $cajaTx->actualizarUltimoArqueoSesion($idSesion, $idArqueo);
+
+                $arqueosRaw = $cajaTx->listarArqueosSesion($idSesion);
+                $history = array_map(fn (array $r): array => $this->formatearArqueoResource($r), $arqueosRaw);
+                $arqueoActual = null;
+                foreach ($history as $item) {
+                    if ($item['id'] === $idArqueo) {
+                        $arqueoActual = $item;
+                        break;
+                    }
+                }
+
+                return [
+                    'id_registro' => $idArqueo,
+                    'response'    => [
+                        'status'            => true,
+                        'code'              => 'ARQUEO_SAVED',
+                        'idempotent_replay' => false,
+                        'message'           => 'Arqueo guardado correctamente.',
+                        'data'              => [
+                            'result_code' => 'ARQUEO_SAVED',
+                            'arqueo'      => $arqueoActual,
+                            'expected'    => round($expectedCent / 100, 2),
+                            'version'     => $versionActual,
+                            'history'     => $history,
+                        ],
+                    ],
+                ];
+            }
+        );
+
+        if (!empty($resIdemp['idempotent_replay'])) {
+            $resp = $resIdemp['response'];
+            $resp['status'] = true;
+            $resp['code'] = 'OPERATION_ALREADY_CONFIRMED';
+            $resp['idempotent_replay'] = true;
+            return [
+                'http_code' => 200,
+                'response'  => $resp,
+            ];
+        }
+
+        return [
+            'http_code' => 201,
+            'response'  => $resIdemp['response'],
+        ];
+    }
+
+    private function decimalDbANumero(string $valorDb): float
+    {
+        return round(self::parseDecimalACentimos($valorDb) / 100, 2);
+    }
+
+    private function formatearArqueoResource(array $row): array
+    {
+        $dt = new DateTimeImmutable((string)$row['fecha_hora_arqueo'], new DateTimeZone(self::LIMA_TZ));
+        $mapEstado = [
+            'VIGENTE'        => 'Vigente',
+            'REEMPLAZADO'    => 'Reemplazado',
+            'DESACTUALIZADO' => 'Desactualizado',
+        ];
+        $estadoFisico = (string)$row['estado'];
+
+        return [
+            'id'          => (int)$row['id_arqueo_caja'],
+            'session_id'  => (int)$row['id_sesion_caja'],
+            'date'        => $dt->format('Y-m-d'),
+            'time'        => $dt->format('H:i'),
+            'recorded_at' => $dt->format('Y-m-d\TH:i:sP'),
+            'expected'    => $this->decimalDbANumero((string)$row['monto_esperado']),
+            'counted'     => $this->decimalDbANumero((string)$row['monto_contado']),
+            'difference'  => $this->decimalDbANumero((string)$row['diferencia']),
+            'observation' => $row['observacion'] !== null ? (string)$row['observacion'] : null,
+            'status'      => $mapEstado[$estadoFisico] ?? $estadoFisico,
+            'version'     => (int)$row['version_caja_evaluada'],
+        ];
+    }
+
+    private function resolverArqueoActivoId(array $sesion, array $arqueosRaw): ?int
+    {
+        $idSesion = (int)$sesion['id_sesion_caja'];
+        $versionActual = (int)$sesion['version_caja'];
+        $idUltimo = $sesion['id_ultimo_arqueo'] !== null ? (int)$sesion['id_ultimo_arqueo'] : null;
+        if ($idUltimo === null || empty($arqueosRaw)) {
+            return null;
+        }
+
+        $ultimoRow = $arqueosRaw[count($arqueosRaw) - 1];
+        if (
+            (int)$ultimoRow['id_sesion_caja'] === $idSesion
+            && (int)$ultimoRow['id_arqueo_caja'] === $idUltimo
+            && (string)$ultimoRow['estado'] === 'VIGENTE'
+            && (int)$ultimoRow['version_caja_evaluada'] === $versionActual
+        ) {
+            return $idUltimo;
+        }
+
+        return null;
+    }
+
+    private function evaluarHorarioCierre(array $sesion, ?DateTimeImmutable $nowOverride = null): array
+    {
+        $tz = new DateTimeZone(self::LIMA_TZ);
+        $salidaDt = new DateTimeImmutable((string)$sesion['fecha_hora_salida_referencia'], $tz);
+        $nowDt = ($nowOverride ?? $this->ahoraLima())->setTimezone($tz);
+        $earlyThresholdDt = $salidaDt->modify('-15 minutes');
+        $requiresAuth = ($nowDt < $earlyThresholdDt);
+        $diffSeconds = $salidaDt->getTimestamp() - $nowDt->getTimestamp();
+        $minutesRemaining = $diffSeconds > 0 ? (int)ceil($diffSeconds / 60) : 0;
+
+        return [
+            'scheduled_end'            => $salidaDt->format('H:i'),
+            'current_time'             => $nowDt->format('H:i'),
+            'tolerance_minutes'        => 15,
+            'early_threshold'          => $earlyThresholdDt->format('H:i'),
+            'minutes_remaining_to_end' => $minutesRemaining,
+            'requires_authorization'   => $requiresAuth,
+            'reason'                   => $requiresAuth ? 'Cierre anterior al margen de quince minutos.' : null,
+        ];
+    }
+
+    private function resolverSessionIdQueryOpcional(array $queryParams): ?int
+    {
+        $hasSessionId = array_key_exists('session_id', $queryParams) && $queryParams['session_id'] !== '' && $queryParams['session_id'] !== null;
+        $hasSesionId = array_key_exists('sesion_id', $queryParams) && $queryParams['sesion_id'] !== '' && $queryParams['sesion_id'] !== null;
+
+        if (!$hasSessionId && !$hasSesionId) {
+            return null;
+        }
+
+        $vals = [];
+        if ($hasSessionId) {
+            $vals[] = $this->validarEnteroPositivoRequerido(
+                $queryParams['session_id'],
+                true,
+                'session_id',
+                'VALIDATION_ERROR',
+                'El identificador de sesión debe ser un entero positivo.'
+            );
+        }
+        if ($hasSesionId) {
+            $vals[] = $this->validarEnteroPositivoRequerido(
+                $queryParams['sesion_id'],
+                true,
+                'sesion_id',
+                'VALIDATION_ERROR',
+                'El identificador de sesión debe ser un entero positivo.'
+            );
+        }
+
+        if (count($vals) === 2 && $vals[0] !== $vals[1]) {
+            throw new InventarioException(
+                'Los parámetros session_id y sesion_id no coinciden.',
+                'AMBIGUOUS_ALIAS_VALUES',
+                422,
+                ['session_id' => ['Los alias session_id y sesion_id deben tener el mismo valor.']]
+            );
+        }
+
+        return $vals[0];
+    }
+
+    private function validarObservacionArqueo(array $input): ?string
+    {
+        if (!array_key_exists('observation', $input) || $input['observation'] === null) {
+            return null;
+        }
+        if (!is_string($input['observation'])) {
+            throw InventarioException::validacion([
+                'observation' => ['La observación debe ser una cadena de texto.'],
+            ]);
+        }
+        $trimmed = trim($input['observation']);
+        if ($trimmed === '') {
+            return null;
+        }
+        if (mb_strlen($trimmed, 'UTF-8') > 500) {
+            throw InventarioException::validacion([
+                'observation' => ['La observación no puede superar los 500 caracteres.'],
+            ]);
+        }
+        return $trimmed;
+    }
+
+    /**
+     * EP-20: POST /api/caja/cerrar
+     */
+    public function cerrarCaja(
+        array $input,
+        ?string $headerReferencia,
+        array $vendedor
+    ): array {
+        $idVendedor = (int)$vendedor['id_usuario'];
+
+        $this->validarCamposPermitidos($input, [
+            'referencia_solicitud',
+            'request_id',
+            'arqueo_id',
+            'admin_email',
+            'admin_password',
+            'exception_reason',
+        ]);
+
+        $referencia = ControlSolicitudService::resolverReferenciaCuerpoOCabecera($input, $headerReferencia);
+
+        $arqueoId = $this->validarEnteroPositivoRequerido(
+            $input['arqueo_id'] ?? null,
+            array_key_exists('arqueo_id', $input),
+            'arqueo_id',
+            'VALIDATION_ERROR',
+            'El campo arqueo_id debe ser un entero positivo.'
+        );
+
+        $rawAdminEmail = $input['admin_email'] ?? null;
+        if ($rawAdminEmail !== null && !is_string($rawAdminEmail)) {
+            throw new InventarioException(
+                'El correo electrónico del administrador autorizador no tiene un formato válido.',
+                'INVALID_ADMIN_EMAIL',
+                422,
+                ['admin_email' => ['El correo electrónico debe ser una cadena de texto válida.']]
+            );
+        }
+
+        $rawAdminPassword = $input['admin_password'] ?? null;
+        if ($rawAdminPassword !== null && !is_string($rawAdminPassword)) {
+            throw new InventarioException(
+                'Las credenciales del administrador autorizador son inválidas.',
+                'INVALID_ADMIN_CREDENTIALS',
+                403
+            );
+        }
+
+        $rawExceptionReason = $input['exception_reason'] ?? null;
+        if ($rawExceptionReason !== null && !is_string($rawExceptionReason)) {
+            throw new InventarioException(
+                'El motivo de excepción debe ser una cadena de texto.',
+                'MOTIVE_REQUIRED',
+                422,
+                ['exception_reason' => ['El motivo de excepción debe ser una cadena de texto.']]
+            );
+        }
+        $exceptionReasonNorm = $rawExceptionReason !== null ? trim($rawExceptionReason) : null;
+        if ($exceptionReasonNorm === '') {
+            $exceptionReasonNorm = null;
+        } elseif ($exceptionReasonNorm !== null && mb_strlen($exceptionReasonNorm, 'UTF-8') > 250) {
+            throw InventarioException::validacion([
+                'exception_reason' => ['El motivo de excepción no puede superar los 250 caracteres.'],
+            ]);
+        }
+
+        $idSesionObjetivo = $this->cajaModel->obtenerIdSesionPorArqueoId($arqueoId);
+        $payloadFuncional = [
+            'session_id'       => $idSesionObjetivo,
+            'arqueo_id'        => $arqueoId,
+            'exception_reason' => $exceptionReasonNorm,
+        ];
+
+        $resIdemp = $this->controlSolicitudService->ejecutarConIdempotencia(
+            $idVendedor,
+            'CAJA_CERRAR',
+            $referencia,
+            $payloadFuncional,
+            function (PDO $pdoTx, int $idSolicitud) use (
+                $idVendedor,
+                $arqueoId,
+                $rawAdminEmail,
+                $rawAdminPassword,
+                $exceptionReasonNorm
+            ): array {
+                $cajaTx = new CajaModel($pdoTx);
+                // Mismo orden de bloqueo que apertura: guardia física primero, luego sesion_caja.
+                $cajaTx->bloquearGuardiaCajaFisica();
+                $sesion = $this->exigirSesionPropiaAbierta($cajaTx, $idVendedor, true);
+                $idSesion = (int)$sesion['id_sesion_caja'];
+
+                $arqueo = $cajaTx->obtenerArqueoPorId($arqueoId, true);
+                if ($arqueo === null || (int)$arqueo['id_sesion_caja'] !== $idSesion) {
+                    throw new InventarioException(
+                        'El arqueo especificado no existe para la sesión de caja actual.',
+                        'ARQUEO_MISSING',
+                        409
+                    );
+                }
+
+                $idUltimoArqueo = $sesion['id_ultimo_arqueo'] !== null ? (int)$sesion['id_ultimo_arqueo'] : null;
+                if (
+                    $idUltimoArqueo !== $arqueoId
+                    || (string)$arqueo['estado'] !== 'VIGENTE'
+                    || (int)$arqueo['version_caja_evaluada'] !== (int)$sesion['version_caja']
+                ) {
+                    throw new InventarioException(
+                        'El arqueo especificado ya no está vigente para la versión actual de la caja.',
+                        'ARQUEO_STALE',
+                        409
+                    );
+                }
+
+                // Instante único bajo bloqueo para evaluar la regla de 15 minutos y persistir el cierre.
+                $tz = new DateTimeZone(self::LIMA_TZ);
+                $ahoraDt = $this->ahoraLima()->setTimezone($tz);
+                $ahoraDb = $ahoraDt->format('Y-m-d H:i:s');
+                $ahoraIso = $ahoraDt->format('Y-m-d\TH:i:sP');
+                $salidaDt = new DateTimeImmutable((string)$sesion['fecha_hora_salida_referencia'], $tz);
+                $scheduleEval = $this->evaluarHorarioCierre($sesion, $ahoraDt);
+
+                $authorizationResource = null;
+                if ($scheduleEval['requires_authorization']) {
+                    $sinEmail = ($rawAdminEmail === null || trim($rawAdminEmail) === '');
+                    $sinPassword = ($rawAdminPassword === null || $rawAdminPassword === '');
+                    if ($sinEmail && $sinPassword) {
+                        throw new InventarioException(
+                            'Se requiere autorización de un administrador para cerrar antes del margen de 15 minutos.',
+                            'AUTHORIZATION_REQUIRED',
+                            409,
+                            [],
+                            ['schedule' => $scheduleEval]
+                        );
+                    }
+
+                    if ($exceptionReasonNorm === null) {
+                        throw new InventarioException(
+                            'Debe ingresar el motivo de excepción para el cierre anticipado.',
+                            'MOTIVE_REQUIRED',
+                            422,
+                            ['exception_reason' => ['El motivo de excepción es obligatorio para el cierre anticipado.']]
+                        );
+                    }
+
+                    $authService = new AuthService();
+                    $adminInfo = $authService->verificarCredencialesAdministradorPorEmail(
+                        (string)($rawAdminEmail ?? ''),
+                        (string)($rawAdminPassword ?? ''),
+                        $idVendedor,
+                        $pdoTx
+                    );
+
+                    $diffSeconds = $salidaDt->getTimestamp() - $ahoraDt->getTimestamp();
+                    $minutosAnticipacion = (int)ceil($diffSeconds / 60);
+
+                    $idAutorizacion = $cajaTx->insertarAutorizacionCaja([
+                        'id_sesion_caja'               => $idSesion,
+                        'id_usuario_vendedor'          => $idVendedor,
+                        'id_usuario_admin'             => $adminInfo['id_usuario'],
+                        'motivo'                       => $exceptionReasonNorm,
+                        'hora_salida_referencia'       => (string)$sesion['hora_fin_referencia'],
+                        'fecha_hora_salida_referencia' => (string)$sesion['fecha_hora_salida_referencia'],
+                        'hora_cierre_real'             => $ahoraDb,
+                        'minutos_anticipacion'         => $minutosAnticipacion,
+                        'fecha_hora_autorizacion'      => $ahoraDb,
+                        'id_solicitud_idempotencia'    => $idSolicitud,
+                    ]);
+
+                    $authorizationResource = [
+                        'required'           => true,
+                        'id'                 => $idAutorizacion,
+                        'administrator_id'   => $adminInfo['id_usuario'],
+                        'administrator_name' => $adminInfo['nombre'],
+                        'exception_reason'   => $exceptionReasonNorm,
+                        'scheduled_end'      => $salidaDt->format('H:i'),
+                        'actual_close_time'  => $ahoraDt->format('H:i'),
+                        'minutes_before_end' => $minutosAnticipacion,
+                        'authorized_at'      => $ahoraIso,
+                    ];
+                }
+
+                $cajaTx->cerrarSesionCaja([
+                    'id_sesion_caja'           => $idSesion,
+                    'id_arqueo_cierre'         => $arqueoId,
+                    'fecha_hora_cierre'        => $ahoraDb,
+                    'efectivo_esperado_cierre' => (string)$arqueo['monto_esperado'],
+                    'efectivo_contado_cierre'  => (string)$arqueo['monto_contado'],
+                    'diferencia_cierre'        => (string)$arqueo['diferencia'],
+                    'observacion_cierre'       => $arqueo['observacion'],
+                    'id_solicitud_cierre'      => $idSolicitud,
+                ]);
+
+                $sellerName = $cajaTx->obtenerNombreUsuarioPorId($idVendedor);
+                $turnName = (string)$sesion['nombre_turno_referencia'];
+                $startHm = substr((string)$sesion['hora_inicio_referencia'], 0, 5);
+                $endHm = substr((string)$sesion['hora_fin_referencia'], 0, 5);
+
+                $dataPayload = [
+                    'result_code'        => 'CLOSE_CONFIRMED',
+                    'session_id'         => $idSesion,
+                    'status'             => 'Cerrada',
+                    'seller_id'          => $idVendedor,
+                    'seller'             => $sellerName,
+                    'turn'               => $turnName,
+                    'reference_schedule' => [
+                        'shift_id'   => (int)$sesion['id_turno_referencia'],
+                        'shift_name' => $turnName,
+                        'start'      => $startHm,
+                        'end'        => $endHm,
+                        'label'      => "{$turnName} · {$startHm}–{$endHm}",
+                    ],
+                    'opened_at'          => $this->formatearIsoLima((string)$sesion['fecha_hora_apertura']),
+                    'closed_at'          => $ahoraIso,
+                    'arqueo_id'          => $arqueoId,
+                    'summary'            => [
+                        'opening_fund'       => $this->decimalDbANumero((string)$sesion['monto_apertura']),
+                        'opening_difference' => $this->decimalDbANumero((string)$sesion['diferencia_apertura']),
+                        'cash_sales'         => $this->decimalDbANumero((string)$sesion['total_ventas_efectivo']),
+                        'card'               => $this->decimalDbANumero((string)$sesion['total_ventas_tarjeta']),
+                        'yape_plin'          => $this->decimalDbANumero((string)$sesion['total_ventas_yape_plin']),
+                        'income'             => $this->decimalDbANumero((string)$sesion['total_ingresos']),
+                        'expenses'           => $this->decimalDbANumero((string)$sesion['total_egresos']),
+                        'expected'           => $this->decimalDbANumero((string)$arqueo['monto_esperado']),
+                        'counted'            => $this->decimalDbANumero((string)$arqueo['monto_contado']),
+                        'difference'         => $this->decimalDbANumero((string)$arqueo['diferencia']),
+                        'observation'        => $arqueo['observacion'] !== null ? (string)$arqueo['observacion'] : null,
+                        'closed_at'          => $ahoraIso,
+                    ],
+                    'authorization'      => $authorizationResource,
+                ];
+
+                return [
+                    'id_registro' => $idSesion,
+                    'response'    => [
+                        'status'            => true,
+                        'code'              => 'CLOSE_CONFIRMED',
+                        'idempotent_replay' => false,
+                        'message'           => 'Cierre de sesión de caja confirmado correctamente.',
+                        'data'              => $dataPayload,
+                    ],
+                ];
+            }
+        );
+
+        if (!empty($resIdemp['idempotent_replay'])) {
+            $resp = $resIdemp['response'];
+            $resp['status'] = true;
+            $resp['code'] = 'OPERATION_ALREADY_CONFIRMED';
+            $resp['idempotent_replay'] = true;
+            return [
+                'http_code' => 200,
+                'response'  => $resp,
+            ];
+        }
+
+        return [
+            'http_code' => 200,
+            'response'  => $resIdemp['response'],
+        ];
+    }
+
+    /**
+     * EP-21: GET /api/caja/cierre?session_id={id}&referencia_solicitud={ref}
+     */
+    public function consultarCierre(int $idVendedorAutenticado, array $queryParams): array
+    {
+        $sessionId = $this->resolverSessionIdQueryOpcional($queryParams);
+        if ($sessionId === null) {
+            throw InventarioException::validacion([
+                'session_id' => ['El parámetro session_id es obligatorio y debe ser un entero positivo.'],
+            ]);
+        }
+
+        $hasRef = array_key_exists('referencia_solicitud', $queryParams);
+        $hasReqId = array_key_exists('request_id', $queryParams);
+        if ($hasRef && $hasReqId && (string)$queryParams['referencia_solicitud'] !== (string)$queryParams['request_id']) {
+            throw new InventarioException(
+                'Los parámetros referencia_solicitud y request_id no coinciden.',
+                'AMBIGUOUS_ALIAS_VALUES',
+                422,
+                ['referencia_solicitud' => ['Los alias referencia_solicitud y request_id deben tener el mismo valor.']]
+            );
+        }
+
+        $rawRef = $hasRef ? $queryParams['referencia_solicitud'] : ($hasReqId ? $queryParams['request_id'] : null);
+        $referencia = ControlSolicitudService::validarReferenciaSolicitud($rawRef);
+
+        $sesion = $this->cajaModel->obtenerSesionCajaPorId($sessionId);
+        if ($sesion === null) {
+            throw new InventarioException(
+                'La sesión de caja solicitada no existe.',
+                'CASH_SESSION_NOT_FOUND',
+                404
+            );
+        }
+        if ((int)$sesion['id_usuario_vendedor'] !== $idVendedorAutenticado) {
+            throw new InventarioException(
+                'La sesión de caja solicitada pertenece a otro vendedor.',
+                'SESSION_NOT_OWNED',
+                403
+            );
+        }
+
+        $confirmacion = $this->controlSolicitudService->buscarConfirmacionPorReferencia(
+            $idVendedorAutenticado,
+            'CAJA_CERRAR',
+            $referencia
+        );
+
+        if (
+            $confirmacion !== null
+            && (int)($confirmacion['response']['data']['session_id'] ?? 0) === $sessionId
+        ) {
+            return [
+                'status'  => true,
+                'code'    => 'OK',
+                'message' => 'Resumen de cierre recuperado correctamente.',
+                'data'    => $confirmacion['response']['data'],
+            ];
+        }
+
+        if ((string)$sesion['estado'] === 'ABIERTA') {
+            return [
+                'status'  => true,
+                'code'    => 'OK',
+                'message' => 'La sesión aún se encuentra abierta.',
+                'data'    => null,
+            ];
+        }
+
+        throw new InventarioException(
+            'No está permitido consultar cierres históricos sin la referencia de confirmación correspondiente.',
+            'HISTORICAL_QUERY_NOT_ALLOWED',
+            403
+        );
     }
 }

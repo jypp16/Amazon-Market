@@ -69,12 +69,13 @@ try {
     $stock = fn() => (int)$pdoTest->query("SELECT stock_actual FROM producto WHERE id_producto={$idProduct}")->fetchColumn();
     $replay = httpTest('/api/compras', 'POST', $purchase, $admin);
     checkHttp('Reintento compra responde 200 sin duplicar entrada', $replay['status'] === 200 && $replay['json']['idempotent_replay'] === true && $stock() === 12);
+    prepararSesionCajaPruebaSprint3($pdoTest);
     $sale = ['id_cliente' => 1, 'id_tipo_comprobante' => 1, 'id_metodo_pago' => 1, 'productos' => [['id_producto' => $idProduct, 'cantidad' => 2]]];
-    checkHttp('Venta sin referencia rechazada con 422', httpTest('/api/ventas', 'POST', $sale, $admin)['status'] === 422);
+    checkHttp('Venta sin referencia rechazada con 422', httpTest('/api/ventas', 'POST', $sale, $seller)['status'] === 422);
     $sale['referencia_solicitud'] = httpReference('venta');
-    $sold = httpTest('/api/ventas', 'POST', $sale, $admin);
+    $sold = httpTest('/api/ventas', 'POST', $sale, $seller);
     checkHttp('Venta real descuenta 2 unidades', $sold['status'] === 201 && $stock() === 10);
-    $replay = httpTest('/api/ventas', 'POST', $sale, $admin);
+    $replay = httpTest('/api/ventas', 'POST', $sale, $seller);
     checkHttp('Reintento venta no duplica salida ni comprobante', $replay['status'] === 200 && $replay['json']['idempotent_replay'] === true && $stock() === 10);
     $correction = $purchase;
     $correction['referencia_solicitud'] = httpReference('correccion');
@@ -110,37 +111,6 @@ try {
     $replay = httpTest('/api/compras/' . $purchaseId, 'DELETE', $cancel, $admin);
     checkHttp('Reintento anulación no vuelve a retirar unidades', $replay['status'] === 200 && !empty($replay['json']['idempotent_replay']) && $stock() === 10);
 } finally {
-    // Los identificadores provienen de un único producto creado por esta suite.
-    if ($idProduct) {
-        $pdoTest->beginTransaction();
-        try {
-            $deleteSnapshot = $pdoTest->prepare('DELETE FROM reporte_consulta_snapshot WHERE id_usuario=1 AND referencia_consulta=?');
-            foreach ($snapshots as $ref) $deleteSnapshot->execute([$ref]);
-            $pdoTest->exec("DELETE FROM kardex WHERE id_producto={$idProduct}");
-            $pdoTest->exec("DELETE h FROM compra_historial h JOIN compra c ON c.id_compra=h.id_compra JOIN detalle_compra d ON d.id_compra=c.id_compra WHERE d.id_producto={$idProduct}");
-            $purchaseIds = $pdoTest->query("SELECT DISTINCT id_compra FROM detalle_compra WHERE id_producto={$idProduct}")->fetchAll(PDO::FETCH_COLUMN);
-            $saleIds = $pdoTest->query("SELECT DISTINCT id_venta FROM detalle_venta WHERE id_producto={$idProduct}")->fetchAll(PDO::FETCH_COLUMN);
-            $pdoTest->exec("UPDATE detalle_compra SET id_detalle_origen=NULL WHERE id_producto={$idProduct}");
-            $pdoTest->exec("DELETE FROM detalle_compra WHERE id_producto={$idProduct}");
-            $pdoTest->exec("DELETE FROM detalle_venta WHERE id_producto={$idProduct}");
-            foreach ($purchaseIds as $id) $pdoTest->exec('DELETE FROM compra WHERE id_compra=' . (int)$id);
-            foreach ($saleIds as $id) $pdoTest->exec('DELETE FROM venta WHERE id_venta=' . (int)$id);
-            $pdoTest->exec("DELETE FROM producto WHERE id_producto={$idProduct}");
-            $deleteReference = $pdoTest->prepare('DELETE FROM control_solicitud_idempotencia WHERE id_usuario=1 AND referencia_solicitud=?');
-            foreach ($references as $ref) $deleteReference->execute([$ref]);
-            // Solo restaurar la serie utilizada si nadie avanzó su numeración
-            // después de nuestra venta. Nunca retroceder avances concurrentes.
-            if (($sold['status'] ?? 0) === 201) {
-                $restore = $pdoTest->prepare('UPDATE serie_comprobante SET correlativo_actual=? WHERE id_serie=? AND correlativo_actual=?');
-                foreach ($correlativo as $row) {
-                    if ((int)$row['id_tipo_comprobante'] === 1 && $row['serie'] === ($sold['json']['data']['serie'] ?? null)) {
-                        $restore->execute([(int)$row['correlativo_actual'], (int)$row['id_serie'], (int)$row['correlativo_actual'] + 1]);
-                    }
-                }
-            }
-            $pdoTest->commit();
-        } catch (Throwable $e) { $pdoTest->rollBack(); throw $e; }
-    }
     foreach ([$admin, $seller] as $session) {
         $file = $sessionDir . '/sess_' . substr($session['cookie'], strpos($session['cookie'], '=') + 1);
         if (is_file($file)) unlink($file);

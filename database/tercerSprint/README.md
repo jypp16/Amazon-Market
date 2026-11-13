@@ -154,3 +154,47 @@ Para habilitar `corrected_amount >= 0.00` en correcciones vinculadas (`EP-16`) s
      C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_paso8_sprint3.php <base_ensayo>
      ```
 - **Efecto:** Reemplaza únicamente `chk_correccion_importes_y_motivo` en `correccion_movimiento_caja` para permitir `monto_vigente_previo >= 0.00` y `monto_corregido >= 0.00`, conservando `monto_original > 0.00`, `monto_corregido <> monto_vigente_previo`, `efecto_saldo <> 0.00` y todos los triggers de inmutabilidad. No aplica sobre `amazon_market`.
+
+---
+
+## 7. Migración Incremental Adicional — Paso 8 (`08_ampliar_referencia_visible_movimiento_caja_sprint3.sql`)
+
+Para conservar íntegras las referencias visibles generadas por `EP-13` (`admin_injection`) y `EP-14` (`admin_withdrawal`) cuando se combinan un motivo máximo de `250` caracteres y un nombre de administrador de `100` caracteres (`362` caracteres totales con separador y etiqueta), sin truncamiento en modo permisivo ni error `1406` en modo SQL estricto, se incorpora el script incremental **08**:
+
+- **Archivo:** [08_ampliar_referencia_visible_movimiento_caja_sprint3.sql](08_ampliar_referencia_visible_movimiento_caja_sprint3.sql)
+- **Ejecutor:** [ejecutar_ajuste_referencia_paso8_sprint3.php](tools/ejecutar_ajuste_referencia_paso8_sprint3.php)
+- **Orden de ejecución:**
+  - **Sobre una copia que ya tenía `01..07`:** ejecutar directamente:
+    ```powershell
+    C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_referencia_paso8_sprint3.php <base_ensayo>
+    ```
+  - **Sobre una copia nueva preparada desde el respaldo:** ejecutar en secuencia `01..06`, luego `07`, y finalmente `08`:
+    ```powershell
+    C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_migracion_sprint3.php <base_ensayo>
+    C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_paso8_sprint3.php <base_ensayo>
+    C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_referencia_paso8_sprint3.php <base_ensayo>
+    ```
+- **Verificación SQL:**
+  ```sql
+  SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, CHARACTER_MAXIMUM_LENGTH
+    FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA = '<base_ensayo>'
+     AND TABLE_NAME = 'movimiento_caja'
+     AND COLUMN_NAME = 'referencia_visible';
+  -- Esperado: varchar(500), CHARACTER_MAXIMUM_LENGTH = 500
+  ```
+- **Efecto:** Amplía únicamente `movimiento_caja.referencia_visible` a `VARCHAR(500)` conservando todos los registros, restricciones y triggers existentes. No aplica sobre `amazon_market`.
+
+---
+
+## 8. Migración Incremental Adicional — Paso 9 (`09_ajuste_trigger_venta_efectivo_sprint3.sql`)
+
+Para habilitar el registro de movimientos `VENTA_EFECTIVO` vinculados a ventas confirmadas (`venta.estado = 1`, `tinyint(4)`) sin error `MOVIMIENTO_VENTA_METODO_O_MONTO_INVALIDO`, se incorpora el script incremental **09**:
+
+- **Archivo:** [09_ajuste_trigger_venta_efectivo_sprint3.sql](09_ajuste_trigger_venta_efectivo_sprint3.sql)
+- **Ejecutor:** [ejecutar_ajuste_venta_paso9_sprint3.php](tools/ejecutar_ajuste_venta_paso9_sprint3.php)
+- **Orden de ejecución (después de `01..06`, `07` y `08`):**
+  ```powershell
+  C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_venta_paso9_sprint3.php <base_ensayo>
+  ```
+- **Efecto:** Reemplaza `trg_movimiento_caja_before_insert_integridad` alineando la comprobación de `venta.estado` a `1` (`tinyint`), conservando todas las demás validaciones de `movimiento_caja`. No aplica sobre `amazon_market`.

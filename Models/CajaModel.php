@@ -130,7 +130,6 @@ class CajaModel extends Model
                     s.id_sesion_caja,
                     s.id_caja_fisica,
                     s.id_usuario_vendedor,
-                    u.nombre AS seller_name,
                     s.id_turno,
                     s.nombre_turno_referencia,
                     TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
@@ -153,12 +152,11 @@ class CajaModel extends Model
                     s.total_egresos,
                     s.total_retiros_omitidos_declarados,
                     s.efectivo_esperado_actual,
+                    s.id_ultimo_arqueo,
                     s.version_caja,
                     s.estado,
                     s.id_solicitud_apertura
                 FROM sesion_caja s
-                INNER JOIN usuario u
-                    ON u.id_usuario = s.id_usuario_vendedor
                 WHERE s.estado = 'ABIERTA'
                 ORDER BY s.id_sesion_caja DESC
                 LIMIT 1{$lock}";
@@ -167,7 +165,17 @@ class CajaModel extends Model
         $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $row !== false ? $row : null;
+        if ($row === false) {
+            return null;
+        }
+
+        // Consultar seller_name fuera del FOR UPDATE para evitar deadlocks por inversión de orden de bloqueo (usuario <-> sesion_caja)
+        $stmtSeller = $this->conect->prepare('SELECT nombre FROM usuario WHERE id_usuario = :id_usuario LIMIT 1');
+        $stmtSeller->execute([':id_usuario' => (int)$row['id_usuario_vendedor']]);
+        $sellerName = $stmtSeller->fetchColumn();
+        $row['seller_name'] = $sellerName !== false ? (string)$sellerName : '';
+
+        return $row;
     }
 
     /**
@@ -495,6 +503,35 @@ class CajaModel extends Model
     }
 
     /**
+     * Actualiza acumulados de ventas por medio de pago, efectivo esperado e incrementa version_caja en +1.
+     */
+    public function actualizarAcumuladosVentaYVersionSesion(
+        int $idSesion,
+        string $totalVentasEfectivo,
+        string $totalVentasTarjeta,
+        string $totalVentasYapePlin,
+        string $efectivoEsperadoActual
+    ): void {
+        $sql = "UPDATE sesion_caja
+                SET total_ventas_efectivo = :total_ventas_efectivo,
+                    total_ventas_tarjeta = :total_ventas_tarjeta,
+                    total_ventas_yape_plin = :total_ventas_yape_plin,
+                    efectivo_esperado_actual = :efectivo_esperado_actual,
+                    version_caja = version_caja + 1
+                WHERE id_sesion_caja = :id_sesion
+                  AND estado = 'ABIERTA'";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':total_ventas_efectivo'    => $totalVentasEfectivo,
+            ':total_ventas_tarjeta'     => $totalVentasTarjeta,
+            ':total_ventas_yape_plin'   => $totalVentasYapePlin,
+            ':efectivo_esperado_actual' => $efectivoEsperadoActual,
+            ':id_sesion'                => $idSesion,
+        ]);
+    }
+
+    /**
      * Marca como DESACTUALIZADO cualquier arqueo VIGENTE de la sesión tras una operación de caja.
      */
     public function desactualizarArqueoVigenteSesion(int $idSesion, string $fechaHoraCambio): void
@@ -694,5 +731,234 @@ class CajaModel extends Model
         ]);
 
         return (int)$this->conect->lastInsertId();
+    }
+
+    public function obtenerSesionCajaPorId(int $idSesion): ?array
+    {
+        $sql = "SELECT
+                    id_sesion_caja,
+                    id_usuario_vendedor,
+                    version_caja,
+                    id_ultimo_arqueo,
+                    estado
+                FROM sesion_caja
+                WHERE id_sesion_caja = :id_sesion
+                LIMIT 1";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    public function obtenerNombreUsuarioPorId(int $idUsuario): string
+    {
+        $stmt = $this->conect->prepare("SELECT nombre FROM usuario WHERE id_usuario = :id LIMIT 1");
+        $stmt->execute([':id' => $idUsuario]);
+        $nombre = $stmt->fetchColumn();
+        return is_string($nombre) ? $nombre : '';
+    }
+
+    /**
+     * Lista el historial cronológico completo de arqueos de una sesión.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function listarArqueosSesion(int $idSesion): array
+    {
+        $sql = "SELECT
+                    id_arqueo_caja,
+                    id_sesion_caja,
+                    id_usuario_vendedor,
+                    version_caja_evaluada,
+                    monto_esperado,
+                    monto_contado,
+                    diferencia,
+                    observacion,
+                    estado,
+                    vigencia_activa,
+                    causa_cambio_estado,
+                    fecha_hora_arqueo,
+                    fecha_hora_cambio_estado
+                FROM arqueo_caja
+                WHERE id_sesion_caja = :id_sesion
+                ORDER BY fecha_hora_arqueo ASC, id_arqueo_caja ASC";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function reemplazarArqueoVigenteSesion(int $idSesion, string $fechaHoraCambio): void
+    {
+        $sql = "UPDATE arqueo_caja
+                   SET estado = 'REEMPLAZADO',
+                       vigencia_activa = NULL,
+                       causa_cambio_estado = 'NUEVO_ARQUEO',
+                       fecha_hora_cambio_estado = :fecha_cambio
+                 WHERE id_sesion_caja = :id_sesion
+                   AND estado = 'VIGENTE'";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':fecha_cambio' => $fechaHoraCambio,
+            ':id_sesion'    => $idSesion,
+        ]);
+    }
+
+    public function insertarArqueoCaja(array $datos): int
+    {
+        $sql = "INSERT INTO arqueo_caja (
+                    id_sesion_caja,
+                    id_usuario_vendedor,
+                    version_caja_evaluada,
+                    monto_esperado,
+                    monto_contado,
+                    diferencia,
+                    observacion,
+                    estado,
+                    vigencia_activa,
+                    fecha_hora_arqueo,
+                    id_solicitud_idempotencia
+                ) VALUES (
+                    :id_sesion_caja,
+                    :id_usuario_vendedor,
+                    :version_caja_evaluada,
+                    :monto_esperado,
+                    :monto_contado,
+                    :diferencia,
+                    :observacion,
+                    'VIGENTE',
+                    1,
+                    :fecha_hora_arqueo,
+                    :id_solicitud_idempotencia
+                )";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_sesion_caja'            => (int)$datos['id_sesion_caja'],
+            ':id_usuario_vendedor'       => (int)$datos['id_usuario_vendedor'],
+            ':version_caja_evaluada'     => (int)$datos['version_caja_evaluada'],
+            ':monto_esperado'            => (string)$datos['monto_esperado'],
+            ':monto_contado'             => (string)$datos['monto_contado'],
+            ':diferencia'                => (string)$datos['diferencia'],
+            ':observacion'               => $datos['observacion'],
+            ':fecha_hora_arqueo'         => (string)$datos['fecha_hora_arqueo'],
+            ':id_solicitud_idempotencia' => $datos['id_solicitud_idempotencia'],
+        ]);
+        return (int)$this->conect->lastInsertId();
+    }
+
+    public function actualizarUltimoArqueoSesion(int $idSesion, int $idArqueo): void
+    {
+        $sql = "UPDATE sesion_caja
+                   SET id_ultimo_arqueo = :id_arqueo
+                 WHERE id_sesion_caja = :id_sesion";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_arqueo' => $idArqueo,
+            ':id_sesion' => $idSesion,
+        ]);
+    }
+
+    public function obtenerIdSesionPorArqueoId(int $idArqueo): ?int
+    {
+        $stmt = $this->conect->prepare(
+            "SELECT id_sesion_caja FROM arqueo_caja WHERE id_arqueo_caja = :id_arqueo LIMIT 1"
+        );
+        $stmt->execute([':id_arqueo' => $idArqueo]);
+        $val = $stmt->fetchColumn();
+        return $val !== false ? (int)$val : null;
+    }
+
+    public function obtenerArqueoPorId(int $idArqueo, bool $forUpdate = false): ?array
+    {
+        $sql = "SELECT
+                    id_arqueo_caja,
+                    id_sesion_caja,
+                    id_usuario_vendedor,
+                    version_caja_evaluada,
+                    monto_esperado,
+                    monto_contado,
+                    diferencia,
+                    observacion,
+                    estado,
+                    fecha_hora_arqueo
+                FROM arqueo_caja
+                WHERE id_arqueo_caja = :id_arqueo
+                LIMIT 1";
+        if ($forUpdate) {
+            $sql .= ' FOR UPDATE';
+        }
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_arqueo' => $idArqueo]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? $row : null;
+    }
+
+    public function insertarAutorizacionCaja(array $datos): int
+    {
+        $sql = "INSERT INTO autorizacion_caja (
+                    id_sesion_caja,
+                    tipo_operacion,
+                    id_usuario_vendedor,
+                    id_usuario_admin,
+                    motivo,
+                    hora_salida_referencia,
+                    fecha_hora_salida_referencia,
+                    hora_cierre_real,
+                    minutos_anticipacion,
+                    fecha_hora_autorizacion,
+                    id_solicitud_idempotencia
+                ) VALUES (
+                    :id_sesion_caja,
+                    'CIERRE_ANTICIPADO',
+                    :id_usuario_vendedor,
+                    :id_usuario_admin,
+                    :motivo,
+                    :hora_salida_referencia,
+                    :fecha_hora_salida_referencia,
+                    :hora_cierre_real,
+                    :minutos_anticipacion,
+                    :fecha_hora_autorizacion,
+                    :id_solicitud_idempotencia
+                )";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_sesion_caja'               => (int)$datos['id_sesion_caja'],
+            ':id_usuario_vendedor'          => (int)$datos['id_usuario_vendedor'],
+            ':id_usuario_admin'             => (int)$datos['id_usuario_admin'],
+            ':motivo'                       => (string)$datos['motivo'],
+            ':hora_salida_referencia'       => (string)$datos['hora_salida_referencia'],
+            ':fecha_hora_salida_referencia' => (string)$datos['fecha_hora_salida_referencia'],
+            ':hora_cierre_real'             => (string)$datos['hora_cierre_real'],
+            ':minutos_anticipacion'         => (int)$datos['minutos_anticipacion'],
+            ':fecha_hora_autorizacion'      => (string)$datos['fecha_hora_autorizacion'],
+            ':id_solicitud_idempotencia'    => $datos['id_solicitud_idempotencia'],
+        ]);
+        return (int)$this->conect->lastInsertId();
+    }
+
+    public function cerrarSesionCaja(array $datos): void
+    {
+        $sql = "UPDATE sesion_caja
+                   SET estado = 'CERRADA',
+                       id_arqueo_cierre = :id_arqueo_cierre,
+                       fecha_hora_cierre = :fecha_hora_cierre,
+                       efectivo_esperado_cierre = :efectivo_esperado_cierre,
+                       efectivo_contado_cierre = :efectivo_contado_cierre,
+                       diferencia_cierre = :diferencia_cierre,
+                       observacion_cierre = :observacion_cierre,
+                       id_solicitud_cierre = :id_solicitud_cierre,
+                       version_caja = version_caja + 1
+                 WHERE id_sesion_caja = :id_sesion_caja
+                   AND estado = 'ABIERTA'";
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_arqueo_cierre'         => (int)$datos['id_arqueo_cierre'],
+            ':fecha_hora_cierre'        => (string)$datos['fecha_hora_cierre'],
+            ':efectivo_esperado_cierre' => (string)$datos['efectivo_esperado_cierre'],
+            ':efectivo_contado_cierre'  => (string)$datos['efectivo_contado_cierre'],
+            ':diferencia_cierre'        => (string)$datos['diferencia_cierre'],
+            ':observacion_cierre'       => $datos['observacion_cierre'],
+            ':id_solicitud_cierre'      => (int)$datos['id_solicitud_cierre'],
+            ':id_sesion_caja'           => (int)$datos['id_sesion_caja'],
+        ]);
     }
 }

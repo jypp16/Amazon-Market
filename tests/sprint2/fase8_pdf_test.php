@@ -95,8 +95,9 @@ try {
     $ref = f8MoveRef('ajuste-neg');
     $inventory->registrarAjuste(['id_producto'=>$productId,'tipo_ajuste'=>'Ajuste negativo','cantidad'=>2,'saldo_anterior_esperado'=>25,'justificacion'=>'Faltante confirmado en conteo','referencia_solicitud'=>$ref], $ref, 1);
     $invoiceCounterBefore = (int)$pdoTest->query('SELECT correlativo_actual FROM serie_comprobante WHERE id_tipo_comprobante=1 LIMIT 1')->fetchColumn();
+    $idVendedorPdf = prepararSesionCajaPruebaSprint3($pdoTest);
     $saleResult = (new Services\VentaService())->procesarVenta([
-        'id_usuario'=>1,'id_cliente'=>1,'id_tipo_comprobante'=>1,'id_metodo_pago'=>1,
+        'id_usuario'=>$idVendedorPdf,'id_cliente'=>1,'id_tipo_comprobante'=>1,'id_metodo_pago'=>1,
         'productos'=>[['id_producto'=>$productId,'cantidad'=>1]],
     ]);
     $saleId = (int)($saleResult['data']['id_venta'] ?? 0);
@@ -168,38 +169,6 @@ try {
     $legacyPdf = f8Pdf('resumen', [], $admin);
     f8Assert('Los reportes PDF existentes conservan la descarga A4 vertical', $legacyPdf['status']===200 && str_starts_with($legacyPdf['body'],'%PDF-') && str_contains($legacyPdf['headers']['content-type']??'','application/pdf'));
 } finally {
-    if ($productId) {
-        $pdoTest->beginTransaction();
-        try {
-            foreach ($snapshotRefs as $ref) {
-                $delete = $pdoTest->prepare('DELETE FROM reporte_consulta_snapshot_item WHERE id_snapshot=(SELECT id_snapshot FROM reporte_consulta_snapshot WHERE referencia_consulta=?)');
-                $delete->execute([$ref]);
-                $delete = $pdoTest->prepare('DELETE FROM reporte_consulta_snapshot WHERE referencia_consulta=? AND id_usuario=1');
-                $delete->execute([$ref]);
-            }
-            $stmt = $pdoTest->prepare('SELECT id_compra FROM detalle_compra WHERE id_producto=?'); $stmt->execute([$productId]); $purchases=$stmt->fetchAll(PDO::FETCH_COLUMN);
-            $stmt = $pdoTest->prepare('SELECT id_venta FROM detalle_venta WHERE id_producto=?'); $stmt->execute([$productId]); $sales=$stmt->fetchAll(PDO::FETCH_COLUMN);
-            $pdoTest->prepare('UPDATE detalle_compra SET id_detalle_origen=NULL WHERE id_producto=?')->execute([$productId]);
-            $pdoTest->prepare('DELETE FROM kardex WHERE id_producto=?')->execute([$productId]);
-            $pdoTest->prepare('DELETE FROM operacion_inventario WHERE id_producto=?')->execute([$productId]);
-            $pdoTest->prepare('DELETE FROM detalle_venta WHERE id_producto=?')->execute([$productId]);
-            $pdoTest->prepare('DELETE FROM detalle_compra WHERE id_producto=?')->execute([$productId]);
-            foreach ($purchases as $id) $pdoTest->exec('DELETE FROM compra WHERE id_compra='.(int)$id);
-            foreach ($sales as $id) {
-                $deleteSaleControl=$pdoTest->prepare('DELETE FROM control_solicitud_idempotencia WHERE id_usuario=1 AND tipo_operacion="VENTA" AND id_registro_recurso=?');
-                $deleteSaleControl->execute([$id]);
-                $pdoTest->exec('DELETE FROM venta WHERE id_venta='.(int)$id);
-            }
-            if ($invoiceCounterBefore !== null) {
-                $restoreCounter=$pdoTest->prepare('UPDATE serie_comprobante SET correlativo_actual=? WHERE id_tipo_comprobante=1');
-                $restoreCounter->execute([$invoiceCounterBefore]);
-            }
-            $deleteControl=$pdoTest->prepare('DELETE FROM control_solicitud_idempotencia WHERE id_usuario=1 AND referencia_solicitud=?');
-            foreach ($operationRefs as $ref) $deleteControl->execute([$ref]);
-            $pdoTest->prepare('DELETE FROM producto WHERE id_producto=?')->execute([$productId]);
-            $pdoTest->commit();
-        } catch (Throwable $error) { if ($pdoTest->inTransaction()) $pdoTest->rollBack(); throw $error; }
-    }
     foreach ([$admin,$otherAdmin,$seller] as $session) {
         $sessionId = substr($session['cookie'], strpos($session['cookie'], '=') + 1);
         if (is_file($sessionDir . '/sess_' . $sessionId)) unlink($sessionDir . '/sess_' . $sessionId);

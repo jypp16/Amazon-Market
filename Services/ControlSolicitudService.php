@@ -40,6 +40,55 @@ class ControlSolicitudService {
     }
 
     /**
+     * Resuelve la referencia de idempotencia desde `referencia_solicitud`, `request_id`
+     * y/o la cabecera `X-Request-Reference`, rechazando contradicciones entre alias.
+     */
+    public static function resolverReferenciaCuerpoOCabecera(array $input, ?string $headerReferencia = null): string {
+        $tieneRefBody = array_key_exists('referencia_solicitud', $input) && $input['referencia_solicitud'] !== null && $input['referencia_solicitud'] !== '';
+        $tieneReqIdBody = array_key_exists('request_id', $input) && $input['request_id'] !== null && $input['request_id'] !== '';
+        $tieneHeader = is_string($headerReferencia) && trim($headerReferencia) !== '';
+
+        $candidatos = [];
+        if ($tieneRefBody) {
+            if (!is_string($input['referencia_solicitud'])) {
+                throw InventarioException::validacion([
+                    'referencia_solicitud' => 'La referencia de solicitud es obligatoria.',
+                ]);
+            }
+            $candidatos['referencia_solicitud'] = trim($input['referencia_solicitud']);
+        }
+        if ($tieneReqIdBody) {
+            if (!is_string($input['request_id'])) {
+                throw InventarioException::validacion([
+                    'referencia_solicitud' => 'La referencia de solicitud es obligatoria.',
+                ]);
+            }
+            $candidatos['request_id'] = trim($input['request_id']);
+        }
+        if ($tieneHeader) {
+            $candidatos['X-Request-Reference'] = trim($headerReferencia);
+        }
+
+        if (empty($candidatos)) {
+            throw InventarioException::validacion([
+                'referencia_solicitud' => 'La referencia de solicitud es obligatoria para evitar operaciones duplicadas.',
+            ]);
+        }
+
+        $valoresUnicos = array_values(array_unique(array_values($candidatos)));
+        if (count($valoresUnicos) > 1) {
+            throw new InventarioException(
+                'Los alias de referencia de solicitud contienen valores contradictorios.',
+                'AMBIGUOUS_ALIAS_VALUES',
+                422,
+                ['referencia_solicitud' => 'Los valores enviados en referencia_solicitud, request_id y/o X-Request-Reference deben coincidir.']
+            );
+        }
+
+        return self::validarReferenciaSolicitud($valoresUnicos[0]);
+    }
+
+    /**
      * Calcula el hash SHA-256 canónico de los datos funcionales de la solicitud,
      * excluyendo claves de transporte como `referencia_solicitud` o `csrf_token`.
      */
@@ -277,6 +326,44 @@ class ControlSolicitudService {
                 // Ignorar error de liberación de lock al cerrar
             }
         }
+    }
+
+    /**
+     * Consulta de solo lectura de una confirmación idempotente existente (EP-21).
+     */
+    public function buscarConfirmacionPorReferencia(
+        int $idUsuario,
+        string $tipoOperacion,
+        string $referenciaSolicitud
+    ): ?array {
+        $referenciaValida = self::validarReferenciaSolicitud($referenciaSolicitud);
+        $stmt = $this->pdo->prepare(
+            "SELECT id_solicitud, codigo_http, respuesta_json
+               FROM control_solicitud_idempotencia
+              WHERE id_usuario = :id_usuario
+                AND tipo_operacion = :tipo_operacion
+                AND referencia_solicitud = :referencia_solicitud
+                AND estado_solicitud = 'CONFIRMADA'
+              LIMIT 1"
+        );
+        $stmt->execute([
+            ':id_usuario'           => $idUsuario,
+            ':tipo_operacion'       => $tipoOperacion,
+            ':referencia_solicitud' => $referenciaValida,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+        $decoded = json_decode((string)$row['respuesta_json'], true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        return [
+            'id_solicitud' => (int)$row['id_solicitud'],
+            'codigo_http'  => (int)$row['codigo_http'],
+            'response'     => $decoded,
+        ];
     }
 }
 

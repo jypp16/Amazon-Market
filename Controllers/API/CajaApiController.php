@@ -54,6 +54,19 @@ class CajaApiController extends ApiController
         ], true)) {
             return 'turnos.movimientos';
         }
+        if (in_array($segmento, [
+            'arqueo/estado',
+            'arqueos',
+            'arqueo',
+        ], true)) {
+            return 'turnos.arqueo';
+        }
+        if (in_array($segmento, [
+            'cierre',
+            'cerrar',
+        ], true)) {
+            return 'turnos.cerrar';
+        }
         return null;
     }
 
@@ -99,6 +112,21 @@ class CajaApiController extends ApiController
 
             if ($segmento === 'movimientos/corregibles') {
                 $res = $this->cajaService->listarMovimientosCorregibles((int)$vendedor['id_usuario'], $_GET);
+                $this->sendJsonResponse($res, 200);
+            }
+
+            if ($segmento === 'arqueo/estado') {
+                $res = $this->cajaService->consultarEstadoArqueo((int)$vendedor['id_usuario'], $_GET);
+                $this->sendJsonResponse($res, 200);
+            }
+
+            if ($segmento === 'arqueos') {
+                $res = $this->cajaService->listarArqueos((int)$vendedor['id_usuario'], $_GET);
+                $this->sendJsonResponse($res, 200);
+            }
+
+            if ($segmento === 'cierre') {
+                $res = $this->cajaService->consultarCierre((int)$vendedor['id_usuario'], $_GET);
                 $this->sendJsonResponse($res, 200);
             }
 
@@ -180,6 +208,27 @@ class CajaApiController extends ApiController
                     $vendedor,
                     $amountInspection['number_literal'],
                     $amountInspection['count'] > 1
+                );
+                $this->sendJsonResponse($resultado['response'], (int)$resultado['http_code']);
+            }
+
+            if ($segmento === 'arqueo') {
+                $countedInspection = $this->inspectRawJsonField('counted');
+                $resultado = $this->cajaService->guardarArqueo(
+                    $this->getInput(),
+                    $this->getHeader('X-Request-Reference'),
+                    $vendedor,
+                    $countedInspection['number_literal'],
+                    $countedInspection['count'] > 1
+                );
+                $this->sendJsonResponse($resultado['response'], (int)$resultado['http_code']);
+            }
+
+            if ($segmento === 'cerrar') {
+                $resultado = $this->cajaService->cerrarCaja(
+                    $this->getInput(),
+                    $this->getHeader('X-Request-Reference'),
+                    $vendedor
                 );
                 $this->sendJsonResponse($resultado['response'], (int)$resultado['http_code']);
             }

@@ -38,6 +38,9 @@ require_once $rootDir . '/Libraries/Core/Dotenv.php';
 \Dotenv::load($rootDir . '/.env');
 require_once $rootDir . '/Config/Config.php';
 require_once $rootDir . '/Libraries/Core/Autoload.php';
+require_once $rootDir . '/Models/CajaModel.php';
+require_once $rootDir . '/Services/ControlSolicitudService.php';
+require_once $rootDir . '/Services/CajaService.php';
 
 $passed = 0;
 $failed = 0;
@@ -310,6 +313,157 @@ function runParallelHttpWorkers(string $phpBin, string $workerPath, array $tasks
     return $results;
 }
 
+function extractPhpSessIdFromCookieFile(string $cookieFile): string
+{
+    if (!is_file($cookieFile)) {
+        return '';
+    }
+    $lines = file($cookieFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (!is_array($lines)) {
+        return '';
+    }
+    foreach ($lines as $line) {
+        $clean = str_starts_with($line, '#HttpOnly_') ? substr($line, 10) : $line;
+        if (str_starts_with($clean, '#')) {
+            continue;
+        }
+        $parts = explode("\t", $clean);
+        if (count($parts) >= 7 && $parts[5] === 'PHPSESSID') {
+            return (string)$parts[6];
+        }
+    }
+    return '';
+}
+
+function runContendedParallelHttpWorkers(
+    string $dsn,
+    string $dbUser,
+    string $dbPass,
+    int $sesionActivaId,
+    string $phpBin,
+    string $workerPath,
+    array $tasks,
+    int $expectedWaitingTrx = 2
+): array {
+    global $dbName;
+    $pdoLock = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]);
+    $pdoMonitor = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]);
+
+    $lockThreadId = (int)$pdoLock->query('SELECT CONNECTION_ID()')->fetchColumn();
+    $pdoLock->beginTransaction();
+    $stmtHold = $pdoLock->prepare('SELECT id_sesion_caja FROM sesion_caja WHERE id_sesion_caja = :id FOR UPDATE');
+    $stmtHold->execute([':id' => $sesionActivaId]);
+    $stmtHold->fetchColumn();
+
+    $procs = [];
+    $pipesList = [];
+    $startAt = microtime(true) + 0.15;
+
+    foreach ($tasks as $idx => $task) {
+        $cmd = [
+            $phpBin,
+            $workerPath,
+            '--base-url=' . $task['base_url'],
+            '--cookie-file=' . $task['cookie_file'],
+            '--csrf=' . $task['csrf'],
+            '--path=' . $task['path'],
+            '--payload-b64=' . base64_encode((string)json_encode($task['payload'], JSON_UNESCAPED_UNICODE)),
+            '--start-at=' . sprintf('%.6F', $startAt),
+        ];
+        $desc = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $proc = proc_open($cmd, $desc, $pipes);
+        if (!is_resource($proc)) {
+            $pdoLock->rollBack();
+            throw new RuntimeException("No se pudo iniciar worker {$idx}");
+        }
+        fclose($pipes[0]);
+        $procs[$idx] = $proc;
+        $pipesList[$idx] = $pipes;
+    }
+
+    $observedWaitingThreads = [];
+    $observedUserLockThreads = [];
+    $observedMaxConcurrentWaiters = 0;
+    $deadline = microtime(true) + 1.20;
+    while (microtime(true) < $deadline) {
+        $stmtMon = $pdoMonitor->prepare(
+            "SELECT trx_mysql_thread_id, trx_state, trx_query
+               FROM information_schema.INNODB_TRX
+              WHERE trx_mysql_thread_id <> :lock_tid
+                AND trx_state = 'LOCK WAIT'"
+        );
+        $stmtMon->execute([':lock_tid' => $lockThreadId]);
+        $rows = $stmtMon->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $r) {
+            $tid = (int)$r['trx_mysql_thread_id'];
+            if ($tid > 0 && !in_array($tid, $observedWaitingThreads, true)) {
+                $observedWaitingThreads[] = $tid;
+            }
+        }
+
+        $stmtProc = $pdoMonitor->prepare(
+            "SELECT ID, STATE, INFO
+               FROM information_schema.PROCESSLIST
+              WHERE ID <> :lock_tid
+                AND DB = :db_name
+                AND (STATE = 'User lock' OR STATE LIKE '%lock%' OR INFO LIKE '%GET_LOCK%' OR INFO LIKE '%sesion_caja%')"
+        );
+        $stmtProc->execute([':lock_tid' => $lockThreadId, ':db_name' => $dbName]);
+        $procRows = $stmtProc->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($procRows as $pr) {
+            $pid = (int)$pr['ID'];
+            if ($pid > 0 && !in_array($pid, $observedUserLockThreads, true)) {
+                $observedUserLockThreads[] = $pid;
+            }
+        }
+
+        $allThreads = array_values(array_unique(array_merge($observedWaitingThreads, $observedUserLockThreads)));
+        if (count($allThreads) > $observedMaxConcurrentWaiters) {
+            $observedMaxConcurrentWaiters = count($allThreads);
+        }
+        if (count($allThreads) >= $expectedWaitingTrx) {
+            break;
+        }
+        usleep(25000);
+    }
+
+    // Liberar el bloqueo de fila para que ambos workers compitan en MariaDB
+    $pdoLock->commit();
+
+    $results = [];
+    foreach ($procs as $idx => $proc) {
+        $stdout = stream_get_contents($pipesList[$idx][1]);
+        $stderr = stream_get_contents($pipesList[$idx][2]);
+        fclose($pipesList[$idx][1]);
+        fclose($pipesList[$idx][2]);
+        $exitCode = proc_close($proc);
+        $json = json_decode((string)$stdout, true);
+        $results[$idx] = [
+            'exit_code' => $exitCode,
+            'stdout'    => $stdout,
+            'stderr'    => $stderr,
+            'json'      => is_array($json) ? $json : null,
+        ];
+    }
+
+    return [
+        'results'                => $results,
+        'lock_thread_id'         => $lockThreadId,
+        'max_concurrent_waiters' => $observedMaxConcurrentWaiters,
+        'waiting_thread_ids'     => array_values(array_unique(array_merge($observedWaitingThreads, $observedUserLockThreads))),
+        'innodb_lock_wait_ids'   => $observedWaitingThreads,
+        'user_lock_ids'          => $observedUserLockThreads,
+    ];
+}
+
 function startPhpServer(string $phpBin, string $rootDir, string $sessionDir, string $dbName, int $port)
 {
     $routerPath = $rootDir . '/tests/sprint3/server_router_sprint3.php';
@@ -354,10 +508,14 @@ $serverProc2 = null;
 $serverUrl1 = "http://127.0.0.1:{$httpPort1}";
 $serverUrl2 = "http://127.0.0.1:{$httpPort2}";
 
+$dsn = 'mysql:host=' . DB_HOST . ';dbname=' . $dbName . ';charset=utf8mb4';
+$dbUser = DB_USER;
+$dbPass = DB_PASS;
+
 $pdo = new PDO(
-    'mysql:host=' . DB_HOST . ';dbname=' . $dbName . ';charset=utf8mb4',
-    DB_USER,
-    DB_PASS,
+    $dsn,
+    $dbUser,
+    $dbPass,
     [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -412,6 +570,10 @@ try {
     $stmtUsr->execute([':rol' => 1, ':nom' => 'Admin Paso8', ':usr' => 'admp8', ':dni' => '80000001', ':tel' => '900000011', ':dir' => 'Av Test 1', ':eml' => 'admp8@test.local', ':p' => $hashPrueba]);
     $idAdminTest = (int)$pdo->lastInsertId();
 
+    $adminLongName = mb_substr(str_repeat('ÁdminÚnicoÑ', 10), 0, 100);
+    $stmtUsr->execute([':rol' => 1, ':nom' => $adminLongName, ':usr' => 'admp8lng', ':dni' => '80000009', ':tel' => '900000019', ':dir' => 'Av Test 9', ':eml' => 'admp8lng@test.local', ':p' => $hashPrueba]);
+    $idAdminLong = (int)$pdo->lastInsertId();
+
     $stmtUsr->execute([':rol' => 2, ':nom' => 'Vendedor A Paso8', ':usr' => 'vndp8a', ':dni' => '80000002', ':tel' => '900000012', ':dir' => 'Av Test 2', ':eml' => 'vndp8a@test.local', ':p' => $hashPrueba]);
     $idVendA = (int)$pdo->lastInsertId();
 
@@ -426,15 +588,20 @@ try {
     $turnoId = (int)$pdo->lastInsertId();
 
     $cookieV1 = $tempDir . '/v1.cookie';
+    $cookieV1B = $tempDir . '/v1_B.cookie';
     $cookieV2 = $tempDir . '/v2.cookie';
     $cookieV3 = $tempDir . '/v3.cookie';
     $cookieAdmin = $tempDir . '/admin.cookie';
 
     $csrfV1 = loginHttp($serverUrl1, 'vndp8a', 'Paso8Test#2026', $cookieV1);
+    $csrfV1B = loginHttp($serverUrl2, 'vndp8a', 'Paso8Test#2026', $cookieV1B);
     $csrfV2 = loginHttp($serverUrl1, 'vndp8b', 'Paso8Test#2026', $cookieV2);
     $csrfAdmin = loginHttp($serverUrl1, 'admp8', 'Paso8Test#2026', $cookieAdmin);
 
-    assertTrue($csrfV1 !== null && $csrfV2 !== null && $csrfAdmin !== null, 'PRE', 'Login HTTP de usuarios de ensayo');
+    $sessIdV1A = extractPhpSessIdFromCookieFile($cookieV1);
+    $sessIdV1B = extractPhpSessIdFromCookieFile($cookieV1B);
+    assertTrue($csrfV1 !== null && $csrfV1B !== null && $csrfV2 !== null && $csrfAdmin !== null, 'PRE', 'Login HTTP de usuarios de ensayo');
+    assertTrue($sessIdV1A !== '' && $sessIdV1B !== '' && $sessIdV1A !== $sessIdV1B, 'PRE', 'Dos inicios de sesión HTTP independientes del mismo vendedor generan PHPSESSID distintos (hashes ' . substr(hash('sha256', $sessIdV1A), 0, 8) . ' vs ' . substr(hash('sha256', $sessIdV1B), 0, 8) . ')');
 
     // =========================================================================
     // SECCIÓN A: SEGURIDAD, ROLES, PERMISOS, CSRF, JSON Y PROYECCIÓN MÍNIMA
@@ -762,6 +929,110 @@ try {
     $movRetiroAdminId = (int)($egrAdmin['json']['data']['movement']['id'] ?? 0);
     assertTrue((float)($egrAdmin['json']['data']['current_balance'] ?? 0) === 230.0, 'MOVIMIENTOS', 'EP-14 admin_withdrawal descuenta 30.00 -> 230.00');
 
+    // Pendiente A: Referencia visible íntegra (motivo 250 Unicode + admin 100 Unicode = 362 chars) en inyección y retiro administrativo
+    $reasonLongUnicode = mb_substr(str_repeat('MotivoLargoUnicodeÑó€·', 12), 0, 250);
+    assertTrue(mb_strlen($reasonLongUnicode) === 250 && mb_strlen($adminLongName) === 100, 'MOVIMIENTOS', 'Fixture motivo 250 Unicode y admin 100 Unicode válidos');
+
+    $expectedRefInjLong = $reasonLongUnicode . ' · Entregó: ' . $adminLongName;
+    $ingLongAdmin = httpRequest($serverUrl1, 'POST', '/api/caja/ingresos', [
+        'referencia_solicitud' => 'p8_ing_long_ref_0001',
+        'type'                 => 'admin_injection',
+        'amount'               => 0.01,
+        'reason'               => $reasonLongUnicode,
+        'administrator_id'     => $idAdminLong,
+    ], ['X-CSRF-Token' => (string)$csrfV1], $cookieV1);
+    assertSameVal(201, $ingLongAdmin['http_code'], 'MOVIMIENTOS', 'EP-13 admin_injection longitud máxima (362 chars) devuelve 201');
+    $movInjLongId = (int)($ingLongAdmin['json']['data']['movement']['id'] ?? 0);
+    $refRespInjLong = (string)($ingLongAdmin['json']['data']['movement']['reference'] ?? '');
+    assertSameVal($expectedRefInjLong, $refRespInjLong, 'MOVIMIENTOS', 'EP-13 respuesta conserva referencia íntegra de 362 chars Unicode');
+    $refDbInjLong = (string)$pdo->query("SELECT referencia_visible FROM movimiento_caja WHERE id_movimiento_caja = {$movInjLongId}")->fetchColumn();
+    assertSameVal($expectedRefInjLong, $refDbInjLong, 'MOVIMIENTOS', 'BD movimiento_caja.referencia_visible conserva inyección íntegra de 362 chars');
+
+    $replayInjLong = httpRequest($serverUrl1, 'POST', '/api/caja/ingresos', [
+        'referencia_solicitud' => 'p8_ing_long_ref_0001',
+        'type'                 => 'admin_injection',
+        'amount'               => 0.01,
+        'reason'               => $reasonLongUnicode,
+        'administrator_id'     => $idAdminLong,
+    ], ['X-CSRF-Token' => (string)$csrfV1], $cookieV1);
+    assertSameVal(200, $replayInjLong['http_code'], 'MOVIMIENTOS', 'Replay de inyección larga devuelve 200');
+    assertSameVal($expectedRefInjLong, (string)($replayInjLong['json']['data']['movement']['reference'] ?? ''), 'MOVIMIENTOS', 'Replay conserva referencia íntegra de 362 chars');
+
+    $expectedRefEgrLong = $reasonLongUnicode . ' · Recibió: ' . $adminLongName;
+    $egrLongAdmin = httpRequest($serverUrl1, 'POST', '/api/caja/egresos', [
+        'referencia_solicitud' => 'p8_egr_long_ref_0002',
+        'type'                 => 'admin_withdrawal',
+        'amount'               => 0.01,
+        'reason'               => $reasonLongUnicode,
+        'administrator_id'     => $idAdminLong,
+    ], ['X-CSRF-Token' => (string)$csrfV1], $cookieV1);
+    assertSameVal(201, $egrLongAdmin['http_code'], 'MOVIMIENTOS', 'EP-14 admin_withdrawal longitud máxima (362 chars) devuelve 201');
+    $movEgrLongId = (int)($egrLongAdmin['json']['data']['movement']['id'] ?? 0);
+    $refRespEgrLong = (string)($egrLongAdmin['json']['data']['movement']['reference'] ?? '');
+    assertSameVal($expectedRefEgrLong, $refRespEgrLong, 'MOVIMIENTOS', 'EP-14 respuesta conserva referencia íntegra de 362 chars Unicode');
+    $refDbEgrLong = (string)$pdo->query("SELECT referencia_visible FROM movimiento_caja WHERE id_movimiento_caja = {$movEgrLongId}")->fetchColumn();
+    assertSameVal($expectedRefEgrLong, $refDbEgrLong, 'MOVIMIENTOS', 'BD movimiento_caja.referencia_visible conserva retiro íntegro de 362 chars');
+
+    $replayEgrLong = httpRequest($serverUrl1, 'POST', '/api/caja/egresos', [
+        'referencia_solicitud' => 'p8_egr_long_ref_0002',
+        'type'                 => 'admin_withdrawal',
+        'amount'               => 0.01,
+        'reason'               => $reasonLongUnicode,
+        'administrator_id'     => $idAdminLong,
+    ], ['X-CSRF-Token' => (string)$csrfV1], $cookieV1);
+    assertSameVal(200, $replayEgrLong['http_code'], 'MOVIMIENTOS', 'Replay de retiro largo devuelve 200');
+    assertSameVal($expectedRefEgrLong, (string)($replayEgrLong['json']['data']['movement']['reference'] ?? ''), 'MOVIMIENTOS', 'Replay de retiro conserva referencia íntegra de 362 chars');
+
+    $ep15Long = httpRequest($serverUrl1, 'GET', '/api/caja/movimientos/corregibles', null, [], $cookieV1);
+    $ep15RefsById = [];
+    foreach (($ep15Long['json']['data']['movements'] ?? []) as $mItem) {
+        $ep15RefsById[(int)($mItem['id'] ?? 0)] = (string)($mItem['reference'] ?? '');
+    }
+    assertSameVal($expectedRefInjLong, $ep15RefsById[$movInjLongId] ?? '', 'MOVIMIENTOS', 'EP-15 devuelve referencia íntegra de 362 chars para inyección admin');
+    assertSameVal($expectedRefEgrLong, $ep15RefsById[$movEgrLongId] ?? '', 'MOVIMIENTOS', 'EP-15 devuelve referencia íntegra de 362 chars para retiro admin');
+
+    // Comprobación en modo SQL estricto de sesión (sin cambiar configuración global de MariaDB)
+    $pdoStrict = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]);
+    $pdoStrict->exec("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,STRICT_ALL_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");
+    $cajaSvcStrict = new \Services\CajaService($pdoStrict);
+    $strictOk = false;
+    $strictRefInj = '';
+    $strictRefEgr = '';
+    $strictErr = '';
+    try {
+        $resStrictInj = $cajaSvcStrict->registrarIngreso([
+            'referencia_solicitud' => 'p8_strict_inj_000001',
+            'type'                 => 'admin_injection',
+            'amount'               => 0.01,
+            'reason'               => $reasonLongUnicode,
+            'administrator_id'     => $idAdminLong,
+        ], null, [
+            'id_usuario' => $idVendA,
+            'id_rol'     => 2,
+            'nombre'     => 'Vendedor A Paso8',
+        ]);
+        $strictRefInj = (string)($resStrictInj['response']['data']['movement']['reference'] ?? '');
+        $resStrictEgr = $cajaSvcStrict->registrarEgreso([
+            'referencia_solicitud' => 'p8_strict_egr_000002',
+            'type'                 => 'admin_withdrawal',
+            'amount'               => 0.01,
+            'reason'               => $reasonLongUnicode,
+            'administrator_id'     => $idAdminLong,
+        ], null, [
+            'id_usuario' => $idVendA,
+            'id_rol'     => 2,
+            'nombre'     => 'Vendedor A Paso8',
+        ]);
+        $strictRefEgr = (string)($resStrictEgr['response']['data']['movement']['reference'] ?? '');
+        $strictOk = true;
+    } catch (Throwable $eStrict) {
+        $strictOk = false;
+        $strictErr = $eStrict->getMessage();
+    }
+    assertTrue($strictOk && $strictRefInj === $expectedRefInjLong && $strictRefEgr === $expectedRefEgrLong, 'MOVIMIENTOS', 'Modo SQL estricto (STRICT_ALL_TABLES) persiste referencias de 362 chars sin truncamiento ni error 1406', $strictErr);
+
     // Egreso superior al saldo por 0.01 -> 409 INSUFFICIENT_BALANCE
     $egrInsuf = httpRequest($serverUrl1, 'POST', '/api/caja/egresos', [
         'referencia_solicitud' => 'p8_egr_insuf_0000003',
@@ -826,6 +1097,7 @@ try {
     assertSameVal(422, $omitOpenOrigin['http_code'], 'RETIRO_OMITIDO', 'Origen en sesión abierta devuelve 422 ORIGIN_TURN_REQUIRED');
 
     // Retiro omitido válido (500.00 > saldo actual 230.00, sobre origen de otro vendedor closedIds[20], con arqueo vigente)
+    $versionAntesOmitido = (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesionActivaId}")->fetchColumn();
     $idArqueoAntesOmit = insertarArqueoVigenteFixture($pdo, $sesionActivaId);
     $antesOrigen = $pdo->query("SELECT efectivo_esperado_cierre, efectivo_contado_cierre, diferencia_cierre, version_caja FROM sesion_caja WHERE id_sesion_caja = {$closedIds[20]}")->fetch();
 
@@ -843,7 +1115,7 @@ try {
     $movOmitidoId = (int)($omitOk['json']['data']['movement']['id'] ?? 0);
     assertTrue((float)($omitOk['json']['data']['movement']['impact'] ?? -1) === 0.0, 'RETIRO_OMITIDO', 'Retiro omitido tiene impacto 0.0');
     assertTrue((float)($omitOk['json']['data']['current_balance'] ?? 0) === 230.0, 'RETIRO_OMITIDO', 'Retiro omitido mantiene saldo actual en 230.00');
-    assertSameVal(6, $omitOk['json']['data']['version'] ?? null, 'RETIRO_OMITIDO', 'Retiro omitido incrementa version_caja a 6');
+    assertSameVal($versionAntesOmitido + 1, $omitOk['json']['data']['version'] ?? null, 'RETIRO_OMITIDO', 'Retiro omitido incrementa version_caja en +1');
 
     $despuesOrigen = $pdo->query("SELECT efectivo_esperado_cierre, efectivo_contado_cierre, diferencia_cierre, version_caja FROM sesion_caja WHERE id_sesion_caja = {$closedIds[20]}")->fetch();
     assertSameVal($antesOrigen, $despuesOrigen, 'RETIRO_OMITIDO', 'Sesión cerrada de origen permanece 100% íntegra');
@@ -956,9 +1228,9 @@ try {
     ], ['X-CSRF-Token' => (string)$csrfV1], $cookieV1);
     assertTrue((float)($egrPrep['json']['data']['current_balance'] ?? 0) === 100.0, 'CONCURRENCIA', 'Saldo preparado en 100.00');
 
-    // 1. Dos egresos simultáneos de 80.00 contra saldo 100.00 en 2 servidores independientes
+    // 1. Dos egresos simultáneos de 80.00 contra saldo 100.00 en 2 servidores independientes y 2 sesiones PHP independientes
     $workerPath = $rootDir . '/tests/sprint3/worker_concurrencia_paso8.php';
-    $resEgresos = runParallelHttpWorkers($phpBin, $workerPath, [
+    $concEgr = runContendedParallelHttpWorkers($dsn, $dbUser, $dbPass, $sesionActivaId, $phpBin, $workerPath, [
         [
             'base_url'    => $serverUrl1,
             'cookie_file' => $cookieV1,
@@ -973,8 +1245,8 @@ try {
         ],
         [
             'base_url'    => $serverUrl2,
-            'cookie_file' => $cookieV1,
-            'csrf'        => (string)$csrfV1,
+            'cookie_file' => $cookieV1B,
+            'csrf'        => (string)$csrfV1B,
             'path'        => '/api/caja/egresos',
             'payload'     => [
                 'referencia_solicitud' => 'p8_conc_egr_B_000002',
@@ -983,7 +1255,9 @@ try {
                 'reason'               => 'Egreso concurrente B',
             ],
         ],
-    ]);
+    ], 2);
+    $resEgresos = $concEgr['results'];
+    assertTrue($concEgr['max_concurrent_waiters'] >= 2 && count($concEgr['waiting_thread_ids']) >= 2, 'CONCURRENCIA', 'Contención real en MariaDB observada para egresos: 2 conexiones independientes en LOCK WAIT (threads ' . implode(',', $concEgr['waiting_thread_ids']) . ')');
     $codesEgr = [$resEgresos[0]['json']['http_code'] ?? 0, $resEgresos[1]['json']['http_code'] ?? 0];
     sort($codesEgr);
     assertSameVal([201, 409], $codesEgr, 'CONCURRENCIA', 'Dos egresos concurrentes de 80.00 contra 100.00: uno 201 y otro 409 INSUFFICIENT_BALANCE');
@@ -1001,7 +1275,7 @@ try {
     assertTrue((float)($egrExacto['json']['data']['current_balance'] ?? -1) === 0.0, 'MOVIMIENTOS', 'Egreso igual al saldo deja current_balance = 0.0');
 
     // 2. Dos correcciones concurrentes sobre el mismo original ($movInjId vigente en 35.00 -> ambos intentan cambiar a 40.00)
-    $resCorrSame = runParallelHttpWorkers($phpBin, $workerPath, [
+    $concCorr = runContendedParallelHttpWorkers($dsn, $dbUser, $dbPass, $sesionActivaId, $phpBin, $workerPath, [
         [
             'base_url'    => $serverUrl1,
             'cookie_file' => $cookieV1,
@@ -1016,8 +1290,8 @@ try {
         ],
         [
             'base_url'    => $serverUrl2,
-            'cookie_file' => $cookieV1,
-            'csrf'        => (string)$csrfV1,
+            'cookie_file' => $cookieV1B,
+            'csrf'        => (string)$csrfV1B,
             'path'        => '/api/caja/movimientos/correcciones',
             'payload'     => [
                 'referencia_solicitud' => 'p8_conc_corr_B_00002',
@@ -1026,13 +1300,15 @@ try {
                 'reason'               => 'Corrección concurrente B',
             ],
         ],
-    ]);
+    ], 2);
+    $resCorrSame = $concCorr['results'];
+    assertTrue($concCorr['max_concurrent_waiters'] >= 2 && count($concCorr['waiting_thread_ids']) >= 2, 'CONCURRENCIA', 'Contención real en MariaDB observada para correcciones: 2 conexiones independientes en LOCK WAIT (threads ' . implode(',', $concCorr['waiting_thread_ids']) . ')');
     $codesCorr = [$resCorrSame[0]['json']['http_code'] ?? 0, $resCorrSame[1]['json']['http_code'] ?? 0];
     sort($codesCorr);
-    assertSameVal([201, 422], $codesCorr, 'CONCURRENCIA', 'Dos correcciones concurrentes al mismo monto: una 201 y otra 422 NO_CORRECTION_CHANGE');
+    assertTrue($codesCorr === [201, 422], 'CONCURRENCIA', 'Dos correcciones concurrentes al mismo monto: una 201 y otra 422 NO_CORRECTION_CHANGE', json_encode($resCorrSame, JSON_UNESCAPED_UNICODE));
 
-    // 3. Reintentos simultáneos con la misma referencia idempotente
-    $resReplaySim = runParallelHttpWorkers($phpBin, $workerPath, [
+    // 3. Reintentos simultáneos con la misma referencia idempotente y 2 sesiones PHP independientes
+    $concReplay = runContendedParallelHttpWorkers($dsn, $dbUser, $dbPass, $sesionActivaId, $phpBin, $workerPath, [
         [
             'base_url'    => $serverUrl1,
             'cookie_file' => $cookieV1,
@@ -1047,8 +1323,8 @@ try {
         ],
         [
             'base_url'    => $serverUrl2,
-            'cookie_file' => $cookieV1,
-            'csrf'        => (string)$csrfV1,
+            'cookie_file' => $cookieV1B,
+            'csrf'        => (string)$csrfV1B,
             'path'        => '/api/caja/ingresos',
             'payload'     => [
                 'referencia_solicitud' => 'p8_conc_replay_00001',
@@ -1057,11 +1333,15 @@ try {
                 'reason'               => 'Ingreso idempotente simultáneo',
             ],
         ],
-    ]);
+    ], 1);
+    $resReplaySim = $concReplay['results'];
     $c0 = $resReplaySim[0]['json']['http_code'] ?? 0;
     $c1 = $resReplaySim[1]['json']['http_code'] ?? 0;
+    $sortedReplayCodes = [$c0, $c1];
+    sort($sortedReplayCodes);
     $saldoPostReplaySim = (float)$pdo->query("SELECT efectivo_esperado_actual FROM sesion_caja WHERE id_sesion_caja = {$sesionActivaId}")->fetchColumn();
-    assertTrue(in_array(201, [$c0, $c1], true) && $saldoPostReplaySim === 20.0, 'CONCURRENCIA', 'Reintentos simultáneos confirman exactamente una vez (saldo 5.00 + 15.00 = 20.00)');
+    assertTrue($concReplay['max_concurrent_waiters'] >= 1, 'CONCURRENCIA', 'Contención real observada en reintento simultáneo con misma referencia (LOCK WAIT threads ' . implode(',', $concReplay['waiting_thread_ids']) . ')');
+    assertTrue(in_array($sortedReplayCodes, [[200, 201], [201, 409]], true) && $saldoPostReplaySim === 20.0, 'CONCURRENCIA', 'Reintentos simultáneos confirman exactamente una vez (codes=' . implode(',', $sortedReplayCodes) . ', saldo 5.00 + 15.00 = 20.00)');
 
     // 4. Replay posterior al cierre y después de abrir otra sesión
     $versionAntesReplay = (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesionActivaId}")->fetchColumn();

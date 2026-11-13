@@ -7,22 +7,51 @@ declare(strict_types=1);
  */
 
 $dbName = getenv('DB_NAME');
-if (!is_string($dbName) || $dbName === '' || $dbName === 'amazon_market') {
+$reservedDbs = [
+    '',
+    'amazon_market',
+    'amazon_market_restore_verify_20261027_113040',
+    'amazon_market_sprint3_verify_20261112_012312',
+    'amazon_market_sprint3_verify_20261112_012430',
+];
+if (!is_string($dbName) || in_array($dbName, $reservedDbs, true)) {
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'status'  => false,
         'code'    => 'TEST_ENV_UNSAFE',
-        'message' => 'El servidor de pruebas requiere una base de datos aislada distinta de amazon_market.',
+        'message' => 'El servidor de pruebas requiere una base de datos aislada distinta de amazon_market y bases reservadas.',
+        'errors'  => new \stdClass(),
+        'data'    => null,
     ], JSON_UNESCAPED_UNICODE);
     exit(1);
 }
 
-$uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$fullPath = dirname(__DIR__, 2) . $uriPath;
+$uriPath = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
+$rootDir = realpath(dirname(__DIR__, 2));
 
-if ($uriPath !== '/' && is_file($fullPath)) {
-    return false;
+if (preg_match('~(?:^|/)(?:\.|Config|Libraries|Services|Models|Controllers|Views|tests|database|vendor)(?:/|$)|\.(?:sql|env|log|ini|bak)$~i', $uriPath)
+    || str_contains($uriPath, '..') || str_contains($uriPath, '\\')) {
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'status'  => false,
+        'code'    => 'FORBIDDEN',
+        'message' => 'Acceso denegado.',
+        'errors'  => new \stdClass(),
+        'data'    => null,
+    ], JSON_UNESCAPED_UNICODE);
+    exit(0);
+}
+
+if (str_starts_with($uriPath, '/Assets/')) {
+    $file = realpath($rootDir . $uriPath);
+    $assets = realpath($rootDir . '/Assets') . DIRECTORY_SEPARATOR;
+    if ($file && str_starts_with($file, $assets) && is_file($file) && !str_ends_with(strtolower($file), '.php')) {
+        return false;
+    }
+    http_response_code(404);
+    exit(0);
 }
 
 if ($uriPath === '/__test_env_verify') {
