@@ -69,6 +69,7 @@ class CSRFMiddleware extends Middleware {
                 'status' => false,
                 'code' => 'CSRF_INVALID',
                 'message' => 'Token CSRF inválido. Recargue la página e intente de nuevo.',
+                'errors' => new \stdClass(),
                 'data' => null,
             ], JSON_UNESCAPED_UNICODE);
             exit;

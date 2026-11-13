@@ -53,23 +53,13 @@ class InventarioException extends \RuntimeException {
     }
 
     public function toApiResponse(): array {
-        $response = [
+        return [
             'status' => false,
             'code' => $this->errorCode,
             'message' => $this->getMessage(),
+            'errors' => !empty($this->errors) ? $this->errors : new \stdClass(),
+            'data' => !empty($this->contextData) ? $this->contextData : null,
         ];
-
-        if (!empty($this->errors)) {
-            $response['errors'] = $this->errors;
-        }
-
-        if (!empty($this->contextData)) {
-            $response['data'] = $this->contextData;
-        } else {
-            $response['data'] = null;
-        }
-
-        return $response;
     }
 
     public static function validacion(array $errors, string $message = 'Verifique los datos ingresados en el formulario.'): self {

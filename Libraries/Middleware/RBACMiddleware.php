@@ -93,6 +93,9 @@ class RBACMiddleware extends Middleware {
             'reportes.kardex',
             'reportes.variaciones',
             'reportes.exportar',
+            'turnos.programar',
+            'turnos.consultar_historico',
+            'reportes.cierres_caja',
         ], true);
     }
 

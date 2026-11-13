@@ -215,7 +215,7 @@ class ControlSolicitudService {
             }
 
             // 3. Ejecutar la operación de negocio en la misma transacción
-            $resultadoOperacion = $operacionNegocio($this->pdo);
+            $resultadoOperacion = $operacionNegocio($this->pdo, $idSolicitud);
 
             $idRegistroRecurso = isset($resultadoOperacion['id_registro'])
                 ? (int)$resultadoOperacion['id_registro']
@@ -253,6 +253,20 @@ class ControlSolicitudService {
         } catch (\Throwable $error) {
             if ($esTransaccionPropia && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
+            }
+            if ($error instanceof \PDOException) {
+                $sqlState = (string)$error->getCode();
+                $driverCode = (int)($error->errorInfo[1] ?? 0);
+                if ($sqlState === '40001' || in_array($driverCode, [1205, 1213], true)) {
+                    throw new InventarioException(
+                        'Se detectó un conflicto de concurrencia o tiempo de espera en la base de datos. Reintente la operación con la misma referencia.',
+                        'CONCURRENT_OPERATION_CONFLICT',
+                        409,
+                        [],
+                        [],
+                        $error
+                    );
+                }
             }
             throw $error;
         } finally {
