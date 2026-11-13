@@ -125,7 +125,39 @@ class CajaModel extends Model
      */
     public function obtenerSesionAbiertaActual(bool $forUpdate = false): ?array
     {
-        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        if ($forUpdate) {
+            // Orden único de bloqueo: caja_fisica_guardia (id=1) -> sesion_caja (PRIMARY KEY).
+            // Evita deadlocks contra abrirCaja/cerrarCaja por cruce PRIMARY <-> idx_sesion_estado_cierre_id.
+            $guardia = $this->bloquearGuardiaCajaFisica();
+            $idAbierta = ($guardia !== null && $guardia['id_sesion_abierta_actual'] !== null)
+                ? (int)$guardia['id_sesion_abierta_actual']
+                : 0;
+
+            if ($idAbierta <= 0) {
+                $stmtId = $this->conect->prepare(
+                    "SELECT id_sesion_caja
+                     FROM sesion_caja
+                     WHERE estado = 'ABIERTA'
+                     ORDER BY id_sesion_caja DESC
+                     LIMIT 1"
+                );
+                $stmtId->execute();
+                $foundId = $stmtId->fetchColumn();
+                $idAbierta = $foundId !== false ? (int)$foundId : 0;
+            }
+
+            if ($idAbierta <= 0) {
+                return null;
+            }
+
+            $row = $this->obtenerSesionPorIdParaCierre($idAbierta, true);
+            if ($row === null || ($row['estado'] ?? '') !== 'ABIERTA') {
+                return null;
+            }
+
+            return $row;
+        }
+
         $sql = "SELECT
                     s.id_sesion_caja,
                     s.id_caja_fisica,
@@ -159,7 +191,7 @@ class CajaModel extends Model
                 FROM sesion_caja s
                 WHERE s.estado = 'ABIERTA'
                 ORDER BY s.id_sesion_caja DESC
-                LIMIT 1{$lock}";
+                LIMIT 1";
 
         $stmt = $this->conect->prepare($sql);
         $stmt->execute();
@@ -1073,17 +1105,17 @@ class CajaModel extends Model
     }
 
     /**
-     * Lista vendedores activos para selector de consulta administrativa (EP-23A).
+     * Lista todos los vendedores (activos e inactivos) para selector de consulta histórica (EP-23A).
      */
     public function listarVendedoresParaConsulta(): array
     {
         $sql = "SELECT
                     id_usuario AS id,
                     nombre AS name,
-                    email
+                    username,
+                    estado
                 FROM usuario
                 WHERE id_rol = 2
-                  AND estado = 1
                 ORDER BY nombre ASC, id_usuario ASC";
 
         $stmt = $this->conect->prepare($sql);
@@ -1093,17 +1125,23 @@ class CajaModel extends Model
         foreach ($rows as &$row) {
             $row['id'] = (int)$row['id'];
             $row['name'] = (string)$row['name'];
-            $row['email'] = (string)$row['email'];
+            $row['username'] = (string)$row['username'];
+            $row['estado'] = (int)$row['estado'];
         }
 
         return $rows;
     }
 
     /**
-     * Lista sesiones de caja abiertas en una fecha específica (opcionalmente filtradas por vendedor) (EP-23B).
+     * Lista sesiones de caja abiertas en una fecha local de apertura para un vendedor y turno opcional (EP-23B).
      */
-    public function listarSesionesPorFechaYVendedor(string $fecha, ?int $idVendedor = null): array
+    public function listarSesionesPorFechaYVendedor(string $fecha, int $idVendedor, ?int $idTurno = null): array
     {
+        $inicio = $fecha . ' 00:00:00';
+        $finExclusivo = (new \DateTimeImmutable($fecha . ' 00:00:00', new \DateTimeZone('America/Lima')))
+            ->modify('+1 day')
+            ->format('Y-m-d H:i:s');
+
         $sql = "SELECT
                     s.id_sesion_caja,
                     s.id_usuario_vendedor,
@@ -1114,20 +1152,21 @@ class CajaModel extends Model
                     TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
                     s.estado,
                     s.fecha_hora_apertura,
-                    s.fecha_hora_cierre,
-                    s.saldo_inicial,
-                    s.efectivo_esperado_actual,
-                    s.efectivo_esperado_cierre,
-                    s.efectivo_contado_cierre,
-                    s.diferencia_cierre
+                    s.fecha_hora_cierre
                 FROM sesion_caja s
                 INNER JOIN usuario u ON u.id_usuario = s.id_usuario_vendedor
-                WHERE DATE(s.fecha_hora_apertura) = :fecha";
+                WHERE s.fecha_hora_apertura >= :inicio
+                  AND s.fecha_hora_apertura < :fin_exclusivo
+                  AND s.id_usuario_vendedor = :id_vendedor";
 
-        $params = [':fecha' => $fecha];
-        if ($idVendedor !== null) {
-            $sql .= " AND s.id_usuario_vendedor = :id_vendedor";
-            $params[':id_vendedor'] = $idVendedor;
+        $params = [
+            ':inicio'        => $inicio,
+            ':fin_exclusivo' => $finExclusivo,
+            ':id_vendedor'   => $idVendedor,
+        ];
+        if ($idTurno !== null) {
+            $sql .= " AND s.id_turno = :id_turno";
+            $params[':id_turno'] = $idTurno;
         }
         $sql .= " ORDER BY s.fecha_hora_apertura ASC, s.id_sesion_caja ASC";
 
@@ -1168,10 +1207,17 @@ class CajaModel extends Model
                     ua.nombre AS authorized_by_name,
                     m.id_venta,
                     m.id_sesion_origen_omitido,
+                    m.declarado_ocurrio_en_sesion_origen_abierta,
+                    m.confirmado_reflejado_en_apertura,
                     m.id_movimiento_original,
                     m.fecha_hora_registro,
                     corr.id_correccion_caja AS corr_id,
                     corr.id_movimiento_original AS corr_original_id,
+                    EXISTS(
+                        SELECT 1
+                          FROM correccion_movimiento_caja c3
+                         WHERE c3.id_movimiento_original = m.id_movimiento_caja
+                    ) AS tiene_correcciones,
                     (SELECT c2.monto_corregido
                        FROM correccion_movimiento_caja c2
                       WHERE c2.id_movimiento_original = m.id_movimiento_caja
@@ -1207,6 +1253,7 @@ class CajaModel extends Model
                     uv.nombre AS seller_name,
                     a.id_usuario_admin,
                     ua.nombre AS admin_name,
+                    ua.email AS administrator_email,
                     a.motivo,
                     TIME_FORMAT(a.hora_salida_referencia, '%H:%i') AS hora_salida_referencia,
                     a.fecha_hora_salida_referencia,
@@ -1262,6 +1309,11 @@ class CajaModel extends Model
         ?int $idVendedor = null,
         ?int $idTurno = null
     ): array {
+        $desdeInicio = $fechaDesde . ' 00:00:00';
+        $hastaFinExclusivo = (new \DateTimeImmutable($fechaHasta . ' 00:00:00', new \DateTimeZone('America/Lima')))
+            ->modify('+1 day')
+            ->format('Y-m-d H:i:s');
+
         $sql = "SELECT
                     s.id_sesion_caja,
                     s.id_usuario_vendedor,
@@ -1272,6 +1324,8 @@ class CajaModel extends Model
                     TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
                     s.fecha_hora_apertura,
                     s.fecha_hora_cierre,
+                    s.tiene_cierre_anterior,
+                    s.monto_referencia_cierre_anterior,
                     s.saldo_inicial,
                     s.diferencia_apertura,
                     s.total_ventas_efectivo,
@@ -1283,6 +1337,7 @@ class CajaModel extends Model
                     s.efectivo_esperado_cierre,
                     s.efectivo_contado_cierre,
                     s.diferencia_cierre,
+                    s.observacion_cierre,
                     (SELECT ua.nombre
                        FROM autorizacion_caja a
                        INNER JOIN usuario ua ON ua.id_usuario = a.id_usuario_admin
@@ -1297,11 +1352,12 @@ class CajaModel extends Model
                 FROM sesion_caja s
                 INNER JOIN usuario u ON u.id_usuario = s.id_usuario_vendedor
                 WHERE s.estado = 'CERRADA'
-                  AND DATE(s.fecha_hora_cierre) BETWEEN :fecha_desde AND :fecha_hasta";
+                  AND s.fecha_hora_cierre >= :desde_inicio
+                  AND s.fecha_hora_cierre < :hasta_fin_exclusivo";
 
         $params = [
-            ':fecha_desde' => $fechaDesde,
-            ':fecha_hasta' => $fechaHasta,
+            ':desde_inicio'        => $desdeInicio,
+            ':hasta_fin_exclusivo' => $hastaFinExclusivo,
         ];
         if ($idVendedor !== null) {
             $sql .= " AND s.id_usuario_vendedor = :id_vendedor";
@@ -1390,9 +1446,9 @@ class CajaModel extends Model
     }
 
     /**
-     * Obtiene un snapshot de cierres de caja por referencia_consulta perteneciente al usuario.
+     * Obtiene un snapshot de cierres de caja por id_snapshot entero perteneciente al usuario.
      */
-    public function obtenerSnapshotCierresCajaParaUsuario(string $referenciaConsulta, int $idUsuario): ?array
+    public function obtenerSnapshotCierresCajaPorIdParaUsuario(int $idSnapshot, int $idUsuario): ?array
     {
         $sql = "SELECT
                     id_snapshot,
@@ -1407,15 +1463,15 @@ class CajaModel extends Model
                     creado_en,
                     expira_en
                 FROM reporte_consulta_snapshot
-                WHERE referencia_consulta = :referencia_consulta
+                WHERE id_snapshot = :id_snapshot
                   AND id_usuario = :id_usuario
                   AND tipo_reporte = 'cierres_caja'
                 LIMIT 1";
 
         $stmt = $this->conect->prepare($sql);
         $stmt->execute([
-            ':referencia_consulta' => $referenciaConsulta,
-            ':id_usuario'          => $idUsuario,
+            ':id_snapshot' => $idSnapshot,
+            ':id_usuario'  => $idUsuario,
         ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 

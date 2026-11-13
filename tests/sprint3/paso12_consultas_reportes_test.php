@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Batería integral de aceptación para el Paso 12 del Sprint 3
+ * Batería integral de aceptación y conformidad de contrato para el Paso 12 del Sprint 3
  * (EP-22, EP-23A, EP-23B, EP-23C, EP-24A, EP-24B).
  */
 
@@ -184,9 +184,13 @@ function loginViaHttp(string $baseUrl, string $cookieFile, string $username, str
         CURLOPT_COOKIEJAR      => $cookieFile,
         CURLOPT_COOKIEFILE     => $cookieFile,
     ]);
-    curl_exec($ch);
+    $resp = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    $loc = '';
+    if (is_string($resp) && preg_match('/^Location:\s*(.+)$/im', $resp, $lm)) {
+        $loc = trim($lm[1]);
+    }
 
     $home = httpRequest('GET', $baseUrl . '/Dashboard', $cookieFile);
     $csrf2 = $csrf;
@@ -195,12 +199,14 @@ function loginViaHttp(string $baseUrl, string $cookieFile, string $username, str
     } elseif (preg_match('/csrf_token["\']?\s*[:=]\s*["\']([a-f0-9]{64})["\']/i', (string)$home['raw'], $m2)) {
         $csrf2 = $m2[1];
     }
-    return ['status' => $code, 'csrf' => $csrf2];
+    $ok = ($code >= 200 && $code < 400 && $csrf2 !== '' && $loc !== '' && !str_ends_with($loc, '/Auth'));
+    return ['status' => $code, 'csrf' => $csrf2, 'ok' => $ok];
 }
 
 $sessionDir = sys_get_temp_dir() . '\\am_p12_sess_' . uniqid();
 @mkdir($sessionDir, 0777, true);
 $cookieAdmin = tempnam(sys_get_temp_dir(), 'p12_adm_');
+$cookieAdmin2 = tempnam(sys_get_temp_dir(), 'p12_adm2_');
 $cookieSeller1 = tempnam(sys_get_temp_dir(), 'p12_s1_');
 $cookieSeller2 = tempnam(sys_get_temp_dir(), 'p12_s2_');
 $srv1 = null;
@@ -210,77 +216,77 @@ try {
     $srv1 = startPhpServer($phpBin, $rootDir, $httpPort1, $dbName, $sessionDir);
     $baseUrl = $srv1['baseUrl'];
 
-    // Crear usuarios aislados de prueba en copia nueva
     $passPlain = 'ClavePrueba123!';
     $passHash = password_hash($passPlain, PASSWORD_BCRYPT);
-
-    $pdo->prepare('DELETE FROM usuario WHERE email IN (?, ?, ?)')->execute([
-        'p12.admin@test.local',
-        'p12.vendedor1@test.local',
-        'p12.vendedor2@test.local',
-    ]);
+    $tag = substr(md5((string)microtime(true)), 0, 4);
 
     $stmtInsUser = $pdo->prepare(
-        'INSERT INTO usuario (id_rol, username, nombre, dni, telefono, direccion, email, password_hash, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)'
+        'INSERT INTO usuario (id_rol, username, nombre, dni, telefono, direccion, email, password_hash, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmtInsUser->execute([1, 'admp12', 'Admin Paso 12', '78888001', '988880001', 'Dir', 'p12.admin@test.local', $passHash]);
+    $stmtInsUser->execute([1, "a1_{$tag}", 'Admin Paso 12', '78' . random_int(100000, 999999), '988880001', 'Dir', "p12.admin1.{$tag}@test.local", $passHash, 1]);
     $adminId = (int)$pdo->lastInsertId();
 
-    $stmtInsUser->execute([2, 'vndp12a', 'Vendedor Uno P12', '78888002', '988880002', 'Dir', 'p12.vendedor1@test.local', $passHash]);
+    $stmtInsUser->execute([1, "a2_{$tag}", 'Admin Dos P12', '78' . random_int(100000, 999999), '988880002', 'Dir', "p12.admin2.{$tag}@test.local", $passHash, 1]);
+    $admin2Id = (int)$pdo->lastInsertId();
+
+    $stmtInsUser->execute([2, "v1_{$tag}", 'Vendedor Uno Ñandú', '78' . random_int(100000, 999999), '988880003', 'Dir', "p12.vendedor1.{$tag}@test.local", $passHash, 1]);
     $seller1Id = (int)$pdo->lastInsertId();
 
-    $stmtInsUser->execute([2, 'vndp12b', 'Vendedor Dos P12', '78888003', '988880003', 'Dir', 'p12.vendedor2@test.local', $passHash]);
+    $stmtInsUser->execute([2, "v2_{$tag}", 'Vendedor Dos P12', '78' . random_int(100000, 999999), '988880004', 'Dir', "p12.vendedor2.{$tag}@test.local", $passHash, 1]);
     $seller2Id = (int)$pdo->lastInsertId();
 
-    // Asegurar que exista un turno vigente 00:00 - 23:59 para pruebas sin dependencia horaria
-    $pdo->prepare("INSERT INTO turno (nombre, hora_inicio, hora_fin, estado) VALUES ('Turno P12 Completo', '00:00:00', '23:59:00', 1)")->execute();
+    $stmtInsUser->execute([2, "vi_{$tag}", 'Zzz Vendedor Inactivo P12', '78' . random_int(100000, 999999), '988880005', 'Dir', "p12.vendedor_inact.{$tag}@test.local", $passHash, 0]);
+    $sellerInactId = (int)$pdo->lastInsertId();
+
+    $pdo->prepare("INSERT INTO turno (nombre, hora_inicio, hora_fin, estado) VALUES (?, '00:00:00', '23:59:00', 1)")
+        ->execute(["Turno P12 {$tag}"]);
     $shiftId = (int)$pdo->lastInsertId();
 
-    // Login de los 3 usuarios
-    $resLoginAdm = loginViaHttp($baseUrl, $cookieAdmin, 'admp12', $passPlain);
-    assertTrue($resLoginAdm['status'] >= 200 && $resLoginAdm['status'] < 400 && $resLoginAdm['csrf'] !== '', 'AUTH', 'Login admin P12');
-    $resLoginS1 = loginViaHttp($baseUrl, $cookieSeller1, 'vndp12a', $passPlain);
-    assertTrue($resLoginS1['status'] >= 200 && $resLoginS1['status'] < 400 && $resLoginS1['csrf'] !== '', 'AUTH', 'Login vendedor 1 P12');
-    $resLoginS2 = loginViaHttp($baseUrl, $cookieSeller2, 'vndp12b', $passPlain);
-    assertTrue($resLoginS2['status'] >= 200 && $resLoginS2['status'] < 400 && $resLoginS2['csrf'] !== '', 'AUTH', 'Login vendedor 2 P12');
+    $resLoginAdm = loginViaHttp($baseUrl, $cookieAdmin, "a1_{$tag}", $passPlain);
+    assertTrue($resLoginAdm['ok'], 'AUTH', 'Login admin 1 P12');
+    $resLoginAdm2 = loginViaHttp($baseUrl, $cookieAdmin2, "a2_{$tag}", $passPlain);
+    assertTrue($resLoginAdm2['ok'], 'AUTH', 'Login admin 2 P12');
+    $resLoginS1 = loginViaHttp($baseUrl, $cookieSeller1, "v1_{$tag}", $passPlain);
+    assertTrue($resLoginS1['ok'], 'AUTH', 'Login vendedor 1 P12');
+    $resLoginS2 = loginViaHttp($baseUrl, $cookieSeller2, "v2_{$tag}", $passPlain);
+    assertTrue($resLoginS2['ok'], 'AUTH', 'Login vendedor 2 P12');
     $csrfS1 = ['X-CSRF-TOKEN: ' . $resLoginS1['csrf']];
     $csrfS2 = ['X-CSRF-TOKEN: ' . $resLoginS2['csrf']];
 
-    // 1. RBAC y autenticación
-    $endpointsAdmin = [
+    // 1. RBAC
+    foreach ([
         '/api/caja/consulta/vendedores',
-        '/api/caja/consulta/sesiones',
+        '/api/caja/consulta/sesiones?date=2026-11-12&seller_id=' . $seller1Id,
         '/api/caja/consulta?session_id=1',
         '/api/reportes/cierres-caja',
         '/api/reportes/cierres-caja/1',
-    ];
-    foreach ($endpointsAdmin as $ep) {
+    ] as $ep) {
         $unauth = httpRequest('GET', $baseUrl . $ep);
         assertSameVal(401, $unauth['status'], 'RBAC', "Sin sesión {$ep} -> 401");
-
         $asSeller = httpRequest('GET', $baseUrl . $ep, $cookieSeller1);
         assertSameVal(403, $asSeller['status'], 'RBAC', "Vendedor en {$ep} -> 403");
     }
-
-    $unauthEp22 = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa');
-    assertSameVal(401, $unauthEp22['status'], 'RBAC', 'Sin sesión EP-22 -> 401');
-
-    $asAdminEp22 = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieAdmin);
-    assertSameVal(403, $asAdminEp22['status'], 'RBAC', 'Admin en EP-22 -> 403');
+    assertSameVal(401, httpRequest('GET', $baseUrl . '/api/caja/consulta/activa')['status'], 'RBAC', 'Sin sesión EP-22 -> 401');
+    assertSameVal(403, httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieAdmin)['status'], 'RBAC', 'Admin en EP-22 -> 403');
 
     // 2. EP-22 sin sesión abierta
     $ep22Empty = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieSeller1);
-    assertSameVal(200, $ep22Empty['status'], 'EP-22', 'Sin sesión activa responde 200');
-    assertSameVal(false, $ep22Empty['json']['data']['has_active_session'] ?? null, 'EP-22', 'has_active_session=false');
-    assertTrue(
-        is_array($ep22Empty['json']['data'] ?? null)
-        && array_key_exists('session', $ep22Empty['json']['data'])
-        && $ep22Empty['json']['data']['session'] === null,
-        'EP-22',
-        'session=null sin sesión abierta'
-    );
+    assertSameVal(200, $ep22Empty['status'], 'EP-22', 'Sin sesión activa -> 200');
+    assertSameVal('NO_OPEN_SESSION', $ep22Empty['json']['code'] ?? null, 'EP-22', 'Sin sesión code=NO_OPEN_SESSION');
+    assertSameVal('no_session', $ep22Empty['json']['data']['type'] ?? null, 'EP-22', 'Sin sesión data.type=no_session');
+    assertSameVal(false, $ep22Empty['json']['data']['has_active_session'] ?? null, 'EP-22', 'Sin sesión has_active_session=false');
+    assertTrue(array_key_exists('session', $ep22Empty['json']['data'] ?? []) && $ep22Empty['json']['data']['session'] === null, 'EP-22', 'Sin sesión session=null');
+    assertSameVal(0, $ep22Empty['json']['data']['pagination']['total_items'] ?? -1, 'EP-22', 'Paginación vacía total_items=0');
+    assertSameVal(0, $ep22Empty['json']['data']['pagination']['total_movements'] ?? -1, 'EP-22', 'Paginación vacía total_movements=0');
 
-    // 3. Abrir sesión 1 con Vendedor 1 y ejecutar movimientos variados
+    // Filtros prohibidos en EP-22 -> 403 FORBIDDEN
+    foreach (['session_id=1', 'seller_id=' . $seller2Id, 'date=2026-11-12'] as $fParam) {
+        $forb = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?' . $fParam, $cookieSeller1);
+        assertSameVal(403, $forb['status'], 'EP-22', "Filtro prohibido {$fParam} -> 403");
+        assertSameVal('FORBIDDEN', $forb['json']['code'] ?? null, 'EP-22', "Filtro prohibido {$fParam} code=FORBIDDEN");
+    }
+
+    // 3. Sesión 1 (primera sesión, diferencia_apertura NULL) - apertura sin movimientos primero
     $open1 = httpRequest('POST', $baseUrl . '/api/caja/abrir', $cookieSeller1, [
         'shift_id'     => $shiftId,
         'cash_counted' => 100.00,
@@ -288,22 +294,41 @@ try {
     ], $csrfS1);
     assertSameVal(201, $open1['status'], 'SETUP', 'Apertura sesión 1 HTTP 201');
     $sesion1Id = (int)($open1['json']['data']['session_id'] ?? 0);
-    assertTrue($sesion1Id > 0, 'SETUP', 'Sesión 1 creada con ID > 0');
 
-    // Arqueo previo al cierre de sesión 1
+    // EP-22 sin movimientos conserva saldo inicial y current_balance=opening_balance
+    $ep22NoMov = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieSeller1);
+    assertSameVal(200, $ep22NoMov['status'], 'EP-22', 'Sesión propia sin movimientos -> 200');
+    $d22NoMov = $ep22NoMov['json']['data'] ?? [];
+    assertSameVal('result', $d22NoMov['type'] ?? null, 'EP-22', 'data.type=result');
+    assertSameVal('Abierta', $d22NoMov['session']['status'] ?? null, 'EP-22', 'session.status=Abierta');
+    assertSameVal('Vendedor Uno Ñandú', $d22NoMov['session']['seller'] ?? null, 'EP-22', 'session.seller Unicode exacto');
+    assertTrue(is_array($d22NoMov['session']['reference_schedule'] ?? null) && isset($d22NoMov['session']['reference_schedule']['label']), 'EP-22', 'reference_schedule es objeto');
+    assertTrue(array_key_exists('opening_difference', $d22NoMov['session'] ?? []), 'EP-22', 'opening_difference presente');
+    assertSameVal(100.0, (float)($d22NoMov['summary']['opening_balance'] ?? -1), 'EP-22', 'Sin movimientos opening_balance=100');
+    assertSameVal(100.0, (float)($d22NoMov['summary']['current_balance'] ?? -1), 'EP-22', 'Sin movimientos current_balance=100');
+    assertSameVal(10, $d22NoMov['pagination']['page_size'] ?? -1, 'EP-22', 'Default page_size=10');
+
+    // EP-22 desde Vendedor 2 mientras Vendedor 1 ocupa la caja -> HTTP 200 NO_OPEN_SESSION sin fuga del otro vendedor
+    $ep22Foreign = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieSeller2);
+    assertSameVal(200, $ep22Foreign['status'], 'EP-22', 'Caja ocupada por otro vendedor -> 200');
+    assertSameVal('NO_OPEN_SESSION', $ep22Foreign['json']['code'] ?? null, 'EP-22', 'Caja ocupada por otro -> NO_OPEN_SESSION');
+    assertSameVal('no_session', $ep22Foreign['json']['data']['type'] ?? null, 'EP-22', 'Caja ocupada por otro -> data.type=no_session');
+    assertSameVal(false, $ep22Foreign['json']['data']['has_active_session'] ?? null, 'EP-22', 'Caja ocupada por otro -> has_active_session=false');
+    assertTrue(!str_contains($ep22Foreign['raw'], 'Vendedor Uno'), 'EP-22', 'No filtra nombre del otro vendedor');
+
+    // Cerrar sesión 1 anticipadamente
     $arq1 = httpRequest('POST', $baseUrl . '/api/caja/arqueo', $cookieSeller1, [
         'counted'     => 100.00,
-        'observation' => 'Arqueo de cierre sesion 1',
+        'observation' => 'Cierre sesion 1',
         'version'     => 1,
         'request_id'  => 'p12-arq1-' . uniqid(),
     ], $csrfS1);
     assertSameVal(201, $arq1['status'], 'SETUP', 'Arqueo sesión 1 HTTP 201');
     $arq1Id = (int)($arq1['json']['data']['arqueo']['id'] ?? 0);
 
-    // Cerrar sesión 1 para que exista un cierre anterior elegible para retiro omitido en sesión 2
     $close1 = httpRequest('POST', $baseUrl . '/api/caja/cerrar', $cookieSeller1, [
         'arqueo_id'        => $arq1Id,
-        'admin_email'      => 'p12.admin@test.local',
+        'admin_email'      => "p12.admin1.{$tag}@test.local",
         'admin_password'   => $passPlain,
         'exception_reason' => 'Cierre temprano controlado sesion 1',
         'request_id'       => 'p12-close-1-' . uniqid(),
@@ -311,17 +336,47 @@ try {
     assertSameVal(200, $close1['status'], 'SETUP', 'Cierre anticipado sesión 1 HTTP 200');
     sleep(1);
 
-    // Abrir sesión 2 con Vendedor 1
+    // 4. Sesión 2 (apertura con diferencia negativa -10.00 -> 90.00 vs 100.00) + ventas + movimientos + correcciones
     $open2 = httpRequest('POST', $baseUrl . '/api/caja/abrir', $cookieSeller1, [
         'shift_id'     => $shiftId,
-        'cash_counted' => 150.00,
+        'cash_counted' => 90.00,
         'request_id'   => 'p12-open-2-' . uniqid(),
     ], $csrfS1);
     assertSameVal(201, $open2['status'], 'SETUP', 'Apertura sesión 2 HTTP 201');
     $sesion2Id = (int)($open2['json']['data']['session_id'] ?? 0);
 
-    // Registrar ingreso manual, inyección admin, egreso, retiro omitido y corrección
-    $refLarga = str_repeat('R', 220);
+    // Ventas en efectivo, tarjeta y yape_plin (usando primer producto con stock suficiente y método de pago 1, 2, 3)
+    $prodRow = $pdo->query('SELECT id_producto, precio_venta FROM producto WHERE estado = 1 AND stock_actual >= 10 LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+    $idProd = (int)$prodRow['id_producto'];
+    $precioProd = (float)$prodRow['precio_venta'];
+    $idCli = (int)$pdo->query("SELECT id_cliente FROM cliente WHERE estado = 1 ORDER BY id_cliente ASC LIMIT 1")->fetchColumn();
+    $idBoleta = (int)$pdo->query("SELECT id_tipo_comprobante FROM tipo_comprobante WHERE LOWER(nombre) LIKE '%boleta%' AND estado = 1 LIMIT 1")->fetchColumn();
+    if ($idBoleta <= 0) {
+        $idBoleta = 1;
+    }
+    $metodos = $pdo->query('SELECT id_metodo_pago, LOWER(nombre) AS n FROM metodo_pago')->fetchAll(PDO::FETCH_ASSOC);
+    $idEfectivo = 1;
+    $idTarjeta = 2;
+    $idYape = 3;
+    foreach ($metodos as $mp) {
+        if (str_contains($mp['n'], 'efectivo')) $idEfectivo = (int)$mp['id_metodo_pago'];
+        if (str_contains($mp['n'], 'tarjeta')) $idTarjeta = (int)$mp['id_metodo_pago'];
+        if (str_contains($mp['n'], 'yape') || str_contains($mp['n'], 'plin')) $idYape = (int)$mp['id_metodo_pago'];
+    }
+
+    foreach ([$idEfectivo, $idTarjeta, $idYape] as $idxMp => $mpId) {
+        $vRes = httpRequest('POST', $baseUrl . '/api/ventas', $cookieSeller1, [
+            'id_cliente'          => $idCli,
+            'id_tipo_comprobante' => $idBoleta,
+            'id_metodo_pago'      => $mpId,
+            'referencia_solicitud' => 'p12-vta-' . $idxMp . '-' . uniqid(),
+            'productos'           => [['id_producto' => $idProd, 'cantidad' => 1]],
+        ], $csrfS1);
+        assertSameVal(201, $vRes['status'], 'SETUP', "Venta método {$mpId} HTTP 201");
+    }
+
+    // Movimientos variados incluyendo referencia Unicode > 200 chars
+    $refLarga = str_repeat('Ñáéíóú', 40);
     $ing1 = httpRequest('POST', $baseUrl . '/api/caja/ingresos', $cookieSeller1, [
         'type'       => 'manual_income',
         'amount'     => 25.50,
@@ -347,6 +402,7 @@ try {
         'request_id' => 'p12-egr1-' . uniqid(),
     ], $csrfS1);
     assertSameVal(201, $egr1['status'], 'SETUP', 'Salida caja HTTP 201');
+    $egr1Id = (int)($egr1['json']['data']['movement']['id'] ?? 0);
 
     $omit1 = httpRequest('POST', $baseUrl . '/api/caja/egresos', $cookieSeller1, [
         'type'                                     => 'omitted_withdrawal',
@@ -360,192 +416,314 @@ try {
     ], $csrfS1);
     assertSameVal(201, $omit1['status'], 'SETUP', 'Retiro omitido HTTP 201');
 
-    // Corrección del ingreso manual de 25.50 -> 30.50 (+5.00)
+    $reqCorr1 = 'p12-corr1-' . uniqid();
     $corr1 = httpRequest('POST', $baseUrl . '/api/caja/movimientos/correcciones', $cookieSeller1, [
         'original_movement_id' => $ing1Id,
         'corrected_amount'     => 30.50,
         'reason'               => 'Ajuste de conteo en ingreso',
-        'request_id'           => 'p12-corr1-' . uniqid(),
+        'request_id'           => $reqCorr1,
     ], $csrfS1);
     assertSameVal(201, $corr1['status'], 'SETUP', 'Corrección movimiento HTTP 201');
 
-    // Guardar un arqueo en sesión 2
+    $verAntesReplay = (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesion2Id}")->fetchColumn();
+    $corr1Replay = httpRequest('POST', $baseUrl . '/api/caja/movimientos/correcciones', $cookieSeller1, [
+        'original_movement_id' => $ing1Id,
+        'corrected_amount'     => 30.50,
+        'reason'               => 'Ajuste de conteo en ingreso',
+        'request_id'           => $reqCorr1,
+    ], $csrfS1);
+    assertSameVal(200, $corr1Replay['status'], 'VERSION', 'Replay idempotente HTTP 200');
+    $verDespuesReplay = (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesion2Id}")->fetchColumn();
+    assertSameVal($verAntesReplay, $verDespuesReplay, 'VERSION', 'Replay idempotente NO incrementa version_caja');
+
+    // Corrección encadenada: ing1 pasa de 30.50 -> 35.00
+    $corr1b = httpRequest('POST', $baseUrl . '/api/caja/movimientos/correcciones', $cookieSeller1, [
+        'original_movement_id' => $ing1Id,
+        'corrected_amount'     => 35.00,
+        'reason'               => 'Segundo ajuste encadenado en ingreso',
+        'request_id'           => 'p12-corr1b-' . uniqid(),
+    ], $csrfS1);
+    assertSameVal(201, $corr1b['status'], 'SETUP', 'Corrección encadenada HTTP 201');
+
+    // Corrección a cero: egr1 pasa de 10.00 -> 0.00
+    $corrZero = httpRequest('POST', $baseUrl . '/api/caja/movimientos/correcciones', $cookieSeller1, [
+        'original_movement_id' => $egr1Id,
+        'corrected_amount'     => 0.00,
+        'reason'               => 'Anulación contable de salida por error',
+        'request_id'           => 'p12-corr0-' . uniqid(),
+    ], $csrfS1);
+    assertSameVal(201, $corrZero['status'], 'SETUP', 'Corrección a cero HTTP 201');
+
+    $verS2Esperada = (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesion2Id}")->fetchColumn();
+    assertSameVal($verAntesReplay + 2, $verS2Esperada, 'VERSION', 'Dos correcciones nuevas incrementan version_caja en +2');
+
+    // Esperado en sesión 2: 90.00 + precioProd (efectivo) + 35.00 (ing1 encadenado) + 40.00 (inj1) - 0.00 (egr1 corregido a 0) = 165.00 + precioProd
+    $esperadoS2 = round(165.00 + $precioProd, 2);
+
+    // 5. EP-22 paginación, alias limit, conflictos, página fuera de rango y version
+    $ep22Lim = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=1&limit=2', $cookieSeller1);
+    assertSameVal(200, $ep22Lim['status'], 'EP-22', 'Alias limit=2 aceptado -> 200');
+    assertSameVal(2, count($ep22Lim['json']['data']['movements'] ?? []), 'EP-22', 'Página 1 trae 2 movimientos');
+    assertSameVal(8, $ep22Lim['json']['data']['pagination']['total_items'] ?? -1, 'EP-22', 'total_items=8 (1 venta efectivo + 7 movimientos/correcciones)');
+    assertSameVal(8, $ep22Lim['json']['data']['pagination']['total_movements'] ?? -1, 'EP-22', 'total_movements=8');
+    assertSameVal(round($precioProd, 2), (float)($ep22Lim['json']['data']['summary']['cash_sales'] ?? -1), 'EP-22', 'summary.cash_sales exacto sin duplicar');
+    assertSameVal(round($precioProd, 2), (float)($ep22Lim['json']['data']['summary']['card'] ?? -1), 'EP-22', 'summary.card exacto');
+    assertSameVal(round($precioProd, 2), (float)($ep22Lim['json']['data']['summary']['yape_plin'] ?? -1), 'EP-22', 'summary.yape_plin exacto');
+    assertSameVal($esperadoS2, (float)($ep22Lim['json']['data']['summary']['current_balance'] ?? -1), 'EP-22', 'summary.current_balance exacto sin doble suma');
+    assertTrue(is_int($ep22Lim['json']['data']['session']['version'] ?? null), 'VERSION', 'EP-22 session.version es entero');
+    assertSameVal($verS2Esperada, $ep22Lim['json']['data']['session']['version'] ?? -1, 'VERSION', 'EP-22 session.version coincide con BD');
+
+    $ep22Full = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=1&page_size=20', $cookieSeller1);
+    assertSameVal(200, $ep22Full['status'], 'EP-22', 'Consulta completa movimientos -> 200');
+    assertSameVal($verS2Esperada, (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesion2Id}")->fetchColumn(), 'VERSION', 'Consultar EP-22 no incrementa version_caja');
+    $m22ById = [];
+    foreach (($ep22Full['json']['data']['movements'] ?? []) as $m22) {
+        $m22ById[(int)$m22['id']] = $m22;
+    }
+    assertSameVal($sesion2Id, $m22ById[$ing1Id]['session_id'] ?? null, 'MOV', 'EP-22 mov.session_id coincide con sesión real');
+    assertSameVal('Ingreso de sencillo', $m22ById[$ing1Id]['reason'] ?? null, 'MOV', 'EP-22 mov.reason conserva motivo original');
+    assertSameVal('Corregido', $m22ById[$ing1Id]['status'] ?? null, 'MOV', 'EP-22 original encadenado status=Corregido');
+    assertSameVal(35.0, (float)($m22ById[$ing1Id]['current_amount'] ?? -1), 'MOV', 'EP-22 original encadenado current_amount=35.0');
+    assertSameVal('Corregido', $m22ById[$egr1Id]['status'] ?? null, 'MOV', 'EP-22 original corregido a 0.00 status=Corregido');
+    assertSameVal(0.0, (float)($m22ById[$egr1Id]['current_amount'] ?? -1), 'MOV', 'EP-22 original corregido a 0.00 current_amount=0.0');
+    assertTrue(array_key_exists('administrator_id', $m22ById[$ing1Id] ?? []) && $m22ById[$ing1Id]['administrator_id'] === null, 'MOV', 'EP-22 ingreso manual administrator_id=null');
+    assertTrue(array_key_exists('declared_occurred_in_open_origin_session', $m22ById[$ing1Id] ?? []) && $m22ById[$ing1Id]['declared_occurred_in_open_origin_session'] === null, 'MOV', 'EP-22 ingreso manual declared=null');
+    assertTrue(array_key_exists('confirmed_reflected_in_opening', $m22ById[$ing1Id] ?? []) && $m22ById[$ing1Id]['confirmed_reflected_in_opening'] === null, 'MOV', 'EP-22 ingreso manual confirmed=null');
+
+    $ep22Conflict = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page_size=5&limit=10', $cookieSeller1);
+    assertSameVal(422, $ep22Conflict['status'], 'EP-22', 'Conflicto page_size vs limit -> 422');
+    assertSameVal('AMBIGUOUS_ALIAS_VALUES', $ep22Conflict['json']['code'] ?? null, 'EP-22', 'Conflicto code=AMBIGUOUS_ALIAS_VALUES');
+
+    $ep22EmptyPage = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=', $cookieSeller1);
+    assertSameVal(422, $ep22EmptyPage['status'], 'EP-22', 'page= vacío -> 422');
+
+    $ep22OutOfRange = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=99&page_size=2', $cookieSeller1);
+    assertSameVal(200, $ep22OutOfRange['status'], 'EP-22', 'Página fuera de rango -> 200');
+    assertSameVal([], $ep22OutOfRange['json']['data']['movements'] ?? ['x'], 'EP-22', 'Página fuera de rango movements=[]');
+    assertSameVal(99, $ep22OutOfRange['json']['data']['pagination']['page'] ?? -1, 'EP-22', 'Página fuera de rango conserva page=99');
+    assertSameVal($esperadoS2, (float)($ep22OutOfRange['json']['data']['summary']['current_balance'] ?? -1), 'EP-22', 'Página fuera de rango conserva summary completo');
+
+    // 6. EP-23A: vendedores (arreglo directo con username y estado, incluyendo inactivo, orden nombre ASC)
+    $ep23a = httpRequest('GET', $baseUrl . '/api/caja/consulta/vendedores', $cookieAdmin);
+    assertSameVal(200, $ep23a['status'], 'EP-23A', 'Admin consulta vendedores -> 200');
+    $sellersArr = $ep23a['json']['data'] ?? null;
+    assertTrue(is_array($sellersArr) && array_is_list($sellersArr), 'EP-23A', 'data es lista plana (sin wrapper data.sellers)');
+    $foundInact = null;
+    foreach ($sellersArr as $sItem) {
+        if ((int)($sItem['id'] ?? 0) === $sellerInactId) {
+            $foundInact = $sItem;
+            break;
+        }
+    }
+    assertTrue($foundInact !== null, 'EP-23A', 'Incluye vendedor inactivo para historial');
+    assertSameVal("vi_{$tag}", $foundInact['username'] ?? null, 'EP-23A', 'Incluye username');
+    assertSameVal(0, $foundInact['estado'] ?? -1, 'EP-23A', 'Incluye estado=0');
+    assertTrue(!array_key_exists('email', $foundInact ?? []), 'EP-23A', 'No sustituye campos por email');
+
+    // 7. EP-23B: sesiones por date + seller_id obligatorios, turn_id opcional
+    $hoyLima = (new DateTimeImmutable('now', new DateTimeZone('America/Lima')))->format('Y-m-d');
+    assertSameVal(422, httpRequest('GET', $baseUrl . '/api/caja/consulta/sesiones', $cookieAdmin)['status'], 'EP-23B', 'Sin date ni seller_id -> 422');
+    assertSameVal(422, httpRequest('GET', $baseUrl . "/api/caja/consulta/sesiones?date={$hoyLima}", $cookieAdmin)['status'], 'EP-23B', 'Sin seller_id -> 422');
+    $ep23bBadDate = httpRequest('GET', $baseUrl . "/api/caja/consulta/sesiones?date=2026-99-99&seller_id={$seller1Id}", $cookieAdmin);
+    assertSameVal(422, $ep23bBadDate['status'], 'EP-23B', 'Fecha inválida -> 422');
+    assertSameVal('INVALID_DATE', $ep23bBadDate['json']['code'] ?? null, 'EP-23B', 'Fecha inválida code=INVALID_DATE');
+
+    $ep23b = httpRequest('GET', $baseUrl . "/api/caja/consulta/sesiones?date={$hoyLima}&seller_id={$seller1Id}&turn_id={$shiftId}", $cookieAdmin);
+    assertSameVal(200, $ep23b['status'], 'EP-23B', 'Con date, seller_id y turn_id -> 200');
+    $sessArr = $ep23b['json']['data'] ?? null;
+    assertTrue(is_array($sessArr) && array_is_list($sessArr) && count($sessArr) >= 2, 'EP-23B', 'data es lista plana con sesiones abierta y cerrada');
+    assertSameVal('Cerrada', $sessArr[0]['status'] ?? null, 'EP-23B', 'Sesión 1 status=Cerrada');
+    assertSameVal('Abierta', $sessArr[1]['status'] ?? null, 'EP-23B', 'Sesión 2 status=Abierta');
+    assertSameVal($shiftId, $sessArr[0]['turn_id'] ?? null, 'EP-23B', 'turn_id presente');
+
+    // 8. EP-23C: alias sesion_id, overflow PHP_INT_MAX, campos de movimientos y autorizaciones
+    $ep23cAlias = httpRequest('GET', $baseUrl . "/api/caja/consulta?sesion_id={$sesion1Id}", $cookieAdmin);
+    assertSameVal(200, $ep23cAlias['status'], 'EP-23C', 'Alias sesion_id aceptado -> 200');
+    $d23c = $ep23cAlias['json']['data'] ?? [];
+    assertSameVal('result', $d23c['type'] ?? null, 'EP-23C', 'data.type=result');
+    assertTrue(array_key_exists('opening_difference', $d23c['session'] ?? []) && $d23c['session']['opening_difference'] === null, 'EP-23C', 'Primera sesión opening_difference=null');
+    $auth0 = $d23c['authorizations'][0] ?? [];
+    assertSameVal($sesion1Id, $auth0['session_id'] ?? null, 'EP-23C', 'auth.session_id');
+    assertSameVal('CIERRE_ANTICIPADO', $auth0['operation'] ?? null, 'EP-23C', 'auth.operation');
+    assertSameVal($adminId, $auth0['administrator_id'] ?? null, 'EP-23C', 'auth.administrator_id');
+    assertSameVal('Admin Paso 12', $auth0['administrator_name'] ?? null, 'EP-23C', 'auth.administrator_name');
+    assertSameVal("p12.admin1.{$tag}@test.local", $auth0['administrator_email'] ?? null, 'EP-23C', 'auth.administrator_email');
+    assertTrue(isset($auth0['scheduled_end']) && isset($auth0['minutes_before_end']), 'EP-23C', 'auth.scheduled_end y minutes_before_end');
+    assertTrue(!str_contains($ep23cAlias['raw'], $passHash), 'EP-23C', 'Sin hash de contraseña en respuesta');
+
+    $ep23cS2 = httpRequest('GET', $baseUrl . "/api/caja/consulta?session_id={$sesion2Id}&page_size=20", $cookieAdmin);
+    assertSameVal(200, $ep23cS2['status'], 'EP-23C', 'Sesión 2 detalle -> 200');
+    assertTrue(is_int($ep23cS2['json']['data']['session']['version'] ?? null), 'VERSION', 'EP-23C session.version es entero');
+    assertSameVal($verS2Esperada, $ep23cS2['json']['data']['session']['version'] ?? -1, 'VERSION', 'EP-23C session.version coincide con BD');
+    assertSameVal($verS2Esperada, (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesion2Id}")->fetchColumn(), 'VERSION', 'Consultar EP-23C no incrementa version_caja');
+    $movs23c = $ep23cS2['json']['data']['movements'] ?? [];
+    $mIng = null;
+    $mEgr = null;
+    $mInj = null;
+    $mOmit = null;
+    $mCorr = null;
+    foreach ($movs23c as $m) {
+        if ((int)$m['id'] === $ing1Id) $mIng = $m;
+        if ((int)$m['id'] === $egr1Id) $mEgr = $m;
+        if (($m['type'] ?? '') === 'admin_injection') $mInj = $m;
+        if (($m['type'] ?? '') === 'omitted_withdrawal') $mOmit = $m;
+        if (($m['type'] ?? '') === 'correction' && $mCorr === null) $mCorr = $m;
+    }
+    assertSameVal($sesion2Id, $mIng['session_id'] ?? null, 'EP-23C', 'mov.session_id=sesion2');
+    assertSameVal('Ingreso', $mIng['label'] ?? null, 'EP-23C', 'mov.label=Ingreso');
+    assertSameVal('Ingreso de sencillo', $mIng['reason'] ?? null, 'EP-23C', 'mov.reason original intacto');
+    assertSameVal('Corregido', $mIng['status'] ?? null, 'EP-23C', 'mov.status=Corregido');
+    assertTrue(isset($mIng['date']) && isset($mIng['time']) && isset($mIng['recorded_at']), 'EP-23C', 'mov.date/time/recorded_at');
+    assertSameVal(25.5, (float)($mIng['amount'] ?? -1), 'EP-23C', 'mov.amount original=25.5');
+    assertSameVal(35.0, (float)($mIng['current_amount'] ?? -1), 'EP-23C', 'mov.current_amount encadenado=35.0');
+    assertSameVal(25.5, (float)($mIng['impact'] ?? -1), 'EP-23C', 'mov.impact numérico=25.5');
+    assertSameVal('Suma', $mIng['effect'] ?? null, 'EP-23C', 'mov.effect texto=Suma');
+    assertSameVal('Vendedor Uno Ñandú', $mIng['responsible'] ?? null, 'EP-23C', 'mov.responsible');
+    assertTrue(array_key_exists('administrator_id', $mIng ?? []) && $mIng['administrator_id'] === null, 'EP-23C', 'mov.administrator_id=null en ingreso manual');
+    assertSameVal('Corregido', $mEgr['status'] ?? null, 'EP-23C', 'egreso corregido a 0.00 status=Corregido');
+    assertSameVal(0.0, (float)($mEgr['current_amount'] ?? -1), 'EP-23C', 'egreso corregido a 0.00 current_amount=0.0');
+    assertSameVal($adminId, $mInj['administrator_id'] ?? null, 'EP-23C', 'mov.administrator_id en inyección');
+    assertSameVal('Admin Paso 12', $mInj['administrator_name'] ?? null, 'EP-23C', 'mov.administrator_name');
+    assertSameVal('Confirmado', $mInj['status'] ?? null, 'EP-23C', 'mov sin correcciones status=Confirmado');
+    assertSameVal($refLarga, $mInj['reason'] ?? null, 'EP-23C', 'Inyección reason Unicode completo');
+    assertTrue(mb_strlen((string)($mInj['reference'] ?? ''), 'UTF-8') >= 200, 'EP-23C', 'Referencia Unicode larga completa');
+    assertSameVal('Sin efecto: ya reflejado en la apertura', $mOmit['effect'] ?? null, 'EP-23C', 'Retiro omitido effect descriptivo');
+    assertSameVal($sesion1Id, $mOmit['origin_session_id'] ?? null, 'EP-23C', 'Retiro omitido origin_session_id');
+    assertSameVal(true, $mOmit['declared_occurred_in_open_origin_session'] ?? null, 'EP-23C', 'Retiro omitido declared=true');
+    assertSameVal(true, $mOmit['confirmed_reflected_in_opening'] ?? null, 'EP-23C', 'Retiro omitido confirmed=true');
+    assertSameVal($adminId, $mOmit['administrator_id'] ?? null, 'EP-23C', 'Retiro omitido administrator_id');
+    assertSameVal($ing1Id, $mCorr['original_movement_id'] ?? null, 'EP-23C', 'Corrección original_movement_id');
+    assertSameVal('Confirmado', $mCorr['status'] ?? null, 'EP-23C', 'Fila de corrección status=Confirmado');
+
+    $ep23cOverflow = httpRequest('GET', $baseUrl . "/api/caja/consulta?session_id={$sesion2Id}&page=9223372036854775807", $cookieAdmin);
+    assertSameVal(422, $ep23cOverflow['status'], 'EP-23C', 'Overflow PHP_INT_MAX -> 422 (sin 500)');
+
+    // Cerrar sesión 2 para pruebas de EP-24A y EP-24B
+    $verS2 = (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$sesion2Id}")->fetchColumn();
     $arq2 = httpRequest('POST', $baseUrl . '/api/caja/arqueo', $cookieSeller1, [
-        'counted'     => 210.50,
-        'observation' => 'Cierre sesion 2 con retiros omitidos',
-        'version'     => 6,
+        'counted'     => $esperadoS2,
+        'observation' => 'Arqueo cierre sesion 2',
+        'version'     => $verS2,
         'request_id'  => 'p12-arq2-' . uniqid(),
     ], $csrfS1);
     assertSameVal(201, $arq2['status'], 'SETUP', 'Arqueo sesión 2 HTTP 201');
     $arq2Id = (int)($arq2['json']['data']['arqueo']['id'] ?? 0);
-    assertSameVal(201, $arq2['status'], 'SETUP', 'Arqueo sesión 2 HTTP 201');
 
-    // EP-22 con Vendedor 2 (no propietario) -> 409
-    $ep22Other = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieSeller2);
-    assertSameVal(409, $ep22Other['status'], 'EP-22', 'Vendedor no propietario -> 409 CASH_SESSION_OTHER_SELLER');
-    assertSameVal('CASH_SESSION_OTHER_SELLER', $ep22Other['json']['code'] ?? null, 'EP-22', 'Código 409 exacto');
-
-    // EP-22 con Vendedor 1 (paginado page=1&page_size=2)
-    $ep22Page1 = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=1&page_size=2', $cookieSeller1);
-    assertSameVal(200, $ep22Page1['status'], 'EP-22', 'Vendedor propietario EP-22 -> 200');
-    $d22 = $ep22Page1['json']['data'] ?? [];
-    assertSameVal(true, $d22['has_active_session'] ?? null, 'EP-22', 'has_active_session=true');
-    assertSameVal($sesion2Id, $d22['session']['session_id'] ?? null, 'EP-22', 'session_id coincide');
-    assertSameVal(150.0, (float)($d22['summary']['opening_balance'] ?? -1), 'EP-22', 'summary.opening_balance = 150.0');
-    assertSameVal(210.5, (float)($d22['summary']['current_balance'] ?? -1), 'EP-22', 'summary.current_balance = 210.5');
-    assertSameVal(1, count($d22['arqueos'] ?? []), 'EP-22', 'Incluye 1 arqueo');
-    assertSameVal(2, count($d22['movements'] ?? []), 'EP-22', 'Página 1 trae 2 movimientos');
-    assertSameVal(5, $d22['pagination']['total'] ?? -1, 'EP-22', 'Total movimientos = 5');
-    assertSameVal(3, $d22['pagination']['total_pages'] ?? -1, 'EP-22', 'Total páginas = 3');
-
-    // EP-22 página 2 completa para verificar current_amount, reference no truncada, origin_session_id, correction_id
-    $ep22All = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=1&page_size=20', $cookieSeller1);
-    $movsAll = $ep22All['json']['data']['movements'] ?? [];
-    assertSameVal(5, count($movsAll), 'EP-22', 'Todos los 5 movimientos recuperados');
-    $foundIng = null;
-    $foundInj = null;
-    $foundOmit = null;
-    $foundCorr = null;
-    foreach ($movsAll as $m) {
-        if ((int)$m['id'] === $ing1Id) $foundIng = $m;
-        if (($m['type'] ?? '') === 'admin_injection') $foundInj = $m;
-        if (($m['type'] ?? '') === 'omitted_withdrawal') $foundOmit = $m;
-        if (($m['type'] ?? '') === 'correction') $foundCorr = $m;
-    }
-    assertSameVal(30.5, (float)($foundIng['current_amount'] ?? -1), 'EP-22', 'Movimiento corregido expone current_amount=30.5');
-    assertTrue(strlen((string)($foundInj['reference'] ?? '')) >= 220, 'EP-22', 'Referencia larga no truncada en consulta');
-    assertSameVal($sesion1Id, $foundOmit['origin_session_id'] ?? null, 'EP-22', 'omitted_withdrawal expone origin_session_id');
-    assertSameVal($ing1Id, $foundCorr['original_movement_id'] ?? null, 'EP-22', 'correction expone original_movement_id');
-    assertTrue(($foundCorr['correction_id'] ?? 0) > 0, 'EP-22', 'correction expone correction_id');
-
-    // EP-22 paginación inválida -> 422
-    $ep22BadPage = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page=0', $cookieSeller1);
-    assertSameVal(422, $ep22BadPage['status'], 'EP-22', 'page=0 -> 422');
-    $ep22BadSize = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa?page_size=101', $cookieSeller1);
-    assertSameVal(422, $ep22BadSize['status'], 'EP-22', 'page_size=101 -> 422');
-
-    // 4. EP-23A: Vendedores para consulta
-    $ep23a = httpRequest('GET', $baseUrl . '/api/caja/consulta/vendedores', $cookieAdmin);
-    assertSameVal(200, $ep23a['status'], 'EP-23A', 'Admin consulta vendedores -> 200');
-    $sellersList = $ep23a['json']['data']['sellers'] ?? [];
-    $sellerIds = array_column($sellersList, 'id');
-    assertTrue(in_array($seller1Id, $sellerIds, true) && in_array($seller2Id, $sellerIds, true), 'EP-23A', 'Incluye vendedores activos de prueba');
-
-    // 5. EP-23B: Sesiones por fecha y vendedor
-    $hoyLima = (new DateTimeImmutable('now', new DateTimeZone('America/Lima')))->format('Y-m-d');
-    $ep23b = httpRequest('GET', $baseUrl . "/api/caja/consulta/sesiones?date={$hoyLima}&seller_id={$seller1Id}", $cookieAdmin);
-    assertSameVal(200, $ep23b['status'], 'EP-23B', 'Admin consulta sesiones por fecha y vendedor -> 200');
-    $sessList = $ep23b['json']['data']['sessions'] ?? [];
-    assertTrue(count($sessList) >= 2, 'EP-23B', 'Lista sesiones abiertas y cerradas del día');
-    $ep23bBadDate = httpRequest('GET', $baseUrl . '/api/caja/consulta/sesiones?date=2026-99-99', $cookieAdmin);
-    assertSameVal(422, $ep23bBadDate['status'], 'EP-23B', 'Fecha inválida -> 422');
-
-    // 6. EP-23C: Detalle de sesión (sesión 1 cerrada con autorización anticipada)
-    $ep23c = httpRequest('GET', $baseUrl . "/api/caja/consulta?session_id={$sesion1Id}", $cookieAdmin);
-    assertSameVal(200, $ep23c['status'], 'EP-23C', 'Admin consulta detalle sesión 1 -> 200');
-    $d23c = $ep23c['json']['data'] ?? [];
-    assertSameVal('CERRADA', $d23c['session']['status'] ?? null, 'EP-23C', 'Estado CERRADA');
-    assertSameVal(100.0, (float)($d23c['summary']['expected_cash'] ?? -1), 'EP-23C', 'summary.expected_cash=100');
-    assertSameVal(100.0, (float)($d23c['summary']['counted_cash'] ?? -1), 'EP-23C', 'summary.counted_cash=100');
-    assertSameVal(0.0, (float)($d23c['summary']['closing_difference'] ?? -1), 'EP-23C', 'summary.closing_difference=0');
-    assertTrue(!empty($d23c['authorization']), 'EP-23C', 'Incluye autorización de cierre anticipado');
-    assertSameVal('Admin Paso 12', $d23c['authorization']['authorized_by_admin'] ?? null, 'EP-23C', 'Nombre del admin autorizador');
-
-    $ep23c404 = httpRequest('GET', $baseUrl . '/api/caja/consulta?session_id=9999999', $cookieAdmin);
-    assertSameVal(404, $ep23c404['status'], 'EP-23C', 'Sesión inexistente -> 404');
-
-    // 7. EP-24A y EP-24B: Reporte de cierres de caja, snapshots y detalle
-    $ep24a = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?from={$hoyLima}&to={$hoyLima}&seller_id={$seller1Id}&page=1&page_size=10", $cookieAdmin);
-    assertSameVal(200, $ep24a['status'], 'EP-24A', 'Admin genera reporte cierres-caja -> 200');
-    $d24a = $ep24a['json']['data'] ?? [];
-    $snapId = (string)($d24a['snapshot_id'] ?? '');
-    assertTrue(str_starts_with($snapId, 'SNAP-CIE-'), 'EP-24A', 'Snapshot ID generado con prefijo SNAP-CIE-');
-    assertTrue(($d24a['totals']['total_closures'] ?? 0) >= 1, 'EP-24A', 'totals.total_closures >= 1');
-    $rowS1 = null;
-    foreach ($d24a['rows'] ?? [] as $r) {
-        if ((int)($r['session_id'] ?? 0) === $sesion1Id) {
-            $rowS1 = $r;
-            break;
-        }
-    }
-    assertTrue($rowS1 !== null, 'EP-24A', 'Sesión 1 incluida en filas del reporte');
-    assertSameVal(sprintf('CIE-%04d', $sesion1Id), $rowS1['code'] ?? null, 'EP-24A', 'Código CIE-xxxx correcto');
-    assertSameVal(true, $rowS1['has_early_close_authorization'] ?? null, 'EP-24A', 'has_early_close_authorization=true');
-    assertSameVal('Admin Paso 12', $rowS1['authorized_by_admin'] ?? null, 'EP-24A', 'authorized_by_admin correcto');
-
-    // Cerrar sesión 2 DESPUÉS de crear snapshot y verificar que snapshot conserva total original
     $close2 = httpRequest('POST', $baseUrl . '/api/caja/cerrar', $cookieSeller1, [
         'arqueo_id'        => $arq2Id,
-        'admin_email'      => 'p12.admin@test.local',
+        'admin_email'      => "p12.admin1.{$tag}@test.local",
         'admin_password'   => $passPlain,
         'exception_reason' => 'Cierre temprano sesion 2',
         'request_id'       => 'p12-close-2-' . uniqid(),
     ], $csrfS1);
     assertSameVal(200, $close2['status'], 'SETUP', 'Cierre sesión 2 HTTP 200');
 
-    $ep24aSnapPage = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?snapshot_id={$snapId}&page=1&page_size=10", $cookieAdmin);
-    assertSameVal(200, $ep24aSnapPage['status'], 'EP-24A', 'Lectura por snapshot_id -> 200');
-    assertSameVal($d24a['totals']['total_closures'], $ep24aSnapPage['json']['data']['totals']['total_closures'] ?? -1, 'EP-24A', 'Snapshot inmutable mantiene total_closures previo al segundo cierre');
+    // 9. EP-24A: filtros canónicos, defaults, nulabilidad, snapshot entero, mismatch 409, expiración 404
+    $mesInicio = (new DateTimeImmutable('now', new DateTimeZone('America/Lima')))->format('Y-m-01');
+    $ep24aDef = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?vendedor_id={$seller1Id}", $cookieAdmin);
+    assertSameVal(200, $ep24aDef['status'], 'EP-24A', 'Reporte con vendedor_id y defaults -> 200');
+    $d24a = $ep24aDef['json']['data'] ?? [];
+    $snapId = $d24a['snapshot_id'] ?? null;
+    assertTrue(is_int($snapId) && $snapId > 0, 'EP-24A', 'snapshot_id es entero positivo');
+    assertTrue(!empty($d24a['generated_at']) && !empty($d24a['expires_at']), 'EP-24A', 'generated_at y expires_at presentes');
+    assertSameVal($mesInicio, $d24a['filters']['desde'] ?? null, 'EP-24A', 'Default desde = primer día del mes');
+    assertSameVal($hoyLima, $d24a['filters']['hasta'] ?? null, 'EP-24A', 'Default hasta = fecha actual');
+    assertTrue(isset($d24a['closures']) && is_array($d24a['closures']), 'EP-24A', 'data.closures presente');
+    assertSameVal(2, is_array($d24a['closures'] ?? null) ? count($d24a['closures']) : -1, 'EP-24A', '2 cierres del vendedor 1');
 
-    // Mismatch de filtros con snapshot_id -> 422
-    $ep24aMismatch = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?snapshot_id={$snapId}&from=2020-01-01&to=2020-01-02", $cookieAdmin);
-    assertSameVal(422, $ep24aMismatch['status'], 'EP-24A', 'Filtros incompatibles con snapshot_id -> 422');
-    assertSameVal('SNAPSHOT_FILTER_MISMATCH', $ep24aMismatch['json']['code'] ?? null, 'EP-24A', 'Código SNAPSHOT_FILTER_MISMATCH');
+    // Orden DESC: sesión 2 primero, sesión 1 segunda
+    assertSameVal($sesion2Id, $d24a['closures'][0]['session_id'] ?? null, 'EP-24A', 'Orden cierre DESC: sesión 2 primero');
+    assertSameVal(-10.0, (float)($d24a['closures'][0]['opening_difference'] ?? 0), 'EP-24A', 'Sesión 2 opening_difference = -10.0');
+    assertSameVal(true, $d24a['closures'][0]['has_omitted_withdrawals'] ?? null, 'EP-24A', 'Sesión 2 has_omitted_withdrawals=true');
+    assertSameVal($sesion1Id, $d24a['closures'][1]['session_id'] ?? null, 'EP-24A', 'Sesión 1 segunda');
+    assertTrue(array_key_exists('opening_difference', $d24a['closures'][1]) && $d24a['closures'][1]['opening_difference'] === null, 'EP-24A', 'Primera sesión conserva opening_difference=null');
 
-    // Nuevo reporte sin snapshot_id ahora sí ve sesión 2 con has_omitted_withdrawals=true
-    $ep24aFresh = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?from={$hoyLima}&to={$hoyLima}&seller_id={$seller1Id}", $cookieAdmin);
-    assertSameVal(200, $ep24aFresh['status'], 'EP-24A', 'Nuevo reporte ve los 2 cierres');
-    $rowS2 = null;
-    foreach ($ep24aFresh['json']['data']['rows'] ?? [] as $r) {
-        if ((int)($r['session_id'] ?? 0) === $sesion2Id) {
-            $rowS2 = $r;
-            break;
-        }
-    }
-    assertTrue($rowS2 !== null, 'EP-24A', 'Sesión 2 presente en nuevo reporte');
-    assertSameVal(true, $rowS2['has_omitted_withdrawals'] ?? null, 'EP-24A', 'Sesión 2 marca has_omitted_withdrawals=true');
+    // Lectura por snapshot_id con filtro parcial coincidente (hereda desde/hasta del snapshot)
+    $ep24aSnapOk = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?snapshot_id={$snapId}&vendedor_id={$seller1Id}&page=1&limit=1", $cookieAdmin);
+    assertSameVal(200, $ep24aSnapOk['status'], 'EP-24A', 'Lectura snapshot_id entero con filtro parcial -> 200');
+    assertSameVal(1, count($ep24aSnapOk['json']['data']['closures'] ?? []), 'EP-24A', 'limit=1 devuelve 1 fila');
+    assertSameVal(2, $ep24aSnapOk['json']['data']['pagination']['total_closures'] ?? -1, 'EP-24A', 'total_closures=2 conservado');
 
-    // Expiración determinista de snapshot usando setClockProvider() (30 minutos)
+    // Filtro incompatible -> 409 SNAPSHOT_FILTER_MISMATCH
+    $ep24aMismatch = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?snapshot_id={$snapId}&desde=2020-01-01", $cookieAdmin);
+    assertSameVal(409, $ep24aMismatch['status'], 'EP-24A', 'Filtro incompatible con snapshot -> 409');
+    assertSameVal('SNAPSHOT_FILTER_MISMATCH', $ep24aMismatch['json']['code'] ?? null, 'EP-24A', 'code=SNAPSHOT_FILTER_MISMATCH');
+
+    // snapshot_id vacío -> 422
+    assertSameVal(422, httpRequest('GET', $baseUrl . '/api/reportes/cierres-caja?snapshot_id=', $cookieAdmin)['status'], 'EP-24A', 'snapshot_id vacío -> 422');
+
+    // Rango invertido -> 422 INVALID_DATE_RANGE
+    $ep24aInvRange = httpRequest('GET', $baseUrl . '/api/reportes/cierres-caja?desde=2026-11-20&hasta=2026-11-01', $cookieAdmin);
+    assertSameVal(422, $ep24aInvRange['status'], 'EP-24A', 'Rango invertido -> 422');
+    assertSameVal('INVALID_DATE_RANGE', $ep24aInvRange['json']['code'] ?? null, 'EP-24A', 'code=INVALID_DATE_RANGE');
+
+    // Snapshot ajeno (Admin 2 intenta leer snapshot de Admin 1) -> 404 SNAPSHOT_NOT_FOUND
+    $ep24aForeignSnap = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?snapshot_id={$snapId}", $cookieAdmin2);
+    assertSameVal(404, $ep24aForeignSnap['status'], 'EP-24A', 'Snapshot ajeno -> 404');
+    assertSameVal('SNAPSHOT_NOT_FOUND', $ep24aForeignSnap['json']['code'] ?? null, 'EP-24A', 'Snapshot ajeno code=SNAPSHOT_NOT_FOUND');
+
+    // Expiración determinista con setClockProvider() -> 404 SNAPSHOT_NOT_FOUND sin DELETE físico
     $cajaSvc = new \Services\CajaService($pdo);
     $ahoraReal = new DateTimeImmutable('now', new DateTimeZone('America/Lima'));
     $cajaSvc->setClockProvider(static fn (): DateTimeImmutable => $ahoraReal->modify('+31 minutes'));
-    $expiredCaught = false;
+    $expiredCode = null;
+    $expiredStatus = 0;
     try {
         $cajaSvc->reporteCierresCaja(['snapshot_id' => $snapId], $adminId);
     } catch (\Libraries\Core\InventarioException $e) {
-        $expiredCaught = ($e->getHttpCode() === 410 && $e->getErrorCode() === 'SNAPSHOT_EXPIRED');
+        $expiredStatus = $e->getHttpCode();
+        $expiredCode = $e->getErrorCode();
     }
-    assertTrue($expiredCaught, 'EP-24A', 'Snapshot expirado tras +31m lanza 410 SNAPSHOT_EXPIRED');
-    $stmtCheckSnap = $pdo->prepare('SELECT COUNT(*) FROM reporte_consulta_snapshot WHERE referencia_consulta = ?');
-    $stmtCheckSnap->execute([$snapId]);
-    assertSameVal(1, (int)$stmtCheckSnap->fetchColumn(), 'EP-24A', 'Snapshot expirado NO es eliminado globalmente de la BD');
+    assertSameVal(404, $expiredStatus, 'EP-24A', 'Snapshot expirado +31m -> 404');
+    assertSameVal('SNAPSHOT_NOT_FOUND', $expiredCode, 'EP-24A', 'Snapshot expirado -> SNAPSHOT_NOT_FOUND');
+    $stmtCntSnap = $pdo->prepare('SELECT COUNT(*) FROM reporte_consulta_snapshot WHERE id_snapshot = ?');
+    $stmtCntSnap->execute([$snapId]);
+    assertSameVal(1, (int)$stmtCntSnap->fetchColumn(), 'EP-24A', 'Snapshot expirado NO es eliminado físicamente');
 
-    // EP-24B: Detalle de cierre de caja
-    $ep24b = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja/{$sesion2Id}?page=1&page_size=20", $cookieAdmin);
-    assertSameVal(200, $ep24b['status'], 'EP-24B', 'Detalle cierre sesión 2 -> 200');
-    $d24b = $ep24b['json']['data'] ?? [];
-    assertSameVal(sprintf('CIE-%04d', $sesion2Id), $d24b['closure']['code'] ?? null, 'EP-24B', 'Código CIE-xxxx en detalle');
-    assertSameVal('Cierre sesion 2 con retiros omitidos', $d24b['closure']['observation'] ?? null, 'EP-24B', 'Observación de cierre presente');
-    assertSameVal(210.5, (float)($d24b['closure']['counted_cash'] ?? -1), 'EP-24B', 'counted_cash=210.5');
-    assertSameVal(5, $d24b['pagination']['total'] ?? -1, 'EP-24B', '5 movimientos en detalle de cierre');
+    // 10. EP-24B: detalle cierre 1 (opening_difference=null, reference_schedule objeto) y sesión abierta -> 409 CASH_SESSION_NOT_CLOSED
+    $ep24bS1 = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja/{$sesion1Id}", $cookieAdmin);
+    assertSameVal(200, $ep24bS1['status'], 'EP-24B', 'Detalle cierre 1 -> 200');
+    $d24b1 = $ep24bS1['json']['data'] ?? [];
+    assertTrue(array_key_exists('opening_difference', $d24b1['closure'] ?? []) && $d24b1['closure']['opening_difference'] === null, 'EP-24B', 'Detalle primer cierre opening_difference=null');
+    assertTrue(is_array($d24b1['closure']['reference_schedule'] ?? null) && isset($d24b1['closure']['reference_schedule']['label']), 'EP-24B', 'closure.reference_schedule es objeto');
+    assertSameVal(20, $d24b1['pagination']['page_size'] ?? -1, 'EP-24B', 'Default page_size=20');
+    assertSameVal(0, $d24b1['pagination']['total_movements'] ?? -1, 'EP-24B', 'total_movements=0');
 
-    // EP-24B sobre sesión inexistente -> 404
-    $ep24b404 = httpRequest('GET', $baseUrl . '/api/reportes/cierres-caja/9999999', $cookieAdmin);
-    assertSameVal(404, $ep24b404['status'], 'EP-24B', 'Cierre inexistente -> 404');
+    // EP-24B detalle cierre 2: verificar consistencia de MovimientoCajaResource en detalle del cierre
+    $ep24bS2 = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja/{$sesion2Id}", $cookieAdmin);
+    assertSameVal(200, $ep24bS2['status'], 'EP-24B', 'Detalle cierre 2 -> 200');
+    $m24bById = [];
+    foreach (($ep24bS2['json']['data']['movements'] ?? []) as $m24) {
+        $m24bById[(int)$m24['id']] = $m24;
+    }
+    assertSameVal($sesion2Id, $m24bById[$ing1Id]['session_id'] ?? null, 'EP-24B', 'mov.session_id consistente');
+    assertSameVal('Ingreso de sencillo', $m24bById[$ing1Id]['reason'] ?? null, 'EP-24B', 'mov.reason consistente');
+    assertSameVal('Corregido', $m24bById[$ing1Id]['status'] ?? null, 'EP-24B', 'mov.status=Corregido consistente');
+    assertSameVal(35.0, (float)($m24bById[$ing1Id]['current_amount'] ?? -1), 'EP-24B', 'mov.current_amount=35.0 consistente');
+    assertSameVal('Corregido', $m24bById[$egr1Id]['status'] ?? null, 'EP-24B', 'egreso a cero status=Corregido consistente');
+    assertSameVal(0.0, (float)($m24bById[$egr1Id]['current_amount'] ?? -1), 'EP-24B', 'egreso a cero current_amount=0.0 consistente');
+    assertSameVal('Confirmado', $m24bById[(int)$inj1['json']['data']['movement']['id']]['status'] ?? null, 'EP-24B', 'inyección status=Confirmado');
+    assertSameVal($adminId, $m24bById[(int)$inj1['json']['data']['movement']['id']]['administrator_id'] ?? null, 'EP-24B', 'inyección administrator_id consistente');
+    assertSameVal(true, $m24bById[(int)$omit1['json']['data']['movement']['id']]['declared_occurred_in_open_origin_session'] ?? null, 'EP-24B', 'retiro omitido declared=true consistente');
+    assertSameVal(true, $m24bById[(int)$omit1['json']['data']['movement']['id']]['confirmed_reflected_in_opening'] ?? null, 'EP-24B', 'retiro omitido confirmed=true consistente');
+    assertSameVal('25.50', $pdo->query("SELECT monto FROM movimiento_caja WHERE id_movimiento_caja = {$ing1Id}")->fetchColumn(), 'CONSERVACION', 'Monto original inmutable en BD');
 
-    // EP-24B sobre sesión ABIERTA -> 409 SESSION_NOT_CLOSED
+    // Abrir sesión 3 y verificar 409 CASH_SESSION_NOT_CLOSED en EP-24B
     $open3 = httpRequest('POST', $baseUrl . '/api/caja/abrir', $cookieSeller2, [
         'shift_id'     => $shiftId,
-        'cash_counted' => 195.50,
+        'cash_counted' => $esperadoS2,
         'request_id'   => 'p12-open-3-' . uniqid(),
     ], $csrfS2);
+    assertSameVal(201, $open3['status'], 'SETUP', 'Apertura sesión 3 HTTP 201');
     $sesion3Id = (int)($open3['json']['data']['session_id'] ?? 0);
-    $ep24b409 = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja/{$sesion3Id}", $cookieAdmin);
-    assertSameVal(409, $ep24b409['status'], 'EP-24B', 'Sesión abierta en detalle de cierre -> 409');
-    assertSameVal('SESSION_NOT_CLOSED', $ep24b409['json']['code'] ?? null, 'EP-24B', 'Código SESSION_NOT_CLOSED');
+
+    $ep24bOpen = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja/{$sesion3Id}", $cookieAdmin);
+    assertSameVal(409, $ep24bOpen['status'], 'EP-24B', 'Sesión abierta en EP-24B -> 409');
+    assertSameVal('CASH_SESSION_NOT_CLOSED', $ep24bOpen['json']['code'] ?? null, 'EP-24B', 'code=CASH_SESSION_NOT_CLOSED');
 } finally {
     stopPhpServer($srv1);
     @unlink($cookieAdmin);
+    @unlink($cookieAdmin2);
     @unlink($cookieSeller1);
     @unlink($cookieSeller2);
     if (is_dir($sessionDir)) {

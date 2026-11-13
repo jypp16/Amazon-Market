@@ -849,6 +849,213 @@ PHP;
     assertSameVal(0, $closeNeg['json']['data']['summary']['difference'] ?? null, 'Persistencia', 'diferencia_apertura negativa no altera summary.difference');
     assertSameVal(0, (int)$pdo->query("SELECT COUNT(*) FROM movimiento_caja WHERE id_sesion_caja = {$idSesNeg}")->fetchColumn(), 'Persistencia', 'No se generan movimientos para corregir opening_difference negativa');
 
+    // =========================================================================
+    // 5I-5L: BARRERAS DETERMINÍSTICAS EN MARIADB PARA AMBOS ÓRDENES SIN DEADLOCK
+    // =========================================================================
+    $innodbStatusBefore = (string)($pdo->query('SHOW ENGINE INNODB STATUS')->fetch(PDO::FETCH_ASSOC)['Status'] ?? '');
+    $extractDeadlockHeader = static function (string $status): string {
+        if (preg_match('/------------------------\r?\nLATEST DETECTED DEADLOCK\r?\n------------------------\r?\n([^\r\n]+)/', $status, $m)) {
+            return trim($m[1]);
+        }
+        return '';
+    };
+    $deadlockHeaderBefore = $extractDeadlockHeader($innodbStatusBefore);
+
+    $barrierLockFile = $tmpDir . '/barrier_lock_guardia.php';
+    file_put_contents($barrierLockFile, "<?php\n" . <<<'PHP'
+$db = $argv[1];
+$sig = $argv[2];
+$holdUs = (int)$argv[3];
+$pdo = new PDO("mysql:host=127.0.0.1;dbname={$db};charset=utf8mb4", 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$pdo->exec("SET SESSION time_zone = '-05:00'");
+$pdo->beginTransaction();
+$pdo->query("SELECT id_caja_fisica FROM caja_fisica_guardia WHERE id_caja_fisica = 1 FOR UPDATE")->fetch();
+file_put_contents($sig, 'LOCKED');
+usleep($holdUs);
+$pdo->commit();
+PHP);
+
+    $barrierHttpFile = $tmpDir . '/barrier_http_worker.php';
+    file_put_contents($barrierHttpFile, "<?php\n" . <<<'PHP'
+$url = $argv[1];
+$path = $argv[2];
+$bodyJson = $argv[3];
+$csrf = $argv[4];
+$cookie = $argv[5];
+$ch = curl_init($url . $path);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+curl_setopt($ch, CURLOPT_POSTFIELDS, $bodyJson);
+curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Accept: application/json', 'X-CSRF-TOKEN: ' . $csrf]);
+curl_setopt($ch, CURLOPT_COOKIEFILE, $cookie);
+curl_setopt($ch, CURLOPT_COOKIEJAR, $cookie);
+curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+$t0 = microtime(true);
+$raw = curl_exec($ch);
+$elapsed = microtime(true) - $t0;
+$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+echo json_encode(['status' => $status, 'elapsed' => $elapsed, 'json' => json_decode((string)$raw, true)]);
+PHP);
+
+    $runOrderedBarrier = static function (array $reqA, array $reqB) use ($tmpDir, $dbName, $barrierLockFile, $barrierHttpFile, $url1, $url2, $authV1A, $authV1B, $cookieV1A, $cookieV1B): array {
+        $sig = $tmpDir . '/sig_' . uniqid('', true) . '.lock';
+        @unlink($sig);
+        $pLock = proc_open([PHP_BINARY, $barrierLockFile, $dbName, $sig, '1100000'], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipesLock);
+        $limit = microtime(true) + 5.0;
+        while (!is_file($sig) && microtime(true) < $limit) {
+            usleep(15000);
+        }
+        $lockAcquired = is_file($sig);
+
+        $pA = proc_open([PHP_BINARY, $barrierHttpFile, $url1, $reqA['path'], json_encode($reqA['body']), $authV1A['csrf'], $cookieV1A], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipesA);
+        usleep(250000); // Garantizar que A entre antes a la cola FIFO de InnoDB sobre caja_fisica_guardia
+        $pB = proc_open([PHP_BINARY, $barrierHttpFile, $url2, $reqB['path'], json_encode($reqB['body']), $authV1B['csrf'], $cookieV1B], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipesB);
+
+        $outA = stream_get_contents($pipesA[1]);
+        $outB = stream_get_contents($pipesB[1]);
+        fclose($pipesLock[0]); fclose($pipesLock[1]); fclose($pipesLock[2]);
+        fclose($pipesA[0]); fclose($pipesA[1]); fclose($pipesA[2]);
+        fclose($pipesB[0]); fclose($pipesB[1]); fclose($pipesB[2]);
+        proc_close($pLock);
+        proc_close($pA);
+        proc_close($pB);
+        @unlink($sig);
+
+        return [
+            'locked' => $lockAcquired,
+            'a' => json_decode((string)$outA, true) ?: ['status' => 0, 'elapsed' => 0.0, 'json' => null],
+            'b' => json_decode((string)$outB, true) ?: ['status' => 0, 'elapsed' => 0.0, 'json' => null],
+        ];
+    };
+
+    // 5I: Movimiento (Ingreso) vs Cierre — Barrera controlada en ambos órdenes
+    // Orden 1: Cierre primero -> Ingreso espera en MariaDB -> Cierre 200, Ingreso 409 CASH_SESSION_CLOSED
+    $op5i1 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 55.25, 'referencia_solicitud' => 'p11_open_5i1_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idSes5i1 = (int)($op5i1['json']['data']['session_id'] ?? 0);
+    $arq5i1 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 55.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5i1_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5i1 = (int)($arq5i1['json']['data']['arqueo']['id'] ?? 0);
+    $bar5i1 = $runOrderedBarrier(
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5i1, 'referencia_solicitud' => 'p11_5i1_close_0001']],
+        ['path' => '/api/caja/ingresos', 'body' => ['type' => 'manual_income', 'amount' => 12.00, 'reason' => 'Ing 5I1', 'referencia_solicitud' => 'p11_5i1_ing_00001']]
+    );
+    assertTrue($bar5i1['locked'] && $bar5i1['a']['elapsed'] >= 0.5 && $bar5i1['b']['elapsed'] >= 0.5, 'Concurrencia', '5I Orden 1 esperó contención real en MariaDB');
+    assertSameVal(200, $bar5i1['a']['status'], 'Concurrencia', '5I Orden 1 (Cierre->Ingreso): cierre -> 200 CLOSE_CONFIRMED');
+    assertSameVal(409, $bar5i1['b']['status'], 'Concurrencia', '5I Orden 1 (Cierre->Ingreso): ingreso -> 409');
+    assertSameVal('CASH_SESSION_CLOSED', $bar5i1['b']['json']['code'] ?? null, 'Concurrencia', '5I Orden 1: ingreso recibe CASH_SESSION_CLOSED (sin CONCURRENT_OPERATION_CONFLICT)');
+    assertSameVal(2, (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$idSes5i1}")->fetchColumn(), 'Concurrencia', '5I Orden 1: version_caja=2');
+
+    // Orden 2: Ingreso primero -> Cierre espera en MariaDB -> Ingreso 201, Cierre 409 ARQUEO_STALE, reutilización de referencia_solicitud tras fallo
+    $op5i2 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 55.25, 'referencia_solicitud' => 'p11_open_5i2_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idSes5i2 = (int)($op5i2['json']['data']['session_id'] ?? 0);
+    $arq5i2 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 55.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5i2_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5i2 = (int)($arq5i2['json']['data']['arqueo']['id'] ?? 0);
+    $refClose5i2 = 'p11_5i2_close_retry1';
+    $bar5i2 = $runOrderedBarrier(
+        ['path' => '/api/caja/ingresos', 'body' => ['type' => 'manual_income', 'amount' => 10.00, 'reason' => 'Ing 5I2', 'referencia_solicitud' => 'p11_5i2_ing_00001']],
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5i2, 'referencia_solicitud' => $refClose5i2]]
+    );
+    assertTrue($bar5i2['locked'] && $bar5i2['a']['elapsed'] >= 0.5 && $bar5i2['b']['elapsed'] >= 0.5, 'Concurrencia', '5I Orden 2 esperó contención real en MariaDB');
+    assertSameVal(201, $bar5i2['a']['status'], 'Concurrencia', '5I Orden 2 (Ingreso->Cierre): ingreso -> 201');
+    assertSameVal(409, $bar5i2['b']['status'], 'Concurrencia', '5I Orden 2 (Ingreso->Cierre): cierre -> 409');
+    assertSameVal('ARQUEO_STALE', $bar5i2['b']['json']['code'] ?? null, 'Concurrencia', '5I Orden 2: cierre recibe ARQUEO_STALE (sin deadlock)');
+    assertSameVal('DESACTUALIZADO', $pdo->query("SELECT estado FROM arqueo_caja WHERE id_arqueo_caja = {$idArq5i2}")->fetchColumn(), 'Concurrencia', '5I Orden 2: arqueo previo pasa a DESACTUALIZADO');
+    assertSameVal(2, (int)$pdo->query("SELECT version_caja FROM sesion_caja WHERE id_sesion_caja = {$idSes5i2}")->fetchColumn(), 'Concurrencia', '5I Orden 2: version_caja=2');
+    $arq5i2New = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 65.25, 'version' => 2, 'referencia_solicitud' => 'p11_arq_5i2_new_001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $close5i2Retry = httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => (int)($arq5i2New['json']['data']['arqueo']['id'] ?? 0), 'referencia_solicitud' => $refClose5i2], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(200, $close5i2Retry['status'], 'Concurrencia', '5I Orden 2: reutilización de referencia_solicitud tras ARQUEO_STALE -> 200');
+
+    // 5J: Nuevo arqueo vs Cierre — Barrera controlada en ambos órdenes
+    // Orden 1: Cierre -> Nuevo arqueo => Cierre 200, Arqueo 409 CASH_SESSION_CLOSED
+    $op5j1 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 65.25, 'referencia_solicitud' => 'p11_open_5j1_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $arq5j1 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 65.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5j1_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5j1 = (int)($arq5j1['json']['data']['arqueo']['id'] ?? 0);
+    $bar5j1 = $runOrderedBarrier(
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5j1, 'referencia_solicitud' => 'p11_5j1_close_0001']],
+        ['path' => '/api/caja/arqueo', 'body' => ['counted' => 65.25, 'version' => 1, 'referencia_solicitud' => 'p11_5j1_arq_00001']]
+    );
+    assertTrue($bar5j1['locked'] && $bar5j1['a']['elapsed'] >= 0.5 && $bar5j1['b']['elapsed'] >= 0.5, 'Concurrencia', '5J Orden 1 esperó contención real en MariaDB');
+    assertSameVal(200, $bar5j1['a']['status'], 'Concurrencia', '5J Orden 1 (Cierre->Arqueo): cierre -> 200');
+    assertSameVal('CASH_SESSION_CLOSED', $bar5j1['b']['json']['code'] ?? null, 'Concurrencia', '5J Orden 1 (Cierre->Arqueo): arqueo -> 409 CASH_SESSION_CLOSED');
+
+    // Orden 2: Nuevo arqueo -> Cierre (con arqueo previo) => Arqueo 201, Cierre 409 ARQUEO_STALE
+    $op5j2 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 65.25, 'referencia_solicitud' => 'p11_open_5j2_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $arq5j2 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 65.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5j2_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5j2 = (int)($arq5j2['json']['data']['arqueo']['id'] ?? 0);
+    $bar5j2 = $runOrderedBarrier(
+        ['path' => '/api/caja/arqueo', 'body' => ['counted' => 65.25, 'version' => 1, 'referencia_solicitud' => 'p11_5j2_arq_00001']],
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5j2, 'referencia_solicitud' => 'p11_5j2_close_0001']]
+    );
+    assertTrue($bar5j2['locked'] && $bar5j2['a']['elapsed'] >= 0.5 && $bar5j2['b']['elapsed'] >= 0.5, 'Concurrencia', '5J Orden 2 esperó contención real en MariaDB');
+    assertSameVal(201, $bar5j2['a']['status'], 'Concurrencia', '5J Orden 2 (Arqueo->Cierre): nuevo arqueo -> 201');
+    assertSameVal('ARQUEO_STALE', $bar5j2['b']['json']['code'] ?? null, 'Concurrencia', '5J Orden 2 (Arqueo->Cierre): cierre con arqueo reemplazado -> 409 ARQUEO_STALE');
+    $idArq5j2New = (int)($bar5j2['a']['json']['data']['arqueo']['id'] ?? 0);
+    httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => $idArq5j2New, 'referencia_solicitud' => 'p11_5j2_close_fix1'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+
+    // 5K: Venta vs Cierre — Barrera controlada en ambos órdenes
+    // Orden 1: Cierre -> Venta => Cierre 200, Venta 409 CASH_SESSION_CLOSED
+    $op5k1 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 65.25, 'referencia_solicitud' => 'p11_open_5k1_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $arq5k1 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 65.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5k1_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5k1 = (int)($arq5k1['json']['data']['arqueo']['id'] ?? 0);
+    $bar5k1 = $runOrderedBarrier(
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5k1, 'referencia_solicitud' => 'p11_5k1_close_0001']],
+        ['path' => '/api/ventas', 'body' => ['id_cliente' => $idCli, 'id_tipo_comprobante' => $idBol, 'id_metodo_pago' => 1, 'productos' => [['id_producto' => $idProd, 'cantidad' => 1]], 'referencia_solicitud' => 'p11_5k1_venta_0001']]
+    );
+    assertSameVal(200, $bar5k1['a']['status'], 'Concurrencia', '5K Orden 1 (Cierre->Venta): cierre -> 200');
+    assertSameVal('CASH_SESSION_CLOSED', $bar5k1['b']['json']['code'] ?? null, 'Concurrencia', '5K Orden 1 (Cierre->Venta): venta -> 409 CASH_SESSION_CLOSED');
+
+    // Orden 2: Venta -> Cierre => Venta 201, Cierre 409 ARQUEO_STALE
+    $op5k2 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => 65.25, 'referencia_solicitud' => 'p11_open_5k2_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idSes5k2 = (int)($op5k2['json']['data']['session_id'] ?? 0);
+    $arq5k2 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 65.25, 'version' => 1, 'referencia_solicitud' => 'p11_arq_5k2_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5k2 = (int)($arq5k2['json']['data']['arqueo']['id'] ?? 0);
+    $bar5k2 = $runOrderedBarrier(
+        ['path' => '/api/ventas', 'body' => ['id_cliente' => $idCli, 'id_tipo_comprobante' => $idBol, 'id_metodo_pago' => 1, 'productos' => [['id_producto' => $idProd, 'cantidad' => 1]], 'referencia_solicitud' => 'p11_5k2_venta_0001']],
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5k2, 'referencia_solicitud' => 'p11_5k2_close_0001']]
+    );
+    assertSameVal(201, $bar5k2['a']['status'], 'Concurrencia', '5K Orden 2 (Venta->Cierre): venta -> 201');
+    assertSameVal('ARQUEO_STALE', $bar5k2['b']['json']['code'] ?? null, 'Concurrencia', '5K Orden 2 (Venta->Cierre): cierre -> 409 ARQUEO_STALE');
+    $esp5k2 = (float)$pdo->query("SELECT efectivo_esperado_actual FROM sesion_caja WHERE id_sesion_caja = {$idSes5k2}")->fetchColumn();
+    $arq5k2New = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => $esp5k2, 'version' => 2, 'referencia_solicitud' => 'p11_arq_5k2_new_001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => (int)($arq5k2New['json']['data']['arqueo']['id'] ?? 0), 'referencia_solicitud' => 'p11_5k2_close_fix1'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+
+    // 5L: Corrección de movimiento vs Cierre — Barrera controlada en ambos órdenes + cero deadlocks InnoDB
+    // Orden 1: Cierre -> Corrección => Cierre 200, Corrección 409 CASH_SESSION_CLOSED
+    $op5l1 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => $esp5k2, 'referencia_solicitud' => 'p11_open_5l1_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $ing5l1 = httpRequest($url1, 'POST', '/api/caja/ingresos', ['type' => 'manual_income', 'amount' => 15.00, 'reason' => 'Base 5L1', 'referencia_solicitud' => 'p11_ing_5l1_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idMov5l1 = (int)($ing5l1['json']['data']['movement']['id'] ?? 0);
+    $arq5l1 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => $esp5k2 + 15.00, 'version' => 2, 'referencia_solicitud' => 'p11_arq_5l1_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5l1 = (int)($arq5l1['json']['data']['arqueo']['id'] ?? 0);
+    $bar5l1 = $runOrderedBarrier(
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5l1, 'referencia_solicitud' => 'p11_5l1_close_0001']],
+        ['path' => '/api/caja/movimientos/correcciones', 'body' => ['original_movement_id' => $idMov5l1, 'corrected_amount' => 20.00, 'reason' => 'Corr 5L1', 'referencia_solicitud' => 'p11_5l1_corr_00001']]
+    );
+    assertSameVal(200, $bar5l1['a']['status'], 'Concurrencia', '5L Orden 1 (Cierre->Corrección): cierre -> 200');
+    assertSameVal('CASH_SESSION_CLOSED', $bar5l1['b']['json']['code'] ?? null, 'Concurrencia', '5L Orden 1 (Cierre->Corrección): corrección -> 409 CASH_SESSION_CLOSED');
+
+    // Orden 2: Corrección -> Cierre => Corrección 201, Cierre 409 ARQUEO_STALE
+    $op5l2 = httpRequest($url1, 'POST', '/api/caja/abrir', ['shift_id' => $idTurnoPast, 'cash_counted' => $esp5k2 + 15.00, 'referencia_solicitud' => 'p11_open_5l2_00001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idSes5l2 = (int)($op5l2['json']['data']['session_id'] ?? 0);
+    $ing5l2 = httpRequest($url1, 'POST', '/api/caja/ingresos', ['type' => 'manual_income', 'amount' => 15.00, 'reason' => 'Base 5L2', 'referencia_solicitud' => 'p11_ing_5l2_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idMov5l2 = (int)($ing5l2['json']['data']['movement']['id'] ?? 0);
+    $arq5l2 = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => $esp5k2 + 30.00, 'version' => 2, 'referencia_solicitud' => 'p11_arq_5l2_000001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $idArq5l2 = (int)($arq5l2['json']['data']['arqueo']['id'] ?? 0);
+    $bar5l2 = $runOrderedBarrier(
+        ['path' => '/api/caja/movimientos/correcciones', 'body' => ['original_movement_id' => $idMov5l2, 'corrected_amount' => 20.00, 'reason' => 'Corr 5L2', 'referencia_solicitud' => 'p11_5l2_corr_00001']],
+        ['path' => '/api/caja/cerrar', 'body' => ['arqueo_id' => $idArq5l2, 'referencia_solicitud' => 'p11_5l2_close_0001']]
+    );
+    assertSameVal(201, $bar5l2['a']['status'], 'Concurrencia', '5L Orden 2 (Corrección->Cierre): corrección -> 201');
+    assertSameVal('ARQUEO_STALE', $bar5l2['b']['json']['code'] ?? null, 'Concurrencia', '5L Orden 2 (Corrección->Cierre): cierre -> 409 ARQUEO_STALE');
+    $arq5l2New = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => $esp5k2 + 35.00, 'version' => 3, 'referencia_solicitud' => 'p11_arq_5l2_new_001'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    $close5l2Final = httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => (int)($arq5l2New['json']['data']['arqueo']['id'] ?? 0), 'referencia_solicitud' => 'p11_5l2_close_fix1'], ['X-CSRF-TOKEN' => $authV1A['csrf']], $cookieV1A);
+    assertSameVal(200, $close5l2Final['status'], 'Concurrencia', '5L Orden 2: cierre posterior con arqueo vigente -> 200');
+    assertSameVal(null, $pdo->query("SELECT id_sesion_abierta_actual FROM caja_fisica_guardia WHERE id_caja_fisica = 1")->fetchColumn(), 'Concurrencia', '5L Orden 2: guardia liberada tras cierre');
+    assertSameVal($idSes5l2, (int)$pdo->query("SELECT id_ultima_sesion_cerrada FROM caja_fisica_guardia WHERE id_caja_fisica = 1")->fetchColumn(), 'Concurrencia', '5L Orden 2: guardia apunta al último cierre');
+
+    $innodbStatusAfter = (string)($pdo->query('SHOW ENGINE INNODB STATUS')->fetch(PDO::FETCH_ASSOC)['Status'] ?? '');
+    $deadlockHeaderAfter = $extractDeadlockHeader($innodbStatusAfter);
+    assertSameVal($deadlockHeaderBefore, $deadlockHeaderAfter, 'Concurrencia', 'SHOW ENGINE INNODB STATUS sin nuevo deadlock tras barreras 5I-5L');
+
 } finally {
     stopPhpServer($srv1);
     stopPhpServer($srv2);

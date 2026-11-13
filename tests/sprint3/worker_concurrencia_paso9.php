@@ -39,6 +39,7 @@ $pdo = new PDO($dsn, DB_USER, DB_PASS, [
 
 try {
     $pdo->beginTransaction();
+    $pdo->query('SELECT id_caja_fisica FROM caja_fisica_guardia WHERE id_caja_fisica = 1 FOR UPDATE')->fetch();
     $stmt = $pdo->prepare('SELECT id_sesion_caja, id_usuario_vendedor, version_caja, estado, efectivo_esperado_actual FROM sesion_caja WHERE id_sesion_caja = :id FOR UPDATE');
     $stmt->execute([':id' => $idSesion]);
     $row = $stmt->fetch();

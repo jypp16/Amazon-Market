@@ -62,3 +62,42 @@
 
 - `php -l` sin errores en todos los archivos PHP modificados; `git diff --check` sin errores de formato.
 - Comparación fila por fila de las **32 tablas** entre `amazon_market` y `amazon_market_p11_ref32_20261113` (restaurada del respaldo `amazon_market_sprint3_pre_step3_20261112_012312.sql`): `TABLES_CHECKED=32 DIFFS=0`.
+
+---
+
+## 7. Corrección de Regresión de Concurrencia en MariaDB/InnoDB (Deadlock `PRIMARY` vs `idx_sesion_estado_cierre_id`)
+
+### 7.1 Causa Exacta del Deadlock Comprobada
+- En la auditoría (`amazon_market_paso12_final_audit_20261113_093255/r11_deadlock.log`), `SHOW ENGINE INNODB STATUS` confirmó un deadlock real (`1213`) sobre `sesion_caja` entre:
+  - **Transacción 1 (Movimiento / Arqueo / Venta)**: ejecutaba `CajaModel::obtenerSesionAbiertaActual(true)` (`SELECT ... FROM sesion_caja WHERE estado = 'ABIERTA' ORDER BY id_sesion_caja DESC LIMIT 1 FOR UPDATE`), adquiriendo bloqueo sobre el índice secundario `idx_sesion_estado_cierre_id` y esperando el bloqueo exclusivo sobre `PRIMARY`.
+  - **Transacción 2 (`cerrarCaja`)**: ya poseía `caja_fisica_guardia` (`id=1 FOR UPDATE`) y `PRIMARY` de `sesion_caja`, y al ejecutar `UPDATE sesion_caja SET estado = 'CERRADA' ...` necesitaba bloqueo exclusivo sobre `idx_sesion_estado_cierre_id`.
+
+### 7.2 Orden de Bloqueo Antes y Después
+- **Antes (asimétrico)**:
+  - `abrirCaja()` y `cerrarCaja()`: `control_solicitud_idempotencia` -> `caja_fisica_guardia (id=1 FOR UPDATE)` -> `sesion_caja (PRIMARY FOR UPDATE)` -> dependientes.
+  - `registrarIngreso()`, `registrarEgreso()`, `corregirMovimiento()`, `guardarArqueo()`, `VentaService::procesarVenta()`: omitían `caja_fisica_guardia` y ejecutaban `obtenerSesionAbiertaActual(true)` bloqueando `idx_sesion_estado_cierre_id -> PRIMARY`.
+- **Después (orden único unificado en [CajaModel.php](file:///c:/xampp/htdocs/Amazon-Market/Models/CajaModel.php#L126-L163))**:
+  - Cuando `$forUpdate === true`, `obtenerSesionAbiertaActual(true)` adquiere primero `bloquearGuardiaCajaFisica()` (`caja_fisica_guardia WHERE id_caja_fisica = 1 FOR UPDATE`), resuelve el ID de sesión abierta sin bloquear `idx_sesion_estado_cierre_id` y bloquea `sesion_caja` exclusivamente por `PRIMARY KEY` mediante `obtenerSesionPorIdParaCierre($idAbierta, true)`, verificando `estado === 'ABIERTA'`.
+  - Asimismo, en [worker_concurrencia_paso9.php](file:///c:/xampp/htdocs/Amazon-Market/tests/sprint3/worker_concurrencia_paso9.php#L42) se alineó la adquisición de `caja_fisica_guardia FOR UPDATE` antes de `sesion_caja FOR UPDATE`.
+
+### 7.3 Archivos Modificados en esta Corrección
+- [CajaModel.php](file:///c:/xampp/htdocs/Amazon-Market/Models/CajaModel.php)
+- [paso11_cierre_autorizacion_test.php](file:///c:/xampp/htdocs/Amazon-Market/tests/sprint3/paso11_cierre_autorizacion_test.php) (secciones determinísticas `5I`–`5L` con barrera real en MariaDB para ambos órdenes en Movimiento vs Cierre, Arqueo vs Cierre, Venta vs Cierre y Corrección vs Cierre, reutilización de `referencia_solicitud` tras `ARQUEO_STALE`, verificación de `caja_fisica_guardia` y ausencia de deadlocks en `SHOW ENGINE INNODB STATUS`)
+- [worker_concurrencia_paso9.php](file:///c:/xampp/htdocs/Amazon-Market/tests/sprint3/worker_concurrencia_paso9.php)
+- [VALIDACION_PASO_11.md](file:///c:/xampp/htdocs/Amazon-Market/tests/sprint3/VALIDACION_PASO_11.md) y [VALIDACION_PASO_12.md](file:///c:/xampp/htdocs/Amazon-Market/tests/sprint3/VALIDACION_PASO_12.md)
+
+### 7.4 Reproducción Antes vs Después y Conteo Final de Pruebas (Copias Aisladas `01..09`)
+- **Antes (evidencia de auditoría)**: Paso 11 `128/130` (salida `1`) / `128/129` (salida `1`) con `409 CONCURRENT_OPERATION_CONFLICT` por deadlock InnoDB en `Movimiento vs Cierre` y `Nuevo arqueo vs Cierre`.
+- **Después**:
+  - `tests/sprint3/paso11_cierre_autorizacion_test.php`: **160/160** (salida `0`, `Concurrencia: 53/53`, sin nuevos deadlocks en `SHOW ENGINE INNODB STATUS`).
+  - `tests/sprint3/paso12_consultas_reportes_test.php`: **190/190** (salida `0`).
+  - `tests/sprint3/paso10_arqueos_test.php`: **154/154** (salida `0`).
+  - `tests/sprint3/paso9_ventas_caja_test.php`: **107/107** (salida `0`).
+  - `tests/sprint3/paso8_movimientos_correcciones_test.php`: **162/162** (salida `0`).
+  - `tests/sprint3/paso7_apertura_caja_test.php`: **214/214** (salida `0`).
+  - `tests/sprint3/paso6_turnos_programacion_test.php` (+ HU 18): **116/116** (salida `0`).
+  - Sprint 2 (`tests/sprint2/fase4_ventas_kardex_test.php` **14/14**, `tests/sprint2/fase8_pdf_test.php` **21/21**, `tests/sprint2/regresion_http_test.php` **22/22** usando `tests/sprint3/server_router_sprint3.php` sobre copia aislada migrada `01..09`): todos salida `0`.
+
+### 7.5 Conservación y Pendientes Reales
+- Base principal `amazon_market` intacta (**32** tablas); `.env` y respaldos sin modificar; cero cambios DDL.
+- Pendiente real fuera de alcance actual: avance al **Paso 13** (frontend, exportaciones PDF/Excel y tickets).
