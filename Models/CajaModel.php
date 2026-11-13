@@ -1,0 +1,698 @@
+<?php
+
+namespace Models;
+
+use Libraries\Core\Model;
+use PDO;
+
+class CajaModel extends Model
+{
+    private const LOCK_CAJA_FISICA = 'am_caja_fisica_unica';
+
+    public function __construct(?PDO $pdo = null)
+    {
+        if ($pdo !== null) {
+            $this->conect = $pdo;
+        } else {
+            parent::__construct();
+        }
+    }
+
+    /**
+     * Lista el catálogo de turnos activos (estado = 1) ordenados por hora de inicio.
+     *
+     * @return array<int, array{id:int,nombre:string,inicio:string,fin:string}>
+     */
+    public function listarTurnosActivosCatalogo(): array
+    {
+        $sql = "SELECT
+                    id_turno AS id,
+                    nombre,
+                    TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
+                    TIME_FORMAT(hora_fin, '%H:%i') AS fin
+                FROM turno
+                WHERE estado = 1
+                ORDER BY hora_inicio ASC, id_turno ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as &$row) {
+            $row['id'] = (int)$row['id'];
+            $row['nombre'] = (string)$row['nombre'];
+            $row['inicio'] = (string)$row['inicio'];
+            $row['fin'] = (string)$row['fin'];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Obtiene un turno por ID (opcionalmente con FOR UPDATE).
+     */
+    public function obtenerTurnoPorId(int $idTurno, bool $forUpdate = false): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    id_turno,
+                    nombre,
+                    TIME_FORMAT(hora_inicio, '%H:%i') AS inicio,
+                    TIME_FORMAT(hora_fin, '%H:%i') AS fin,
+                    estado
+                FROM turno
+                WHERE id_turno = :id_turno
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_turno' => $idTurno]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Adquiere el bloqueo nombrado exclusivo de la única caja física.
+     */
+    public function adquirirLockCajaFisica(int $timeoutSeconds = 5): bool
+    {
+        $stmt = $this->conect->prepare('SELECT GET_LOCK(:lock_name, :timeout_sec) AS acquired');
+        $stmt->bindValue(':lock_name', self::LOCK_CAJA_FISICA, PDO::PARAM_STR);
+        $stmt->bindValue(':timeout_sec', $timeoutSeconds, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false && (int)($row['acquired'] ?? 0) === 1;
+    }
+
+    /**
+     * Libera el bloqueo nombrado de la única caja física (si la conexión lo posee).
+     */
+    public function liberarLockCajaFisica(): void
+    {
+        try {
+            $stmt = $this->conect->prepare('SELECT RELEASE_LOCK(:lock_name)');
+            $stmt->execute([':lock_name' => self::LOCK_CAJA_FISICA]);
+        } catch (\Throwable $e) {
+            error_log('[CajaModel::liberarLockCajaFisica] ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Bloquea la fila ancla única de caja_fisica_guardia para serializar aperturas incluso con 0 sesiones previas.
+     */
+    public function bloquearGuardiaCajaFisica(): ?array
+    {
+        $sql = "SELECT
+                    id_caja_fisica,
+                    codigo_caja,
+                    id_sesion_abierta_actual,
+                    id_ultima_sesion_cerrada
+                FROM caja_fisica_guardia
+                WHERE id_caja_fisica = 1
+                LIMIT 1
+                FOR UPDATE";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Obtiene la sesión ABIERTA global en la caja física única (si existe).
+     */
+    public function obtenerSesionAbiertaActual(bool $forUpdate = false): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    s.id_sesion_caja,
+                    s.id_caja_fisica,
+                    s.id_usuario_vendedor,
+                    u.nombre AS seller_name,
+                    s.id_turno,
+                    s.nombre_turno_referencia,
+                    TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
+                    TIME_FORMAT(s.hora_fin_referencia, '%H:%i') AS hora_fin_referencia,
+                    s.fecha_hora_salida_referencia,
+                    s.es_suplencia,
+                    s.abierta_fuera_horario,
+                    s.fecha_hora_apertura,
+                    s.tiene_cierre_anterior,
+                    s.id_sesion_cierre_anterior,
+                    s.monto_referencia_cierre_anterior,
+                    s.fecha_hora_cierre_anterior_ref,
+                    s.nombre_turno_cierre_anterior_ref,
+                    s.saldo_inicial,
+                    s.diferencia_apertura,
+                    s.total_ventas_efectivo,
+                    s.total_ventas_tarjeta,
+                    s.total_ventas_yape_plin,
+                    s.total_ingresos,
+                    s.total_egresos,
+                    s.total_retiros_omitidos_declarados,
+                    s.efectivo_esperado_actual,
+                    s.version_caja,
+                    s.estado,
+                    s.id_solicitud_apertura
+                FROM sesion_caja s
+                INNER JOIN usuario u
+                    ON u.id_usuario = s.id_usuario_vendedor
+                WHERE s.estado = 'ABIERTA'
+                ORDER BY s.id_sesion_caja DESC
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Obtiene el último cierre confirmado de la caja física única.
+     */
+    public function obtenerUltimoCierreConfirmado(bool $forUpdate = false): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    id_sesion_caja,
+                    id_usuario_vendedor,
+                    id_turno,
+                    nombre_turno_referencia,
+                    fecha_hora_cierre,
+                    efectivo_esperado_cierre,
+                    efectivo_contado_cierre,
+                    diferencia_cierre
+                FROM sesion_caja
+                WHERE estado = 'CERRADA'
+                ORDER BY id_sesion_caja DESC
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Inserta una nueva sesión de caja en estado ABIERTA.
+     */
+    public function insertarSesionApertura(array $datos): int
+    {
+        $sql = "INSERT INTO sesion_caja (
+                    id_caja_fisica,
+                    id_usuario_vendedor,
+                    id_turno,
+                    nombre_turno_referencia,
+                    hora_inicio_referencia,
+                    hora_fin_referencia,
+                    fecha_hora_salida_referencia,
+                    es_suplencia,
+                    abierta_fuera_horario,
+                    fecha_hora_apertura,
+                    tiene_cierre_anterior,
+                    id_sesion_cierre_anterior,
+                    monto_referencia_cierre_anterior,
+                    fecha_hora_cierre_anterior_ref,
+                    nombre_turno_cierre_anterior_ref,
+                    saldo_inicial,
+                    diferencia_apertura,
+                    total_ventas_efectivo,
+                    total_ventas_tarjeta,
+                    total_ventas_yape_plin,
+                    total_ingresos,
+                    total_egresos,
+                    total_retiros_omitidos_declarados,
+                    efectivo_esperado_actual,
+                    version_caja,
+                    estado,
+                    id_solicitud_apertura
+                ) VALUES (
+                    1,
+                    :id_usuario_vendedor,
+                    :id_turno,
+                    :nombre_turno_referencia,
+                    :hora_inicio_referencia,
+                    :hora_fin_referencia,
+                    :fecha_hora_salida_referencia,
+                    :es_suplencia,
+                    :abierta_fuera_horario,
+                    :fecha_hora_apertura,
+                    :tiene_cierre_anterior,
+                    :id_sesion_cierre_anterior,
+                    :monto_referencia_cierre_anterior,
+                    :fecha_hora_cierre_anterior_ref,
+                    :nombre_turno_cierre_anterior_ref,
+                    :saldo_inicial,
+                    :diferencia_apertura,
+                    0.00,
+                    0.00,
+                    0.00,
+                    0.00,
+                    0.00,
+                    0.00,
+                    :efectivo_esperado_actual,
+                    1,
+                    'ABIERTA',
+                    :id_solicitud_apertura
+                )";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_usuario_vendedor'              => (int)$datos['id_usuario_vendedor'],
+            ':id_turno'                         => (int)$datos['id_turno'],
+            ':nombre_turno_referencia'          => (string)$datos['nombre_turno_referencia'],
+            ':hora_inicio_referencia'           => (string)$datos['hora_inicio_referencia'],
+            ':hora_fin_referencia'              => (string)$datos['hora_fin_referencia'],
+            ':fecha_hora_salida_referencia'     => (string)$datos['fecha_hora_salida_referencia'],
+            ':es_suplencia'                     => (int)$datos['es_suplencia'],
+            ':abierta_fuera_horario'            => (int)$datos['abierta_fuera_horario'],
+            ':fecha_hora_apertura'              => (string)$datos['fecha_hora_apertura'],
+            ':tiene_cierre_anterior'            => (int)$datos['tiene_cierre_anterior'],
+            ':id_sesion_cierre_anterior'        => $datos['id_sesion_cierre_anterior'],
+            ':monto_referencia_cierre_anterior' => $datos['monto_referencia_cierre_anterior'],
+            ':fecha_hora_cierre_anterior_ref'   => $datos['fecha_hora_cierre_anterior_ref'],
+            ':nombre_turno_cierre_anterior_ref' => $datos['nombre_turno_cierre_anterior_ref'],
+            ':saldo_inicial'                    => (string)$datos['saldo_inicial'],
+            ':diferencia_apertura'              => $datos['diferencia_apertura'],
+            ':efectivo_esperado_actual'         => (string)$datos['efectivo_esperado_actual'],
+            ':id_solicitud_apertura'            => $datos['id_solicitud_apertura'],
+        ]);
+
+        return (int)$this->conect->lastInsertId();
+    }
+
+    /**
+     * Lista la proyección mínima (id, name) de administradores activos (id_rol = 1, estado = 1).
+     *
+     * @return array<int, array{id:int,name:string}>
+     */
+    public function listarAdministradoresActivos(): array
+    {
+        $sql = "SELECT
+                    id_usuario AS id,
+                    nombre AS name
+                FROM usuario
+                WHERE id_rol = 1
+                  AND estado = 1
+                ORDER BY nombre ASC, id_usuario ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as &$row) {
+            $row['id'] = (int)$row['id'];
+            $row['name'] = (string)$row['name'];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Obtiene un administrador activo (id_rol = 1, estado = 1) por su ID.
+     */
+    public function obtenerAdministradorActivoPorId(int $idUsuario, bool $forUpdate = false): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    id_usuario,
+                    nombre,
+                    id_rol,
+                    estado
+                FROM usuario
+                WHERE id_usuario = :id_usuario
+                  AND id_rol = 1
+                  AND estado = 1
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_usuario' => $idUsuario]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Lista las sesiones cerradas anteriores a la apertura actual (máximo 20).
+     */
+    public function listarSesionesCerradasAnterioresElegibles(
+        string $fechaAperturaActual,
+        int $idSesionActual,
+        int $limit = 10
+    ): array {
+        $limit = max(1, min(20, $limit));
+        $sql = "SELECT
+                    id_sesion_caja,
+                    nombre_turno_referencia,
+                    fecha_hora_cierre,
+                    efectivo_esperado_cierre,
+                    efectivo_contado_cierre
+                FROM sesion_caja
+                WHERE estado = 'CERRADA'
+                  AND fecha_hora_cierre < :fecha_apertura_actual
+                  AND id_sesion_caja <> :id_sesion_actual
+                ORDER BY fecha_hora_cierre DESC, id_sesion_caja DESC
+                LIMIT :limit_rows";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->bindValue(':fecha_apertura_actual', $fechaAperturaActual, PDO::PARAM_STR);
+        $stmt->bindValue(':id_sesion_actual', $idSesionActual, PDO::PARAM_INT);
+        $stmt->bindValue(':limit_rows', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Verifica si una sesión pertenece al conjunto elegible de las últimas 20 sesiones cerradas anteriores.
+     */
+    public function obtenerSesionOrigenElegibleParaOmitido(
+        int $idOrigen,
+        string $fechaAperturaActual,
+        int $idSesionActual
+    ): ?array {
+        $sql = "SELECT
+                    elegibles.id_sesion_caja,
+                    elegibles.nombre_turno_referencia,
+                    elegibles.fecha_hora_cierre
+                FROM (
+                    SELECT
+                        id_sesion_caja,
+                        nombre_turno_referencia,
+                        fecha_hora_cierre
+                    FROM sesion_caja
+                    WHERE estado = 'CERRADA'
+                      AND fecha_hora_cierre < :fecha_apertura_actual
+                      AND id_sesion_caja <> :id_sesion_actual
+                    ORDER BY fecha_hora_cierre DESC, id_sesion_caja DESC
+                    LIMIT 20
+                ) AS elegibles
+                WHERE elegibles.id_sesion_caja = :id_origen
+                LIMIT 1";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->bindValue(':fecha_apertura_actual', $fechaAperturaActual, PDO::PARAM_STR);
+        $stmt->bindValue(':id_sesion_actual', $idSesionActual, PDO::PARAM_INT);
+        $stmt->bindValue(':id_origen', $idOrigen, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Inserta un registro en movimiento_caja.
+     */
+    public function insertarMovimientoCaja(array $datos): int
+    {
+        $sql = "INSERT INTO movimiento_caja (
+                    id_sesion_caja,
+                    tipo_movimiento,
+                    monto,
+                    efecto_saldo,
+                    motivo,
+                    referencia_visible,
+                    id_usuario_registro,
+                    id_usuario_admin,
+                    id_venta,
+                    id_sesion_origen_omitido,
+                    declarado_ocurrio_en_sesion_origen_abierta,
+                    confirmado_reflejado_en_apertura,
+                    id_movimiento_original,
+                    id_solicitud_idempotencia,
+                    fecha_hora_registro
+                ) VALUES (
+                    :id_sesion_caja,
+                    :tipo_movimiento,
+                    :monto,
+                    :efecto_saldo,
+                    :motivo,
+                    :referencia_visible,
+                    :id_usuario_registro,
+                    :id_usuario_admin,
+                    :id_venta,
+                    :id_sesion_origen_omitido,
+                    :declarado_ocurrio_en_sesion_origen_abierta,
+                    :confirmado_reflejado_en_apertura,
+                    :id_movimiento_original,
+                    :id_solicitud_idempotencia,
+                    :fecha_hora_registro
+                )";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_sesion_caja'                              => (int)$datos['id_sesion_caja'],
+            ':tipo_movimiento'                             => (string)$datos['tipo_movimiento'],
+            ':monto'                                       => (string)$datos['monto'],
+            ':efecto_saldo'                                => (string)$datos['efecto_saldo'],
+            ':motivo'                                      => (string)$datos['motivo'],
+            ':referencia_visible'                          => $datos['referencia_visible'],
+            ':id_usuario_registro'                         => (int)$datos['id_usuario_registro'],
+            ':id_usuario_admin'                            => $datos['id_usuario_admin'],
+            ':id_venta'                                    => $datos['id_venta'] ?? null,
+            ':id_sesion_origen_omitido'                    => $datos['id_sesion_origen_omitido'],
+            ':declarado_ocurrio_en_sesion_origen_abierta'  => $datos['declarado_ocurrio_en_sesion_origen_abierta'],
+            ':confirmado_reflejado_en_apertura'            => $datos['confirmado_reflejado_en_apertura'],
+            ':id_movimiento_original'                      => $datos['id_movimiento_original'] ?? null,
+            ':id_solicitud_idempotencia'                   => $datos['id_solicitud_idempotencia'],
+            ':fecha_hora_registro'                         => (string)$datos['fecha_hora_registro'],
+        ]);
+
+        return (int)$this->conect->lastInsertId();
+    }
+
+    /**
+     * Actualiza acumulados de sesión abierta e incrementa version_caja en +1.
+     */
+    public function actualizarAcumuladosYVersionSesion(
+        int $idSesion,
+        string $totalIngresos,
+        string $totalEgresos,
+        string $totalRetirosOmitidos,
+        string $efectivoEsperadoActual
+    ): void {
+        $sql = "UPDATE sesion_caja
+                SET total_ingresos = :total_ingresos,
+                    total_egresos = :total_egresos,
+                    total_retiros_omitidos_declarados = :total_retiros_omitidos,
+                    efectivo_esperado_actual = :efectivo_esperado_actual,
+                    version_caja = version_caja + 1
+                WHERE id_sesion_caja = :id_sesion
+                  AND estado = 'ABIERTA'";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':total_ingresos'           => $totalIngresos,
+            ':total_egresos'            => $totalEgresos,
+            ':total_retiros_omitidos'   => $totalRetirosOmitidos,
+            ':efectivo_esperado_actual' => $efectivoEsperadoActual,
+            ':id_sesion'                => $idSesion,
+        ]);
+    }
+
+    /**
+     * Marca como DESACTUALIZADO cualquier arqueo VIGENTE de la sesión tras una operación de caja.
+     */
+    public function desactualizarArqueoVigenteSesion(int $idSesion, string $fechaHoraCambio): void
+    {
+        $sql = "UPDATE arqueo_caja
+                SET estado = 'DESACTUALIZADO',
+                    vigencia_activa = NULL,
+                    causa_cambio_estado = 'OPERACION_CAJA_POSTERIOR',
+                    fecha_hora_cambio_estado = :fecha_hora_cambio
+                WHERE id_sesion_caja = :id_sesion
+                  AND estado = 'VIGENTE'";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':fecha_hora_cambio' => $fechaHoraCambio,
+            ':id_sesion'         => $idSesion,
+        ]);
+    }
+
+    /**
+     * Lista los movimientos originales corregibles de una sesión y vendedor en orden cronológico.
+     */
+    public function listarMovimientosCorregiblesSesion(int $idSesion, int $idVendedor): array
+    {
+        $sql = "SELECT
+                    m.id_movimiento_caja,
+                    m.tipo_movimiento,
+                    m.monto,
+                    m.efecto_saldo,
+                    m.motivo,
+                    m.referencia_visible,
+                    m.fecha_hora_registro
+                FROM movimiento_caja m
+                WHERE m.id_sesion_caja = :id_sesion
+                  AND m.id_usuario_registro = :id_vendedor
+                  AND m.tipo_movimiento IN ('INGRESO_MANUAL', 'INYECCION_ADMIN', 'SALIDA_CAJA', 'RETIRO_ADMIN')
+                ORDER BY m.fecha_hora_registro ASC, m.id_movimiento_caja ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_sesion'   => $idSesion,
+            ':id_vendedor' => $idVendedor,
+        ]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Lista todas las correcciones vinculadas registradas en una sesión.
+     */
+    public function listarCorreccionesSesion(int $idSesion): array
+    {
+        $sql = "SELECT
+                    c.id_correccion_caja,
+                    c.id_movimiento_original,
+                    c.id_correccion_previa,
+                    c.numero_eslabon,
+                    c.monto_original,
+                    c.monto_vigente_previo,
+                    c.monto_corregido,
+                    c.efecto_saldo,
+                    c.motivo,
+                    c.fecha_hora_registro,
+                    m.referencia_visible AS original_reference,
+                    u.nombre AS responsible
+                FROM correccion_movimiento_caja c
+                INNER JOIN movimiento_caja m
+                    ON m.id_movimiento_caja = c.id_movimiento_original
+                INNER JOIN usuario u
+                    ON u.id_usuario = c.id_usuario_registro
+                WHERE c.id_sesion_caja = :id_sesion
+                ORDER BY c.fecha_hora_registro ASC, c.id_correccion_caja ASC";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Obtiene un movimiento de caja por ID (opcionalmente con FOR UPDATE).
+     */
+    public function obtenerMovimientoPorId(int $idMovimiento, bool $forUpdate = false): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    id_movimiento_caja,
+                    id_sesion_caja,
+                    tipo_movimiento,
+                    monto,
+                    efecto_saldo,
+                    motivo,
+                    referencia_visible,
+                    id_usuario_registro,
+                    id_usuario_admin,
+                    fecha_hora_registro
+                FROM movimiento_caja
+                WHERE id_movimiento_caja = :id_movimiento
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_movimiento' => $idMovimiento]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Obtiene el estado de una sesión por ID.
+     */
+    public function obtenerEstadoSesionPorId(int $idSesion): ?array
+    {
+        $sql = "SELECT id_sesion_caja, id_usuario_vendedor, estado
+                FROM sesion_caja
+                WHERE id_sesion_caja = :id_sesion
+                LIMIT 1";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_sesion' => $idSesion]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Obtiene el último eslabón confirmado de corrección para un movimiento original.
+     */
+    public function obtenerUltimaCorreccionDeMovimiento(int $idMovimientoOriginal, bool $forUpdate = false): ?array
+    {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $sql = "SELECT
+                    id_correccion_caja,
+                    numero_eslabon,
+                    monto_corregido
+                FROM correccion_movimiento_caja
+                WHERE id_movimiento_original = :id_original
+                ORDER BY numero_eslabon DESC
+                LIMIT 1{$lock}";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([':id_original' => $idMovimientoOriginal]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? $row : null;
+    }
+
+    /**
+     * Inserta un eslabón en correccion_movimiento_caja.
+     */
+    public function insertarCorreccionMovimiento(array $datos): int
+    {
+        $sql = "INSERT INTO correccion_movimiento_caja (
+                    id_sesion_caja,
+                    id_movimiento_original,
+                    id_movimiento_correccion,
+                    id_correccion_previa,
+                    numero_eslabon,
+                    monto_original,
+                    monto_vigente_previo,
+                    monto_corregido,
+                    efecto_saldo,
+                    motivo,
+                    id_usuario_registro,
+                    id_solicitud_idempotencia,
+                    fecha_hora_registro
+                ) VALUES (
+                    :id_sesion_caja,
+                    :id_movimiento_original,
+                    :id_movimiento_correccion,
+                    :id_correccion_previa,
+                    :numero_eslabon,
+                    :monto_original,
+                    :monto_vigente_previo,
+                    :monto_corregido,
+                    :efecto_saldo,
+                    :motivo,
+                    :id_usuario_registro,
+                    :id_solicitud_idempotencia,
+                    :fecha_hora_registro
+                )";
+
+        $stmt = $this->conect->prepare($sql);
+        $stmt->execute([
+            ':id_sesion_caja'            => (int)$datos['id_sesion_caja'],
+            ':id_movimiento_original'    => (int)$datos['id_movimiento_original'],
+            ':id_movimiento_correccion'  => (int)$datos['id_movimiento_correccion'],
+            ':id_correccion_previa'      => $datos['id_correccion_previa'],
+            ':numero_eslabon'            => (int)$datos['numero_eslabon'],
+            ':monto_original'            => (string)$datos['monto_original'],
+            ':monto_vigente_previo'      => (string)$datos['monto_vigente_previo'],
+            ':monto_corregido'           => (string)$datos['monto_corregido'],
+            ':efecto_saldo'              => (string)$datos['efecto_saldo'],
+            ':motivo'                    => (string)$datos['motivo'],
+            ':id_usuario_registro'       => (int)$datos['id_usuario_registro'],
+            ':id_solicitud_idempotencia' => $datos['id_solicitud_idempotencia'],
+            ':fecha_hora_registro'       => (string)$datos['fecha_hora_registro'],
+        ]);
+
+        return (int)$this->conect->lastInsertId();
+    }
+}

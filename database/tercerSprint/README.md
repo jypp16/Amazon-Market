@@ -138,3 +138,19 @@ if ($LASTEXITCODE -ne 0) { throw 'Falló la regresión adicional de HU 18' }
 La batería adicional toma el lunes actual del reloj de MariaDB con zona -05:00 y fechas relativas; no depende del día fijo del primer ensayo. Incluye bases históricas, actuales y futuras, excepciones pasadas/actuales/futuras, intervalos totalmente/parcialmente cubiertos, regreso a la última base y sesión abierta. Verifica también que las programaciones y detalles mantengan la misma huella antes/después de intentar la baja.
 
 Cada escenario termina en ROLLBACK, incluso si falla. No limpia datos existentes, no elimina triggers y no reinicia contadores. Los AUTO_INCREMENT de las tablas NUEVAS pueden avanzar por los INSERT de prueba revertidos; no se alteran correlativos comerciales ni tablas anteriores. La batería requiere una copia nueva sin programación previa del vendedor elegido ni sesión abierta, y rechaza el escenario si encuentra esas condiciones, sin borrar información para hacerlo pasar.
+
+---
+
+## 6. Migración Incremental Adicional — Paso 8 (`07_ajuste_check_correccion_cero_sprint3.sql`)
+
+Para habilitar `corrected_amount >= 0.00` en correcciones vinculadas (`EP-16`) sin reescribir los scripts `01`..`06` ni sus checksums históricos, se incorpora el script incremental **07**:
+
+- **Archivo:** [07_ajuste_check_correccion_cero_sprint3.sql](07_ajuste_check_correccion_cero_sprint3.sql)
+- **Ejecutor:** [ejecutar_ajuste_paso8_sprint3.php](tools/ejecutar_ajuste_paso8_sprint3.php)
+- **Orden de ejecución:**
+  1. En una base nueva restaurada desde el respaldo, ejecutar primero `01`..`06` con `ejecutar_migracion_sprint3.php <base_ensayo>` (deja `sprint3_migracion_control.estado = 'COMPLETADA'`).
+  2. Luego (o sobre una copia que ya tenía aplicados `01`..`06`), ejecutar:
+     ```powershell
+     C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_paso8_sprint3.php <base_ensayo>
+     ```
+- **Efecto:** Reemplaza únicamente `chk_correccion_importes_y_motivo` en `correccion_movimiento_caja` para permitir `monto_vigente_previo >= 0.00` y `monto_corregido >= 0.00`, conservando `monto_original > 0.00`, `monto_corregido <> monto_vigente_previo`, `efecto_saldo <> 0.00` y todos los triggers de inmutabilidad. No aplica sobre `amazon_market`.

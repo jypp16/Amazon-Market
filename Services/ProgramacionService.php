@@ -126,6 +126,46 @@ class ProgramacionService
     }
 
     /**
+     * Resuelve los turnos programados efectivos de un vendedor para una fecha local (America/Lima),
+     * reutilizando exactamente la misma precedencia (excepción semanal > base aplicable) de EP-05.
+     *
+     * @return array<int, array{id:int,name:string,label:string,start:string,end:string}>
+     */
+    public function obtenerTurnosProgramadosEnFecha(int $idVendedor, DateTimeImmutable $fechaLocal): array
+    {
+        $diaSemana = (int)$fechaLocal->format('N') - 1;
+        $semanaInicio = $fechaLocal->modify('-' . $diaSemana . ' days')->format('Y-m-d');
+
+        $baseAplicable = $this->programacionModel->obtenerBaseAplicableEnSemana($idVendedor, $semanaInicio, false);
+        $excepcionSemanal = $this->programacionModel->obtenerExcepcionVigenteEnSemana($idVendedor, $semanaInicio, false);
+        $reglaEfectiva = $excepcionSemanal ?? $baseAplicable;
+
+        if ($reglaEfectiva === null) {
+            return [];
+        }
+
+        $detalles = $this->programacionModel->obtenerDetallesProgramacion((int)$reglaEfectiva['id_programacion']);
+        $resultado = [];
+        foreach ($detalles as $detalle) {
+            if (!in_array($diaSemana, $detalle['dias'], true)) {
+                continue;
+            }
+            $inicio = (string)$detalle['inicio'];
+            $fin = (string)$detalle['fin'];
+            $nombre = (string)$detalle['nombre'];
+            $resultado[] = [
+                'id'    => (int)$detalle['turno_id'],
+                'name'  => $nombre,
+                'label' => $nombre . ' · ' . $inicio . '–' . $fin,
+                'start' => $inicio,
+                'end'   => $fin,
+            ];
+        }
+
+        return $resultado;
+    }
+
+    /**
      * EP-06: Guarda o duplica la programación semanal de un vendedor con idempotencia (PROGRAMACION_HORARIO).
      */
     public function guardarProgramacionSemanal(array $input, ?string $headerReferencia, int $idUsuarioAutor): array

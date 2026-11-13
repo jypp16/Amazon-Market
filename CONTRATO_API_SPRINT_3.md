@@ -944,8 +944,8 @@ Los ejemplos son escenarios independientes; no constituyen una única secuencia 
 6. **Autenticación y CSRF:** Sesión activa en BD.
 7. **Propiedad y estado requerido:**
    - Consulta la sesión en estado `'ABIERTA'` de la única caja física:
-     - Si existe y `id_usuario_vendedor === $this->authenticatedUserId`: devuelve `is_open: true`, `is_owner: true` y su saldo actual de efectivo (`current_balance` y `balance`).
-     - Si no existe sesión abierta o pertenece a otro vendedor: devuelve `is_open: false`, `is_owner: false`, `session_id: null`, `current_balance: 0.0` (nunca expone el saldo de otro vendedor).
+     - Si existe y `id_usuario_vendedor === $this->authenticatedUserId`: devuelve `is_open: true`, `is_owner: true` y su saldo actual de efectivo (`current_balance` y `balance`). Una sesión propia abierta con saldo real cero devuelve `0.0`.
+     - Si no existe sesión abierta o pertenece a otro vendedor: devuelve `is_open: false`, `is_owner: false`, `session_id: null`, `current_balance: null`, `balance: null` y los demás datos financieros/de sesión propios en `null` (el saldo no aplica y nunca expone datos de otro vendedor).
 8. **Parámetros de ruta, query, cabeceras y cuerpo:** Ninguno.
 9. **Tipo, obligatoriedad, nulabilidad, formato y límites:** Sin campos de entrada.
 10. **Validaciones y condiciones:** Usuario activo con `id_rol === 2` y permiso `turnos.movimientos`.
@@ -978,8 +978,8 @@ Los ejemplos son escenarios independientes; no constituyen una única secuencia 
 14. **Concurrencia y bloqueos necesarios:** Solo lectura.
 15. **Idempotencia y recuperación:** Solo lectura.
 16. **Ejemplos válidos y casos de rechazo representativos:**
-    - *Válido (con sesión propia abierta):* `GET /api/caja/sesion-actual` $\rightarrow$ `200 OK` con `is_open: true, current_balance: 280.0`.
-    - *Válido (con caja cerrada):* `GET /api/caja/sesion-actual` $\rightarrow$ `200 OK` con `is_open: false, session_id: null, current_balance: 0.0`.
+    - *Válido (con sesión propia abierta):* `GET /api/caja/sesion-actual` $\rightarrow$ `200 OK` con `is_open: true, is_owner: true, current_balance: 280.0, balance: 280.0` (o `0.0` si el saldo real de la sesión propia abierta es cero).
+    - *Válido (con caja cerrada o abierta por otro vendedor):* `GET /api/caja/sesion-actual` $\rightarrow$ `200 OK` con `is_open: false, is_owner: false, session_id: null, current_balance: null, balance: null` (sin datos financieros ajenos).
     - *Rechazo:* Administrador (`id_rol = 1`) invoca `GET /api/caja/sesion-actual` $\rightarrow$ `403 FORBIDDEN`.
 
 ---

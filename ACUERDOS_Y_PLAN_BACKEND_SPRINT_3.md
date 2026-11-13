@@ -93,6 +93,7 @@ Ejemplo: cierre anterior contado en S/ 200,00 y apertura contada en S/ 190,00. L
 ### Ingresos y egresos actuales
 
 - Solo se registran sobre la sesión propia y abierta del vendedor.
+- Al consultar el estado de la sesión actual para movimientos (`GET /api/caja/sesion-actual`), cuando no exista una sesión propia abierta (caja cerrada o abierta por otro vendedor), `current_balance` y `balance` devuelven `null` porque el saldo no aplica (`is_open = false`, `is_owner = false`, `session_id = null`, sin datos financieros ajenos). Una sesión propia abierta con saldo real cero devuelve `0.00`.
 - Se exigen importe positivo, hasta dos decimales y motivo con contenido.
 - Las inyecciones identifican al administrador que entregó el efectivo; los retiros identifican al que lo recibió.
 - Los egresos que afectan al efectivo actual no pueden superar el saldo disponible. Un egreso igual al saldo es válido y deja el saldo en cero.

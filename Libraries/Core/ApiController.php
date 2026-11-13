@@ -12,6 +12,7 @@ abstract class ApiController {
     protected array $requestHeaders = [];
     public string $requestMethod;
     protected ?array $requestBody = null;
+    protected string $rawRequestBody = '';
     protected ?int $authenticatedUserId = null;
     protected ?array $authenticatedUser = null;
     protected bool $allowMultipartFormData = true;
@@ -50,6 +51,7 @@ abstract class ApiController {
             if ($this->requestMethod === 'DELETE') {
                 if (str_contains(strtolower((string)$contentType), 'application/json')) {
                     $rawInput = (string)file_get_contents('php://input');
+                    $this->rawRequestBody = $rawInput;
                     if (trim($rawInput) === '') {
                         $this->requestBody = [];
                         return;
@@ -74,6 +76,7 @@ abstract class ApiController {
 
             if (str_contains(strtolower((string)$contentType), 'application/json')) {
                 $rawInput = (string)file_get_contents('php://input');
+                $this->rawRequestBody = $rawInput;
                 $decodedObj = json_decode($rawInput, false);
                 $decodedArr = json_decode($rawInput, true);
 
@@ -194,6 +197,47 @@ abstract class ApiController {
         return $usuario;
     }
 
+    /**
+     * Exige que el usuario autenticado esté activo en BD, tenga rol Vendedor (id_rol = 2)
+     * y posea el permiso RBAC indicado. Nunca concede bypass administrativo.
+     */
+    protected function requireVendedorActivo(?string $slug = null): array {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'AUTH_REQUIRED',
+                'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 401);
+        }
+
+        if ((int)$usuario['id_rol'] !== 2) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN',
+                'message' => 'Acceso denegado. Esta operación está reservada exclusivamente a usuarios con rol Vendedor.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 403);
+        }
+
+        if ($slug !== null && !RBACMiddleware::tienePermiso(2, $slug)) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN',
+                'message' => 'No tienes permisos para ejecutar esta operación.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 403);
+        }
+
+        $this->authenticatedUser = $usuario;
+        $this->authenticatedUserId = (int)$usuario['id_usuario'];
+        return $usuario;
+    }
+
     protected function getAuthenticatedUser(): array {
         return $this->authenticatedUser ?? [];
     }
@@ -224,6 +268,20 @@ abstract class ApiController {
 
     protected function getInput(): array {
         return $this->requestBody ?? [];
+    }
+
+    /**
+     * @return array{count:int,number_literal:?string}
+     */
+    protected function inspectRawJsonField(string $fieldName): array {
+        if ($this->rawRequestBody === '') {
+            return ['count' => 0, 'number_literal' => null];
+        }
+        return JsonDecimalExtractor::inspectTopLevelKey($this->rawRequestBody, $fieldName);
+    }
+
+    protected function getRawJsonNumberField(string $fieldName): ?string {
+        return $this->inspectRawJsonField($fieldName)['number_literal'];
     }
 
     protected function getParam(string $key, $default = null) {
