@@ -211,7 +211,7 @@ function loginHttp(string $baseUrl, string $username, string $password, string $
 
     return [
         'login' => ['status' => $code, 'raw' => (string)$resp],
-        'csrf'  => ($code === 302 && str_contains((string)$resp, '/Home')) ? $csrf : '',
+        'csrf'  => ($code === 302 && (str_contains((string)$resp, '/Home') || str_contains((string)$resp, '/Caja/abrir'))) ? $csrf : '',
     ];
 }
 

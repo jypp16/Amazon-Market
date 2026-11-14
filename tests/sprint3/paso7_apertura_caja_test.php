@@ -150,7 +150,7 @@ function loginHttp(string $baseUrl, string $username, string $password, string $
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($code !== 302 || !str_contains((string)$resp, '/Home')) {
+    if ($code !== 302 || !(str_contains((string)$resp, '/Home') || str_contains((string)$resp, '/Caja/abrir'))) {
         return null;
     }
 

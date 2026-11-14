@@ -319,7 +319,7 @@ function loginHttpAndGetCsrf(string $baseUrl, string $username, string $password
         'application/x-www-form-urlencoded'
     );
 
-    $loggedIn = ($loginRes['status_code'] === 302 && str_contains($loginRes['headers'], '/Home'));
+    $loggedIn = ($loginRes['status_code'] === 302 && (str_contains($loginRes['headers'], '/Home') || str_contains($loginRes['headers'], '/Caja/abrir')));
 
     return [
         'cookie_file' => $cookieFile,
