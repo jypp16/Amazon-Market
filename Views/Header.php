@@ -212,7 +212,7 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                         <?= $esCajaAbrir ? 'Abrir caja' : ($esCajaMovimientos ? 'Movimientos de caja' : ($esCajaArqueo ? 'Arqueo y cierre' : 'Consultar caja')) ?>
                     </h1>
                     <?php elseif ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
-                    <nav class="kardex-breadcrumb" aria-label="Ruta de navegación">
+                    <nav class="kardex-breadcrumb close-report-breadcrumb" aria-label="Ruta de navegación">
                         <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
                         <span>Reportes</span>
                         <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
