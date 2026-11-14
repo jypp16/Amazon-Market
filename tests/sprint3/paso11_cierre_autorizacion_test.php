@@ -282,8 +282,8 @@ try {
     assertSameVal(401, $resDis['status'], 'Seguridad', 'Usuario desactivado en BD -> 401 AUTH_REQUIRED');
     assertSameVal('AUTH_REQUIRED', $resDis['json']['code'] ?? null, 'Seguridad', 'Code AUTH_REQUIRED para usuario inactivo');
 
-    assertSameVal(403, httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => 1, 'referencia_solicitud' => 'p11_admop_00000001'], ['X-CSRF-TOKEN' => $authAdm['csrf']], $cookieAdm)['status'], 'Seguridad', 'Administrador rechazado como operador en EP-20 -> 403');
-    assertSameVal(403, httpRequest($url1, 'GET', '/api/caja/cierre?session_id=1&referencia_solicitud=p11_admop_00000001', null, [], $cookieAdm)['status'], 'Seguridad', 'Administrador rechazado como operador en EP-21 -> 403');
+    assertSameVal(403, httpRequest($url1, 'POST', '/api/caja/cerrar', ['arqueo_id' => 1, 'referencia_solicitud' => 'p11_admop_00000001'], ['X-CSRF-TOKEN' => $authAdm['csrf']], $cookieAdm)['status'], 'Seguridad', 'Administrador no cierra sesión ajena -> 403');
+    assertSameVal(403, httpRequest($url1, 'GET', '/api/caja/cierre?session_id=1&referencia_solicitud=p11_admop_00000001', null, [], $cookieAdm)['status'], 'Seguridad', 'Administrador no recupera cierre ajeno por EP-21 -> 403');
 
     $idPermCerrar = (int)$pdo->query("SELECT id_permiso FROM permiso WHERE slug = 'turnos.cerrar' LIMIT 1")->fetchColumn();
     $pdo->prepare('DELETE FROM rol_permiso WHERE id_rol = 2 AND id_permiso = ?')->execute([$idPermCerrar]);
@@ -301,6 +301,8 @@ try {
     $pdo->exec("INSERT INTO turno (nombre, hora_inicio, hora_fin, estado) VALUES ('Turno Paso11', '07:00:00', '12:00:00', 1)");
     $idTurno = (int)$pdo->lastInsertId();
 
+    $previousCounted = $pdo->query("SELECT efectivo_contado_cierre FROM sesion_caja WHERE estado='CERRADA' ORDER BY id_sesion_caja DESC LIMIT 1")->fetchColumn();
+    $expectedFirstDifference = $previousCounted === false ? null : round(100.00 - (float)$previousCounted, 2);
     $open1 = httpRequest($url1, 'POST', '/api/caja/abrir', [
         'shift_id'             => $idTurno,
         'cash_counted'         => 100.00,
@@ -470,13 +472,13 @@ try {
     assertSameVal('Faltante S/ 5.00 validado en cierre P11', $ses1Db['observacion_cierre'], 'Persistencia', 'observacion_cierre idéntica al arqueo');
     assertSameVal('VIGENTE', $pdo->query("SELECT estado FROM arqueo_caja WHERE id_arqueo_caja = {$idArq3}")->fetchColumn(), 'Persistencia', 'Arqueo de cierre conserva estado VIGENTE (no invalidado)');
     assertSameVal(1, (int)$pdo->query("SELECT COUNT(*) FROM autorizacion_caja WHERE id_sesion_caja = {$idSes1}")->fetchColumn(), 'Persistencia', '1 fila en autorizacion_caja');
-    assertSameVal(null, $ses1Db['diferencia_apertura'], 'Persistencia', 'Primera sesión conserva diferencia_apertura=NULL en BD');
-    assertSameVal(null, array_key_exists('opening_difference', $resClose1['response']['data']['summary'] ?? []) ? $resClose1['response']['data']['summary']['opening_difference'] : 'MISSING', 'Persistencia', 'EP-20 primer cierre devuelve opening_difference=null');
+    assertSameVal($expectedFirstDifference === null ? null : number_format($expectedFirstDifference, 2, '.', ''), $ses1Db['diferencia_apertura'], 'Persistencia', 'Primera sesión conserva diferencia de apertura según referencia en BD');
+    assertSameVal($expectedFirstDifference, array_key_exists('opening_difference', $resClose1['response']['data']['summary'] ?? []) ? $resClose1['response']['data']['summary']['opening_difference'] : 'MISSING', 'Persistencia', 'EP-20 primer cierre devuelve opening_difference según cierre previo');
 
     // Verificar ausencia de secretos en control_solicitud_idempotencia y respuesta
     $idempJson = (string)$pdo->query("SELECT respuesta_json FROM control_solicitud_idempotencia WHERE referencia_solicitud = '{$refClose1}' LIMIT 1")->fetchColumn();
     $idempDecoded = json_decode($idempJson, true);
-    assertSameVal(null, array_key_exists('opening_difference', $idempDecoded['data']['summary'] ?? []) ? $idempDecoded['data']['summary']['opening_difference'] : 'MISSING', 'Persistencia', 'respuesta_json de confirmación conserva opening_difference=null');
+    assertSameVal($expectedFirstDifference, array_key_exists('opening_difference', $idempDecoded['data']['summary'] ?? []) ? $idempDecoded['data']['summary']['opening_difference'] : 'MISSING', 'Persistencia', 'respuesta_json de confirmación conserva opening_difference según cierre previo');
     assertTrue(!str_contains(json_encode($resClose1), $passPlain) && !str_contains($idempJson, $passPlain), 'Seguridad', 'Sin secretos (admin_password) en respuesta ni en control_solicitud_idempotencia');
 
     // Verificar sesión PHP del vendedor intacta en ambos servidores HTTP y replay de EP-20 sin repetir contraseña
@@ -488,7 +490,7 @@ try {
     assertSameVal(200, $replay1['status'], 'Recuperación', 'Replay EP-20 sin repetir password -> 200');
     assertSameVal('OPERATION_ALREADY_CONFIRMED', $replay1['json']['code'] ?? null, 'Recuperación', 'Replay code=OPERATION_ALREADY_CONFIRMED');
     assertSameVal(true, $replay1['json']['idempotent_replay'] ?? null, 'Recuperación', 'Replay idempotent_replay=true');
-    assertSameVal(null, array_key_exists('opening_difference', $replay1['json']['data']['summary'] ?? []) ? $replay1['json']['data']['summary']['opening_difference'] : 'MISSING', 'Recuperación', 'Replay EP-20 conserva opening_difference=null');
+    assertSameVal($expectedFirstDifference, array_key_exists('opening_difference', $replay1['json']['data']['summary'] ?? []) ? $replay1['json']['data']['summary']['opening_difference'] : 'MISSING', 'Recuperación', 'Replay EP-20 conserva opening_difference según cierre previo');
     assertSameVal(json_encode($resClose1['response']['data']), json_encode($replay1['json']['data'] ?? null), 'Recuperación', 'Replay devuelve data original idéntico');
     assertSameVal($sessIdA, extractPhpSessionId($cookieV1A), 'Seguridad', 'Sesión PHP del vendedor conservada sin cambios');
 
@@ -543,7 +545,7 @@ try {
     $ep21Ses1 = httpRequest($url1, 'GET', "/api/caja/cierre?sesion_id={$idSes1}&request_id={$refClose1}", null, [], $cookieV1A);
     assertSameVal(200, $ep21Ses1['status'], 'Recuperación', 'EP-21 de sesión 1 tras nueva apertura -> 200');
     assertSameVal($idSes1, (int)($ep21Ses1['json']['data']['session_id'] ?? 0), 'Recuperación', 'EP-21 devuelve resumen de sesión 1');
-    assertSameVal(null, array_key_exists('opening_difference', $ep21Ses1['json']['data']['summary'] ?? []) ? $ep21Ses1['json']['data']['summary']['opening_difference'] : 'MISSING', 'Recuperación', 'EP-21 de primer cierre conserva opening_difference=null tras nueva apertura');
+    assertSameVal($expectedFirstDifference, array_key_exists('opening_difference', $ep21Ses1['json']['data']['summary'] ?? []) ? $ep21Ses1['json']['data']['summary']['opening_difference'] : 'MISSING', 'Recuperación', 'EP-21 de primer cierre conserva opening_difference según cierre previo tras nueva apertura');
     assertSameVal(403, httpRequest($url1, 'GET', "/api/caja/cierre?session_id={$idSes1}&referencia_solicitud=p11_wrong_ref_000001", null, [], $cookieV1A)['status'], 'Recuperación', 'EP-21 sesión cerrada sin referencia concordante -> 403 HISTORICAL_QUERY_NOT_ALLOWED');
     assertSameVal(422, httpRequest($url1, 'GET', "/api/caja/cierre?session_id={$idSes1}&sesion_id={$idSes2}&referencia_solicitud={$refClose1}", null, [], $cookieV1A)['status'], 'Recuperación', 'EP-21 alias contradictorios -> 422 AMBIGUOUS_ALIAS_VALUES');
     assertSameVal(404, httpRequest($url1, 'GET', "/api/caja/cierre?session_id=999999&referencia_solicitud={$refClose1}", null, [], $cookieV1A)['status'], 'Recuperación', 'EP-21 sesión inexistente -> 404 CASH_SESSION_NOT_FOUND');

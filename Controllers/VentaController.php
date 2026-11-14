@@ -24,7 +24,7 @@ class VentaController extends Controller {
 
     public function index() {
         // Consultar el estado actual en servidor: una caja ajena no habilita ventas.
-        if ((int)($_SESSION['rol'] ?? 0) === 2) {
+        if (in_array((int)($_SESSION['rol'] ?? 0), [1, 2], true)) {
             header('Cache-Control: no-store');
             $sesion = (new CajaModel())->obtenerSesionAbiertaActual();
             if ($sesion === null || (int)$sesion['id_usuario_vendedor'] !== (int)($_SESSION['idUser'] ?? 0)) {

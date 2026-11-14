@@ -64,16 +64,16 @@ class VentaService {
             $referenciaValida = ControlSolicitudService::resolverReferenciaCuerpoOCabecera($input);
         }
 
-        // 1. Validar responsable autenticado en BD y rol Vendedor (id_rol = 2)
+        // 1. Validar responsable autenticado activo: Administrador (1) o Vendedor (2)
         $rawUsuario = $input['id_usuario'] ?? null;
         $idUsuario = is_bool($rawUsuario) ? false : filter_var($rawUsuario, FILTER_VALIDATE_INT);
         if ($idUsuario === false || $idUsuario <= 0) {
             throw InventarioException::noAutenticado();
         }
         $responsable = $this->movimientoService->verificarResponsableActivo((int)$idUsuario, false);
-        if ((int)($responsable['id_rol'] ?? 0) !== 2) {
+        if (!in_array((int)($responsable['id_rol'] ?? 0), [1, 2], true)) {
             throw new InventarioException(
-                'Solo un usuario con rol Vendedor puede registrar ventas en POS.',
+                'Solo un administrador o vendedor activo puede registrar ventas en POS.',
                 'FORBIDDEN',
                 403
             );

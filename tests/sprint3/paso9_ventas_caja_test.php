@@ -323,10 +323,10 @@ try {
     $resBadCsrf = httpRequest($url1, 'POST', '/api/ventas', $basePayload + ['referencia_solicitud' => 'paso9_badcsrf_00001'], ['X-CSRF-TOKEN' => 'token_invalido'], $cookieV1A);
     assertSameVal(403, $resBadCsrf['status'], 'Auth', 'POST /api/ventas con CSRF inválido -> 403');
 
-    // 2. Admin rechazado en POST /api/ventas (403) y permitido en GET /api/ventas (200)
+    // 2. Admin operador: debe abrir caja antes de vender; conserva GET /api/ventas.
     $resAdminPost = httpRequest($url1, 'POST', '/api/ventas', $basePayload + ['referencia_solicitud' => 'paso9_admin_post_001'], ['X-CSRF-TOKEN' => $authAdmin['csrf']], $cookieAdmin);
-    assertSameVal(403, $resAdminPost['status'], 'Auth', 'Admin bloqueado en POST /api/ventas -> 403');
-    assertSameVal('FORBIDDEN', $resAdminPost['json']['code'] ?? null, 'Auth', 'Admin recibe code FORBIDDEN');
+    assertSameVal(409, $resAdminPost['status'], 'Auth', 'Admin necesita caja propia antes de vender -> 409');
+    assertSameVal('CASH_SESSION_CLOSED', $resAdminPost['json']['code'] ?? null, 'Auth', 'Admin sin caja recibe CASH_SESSION_CLOSED');
 
     $resAdminGet = httpRequest($url1, 'GET', '/api/ventas', null, [], $cookieAdmin);
     assertSameVal(200, $resAdminGet['status'], 'Auth', 'Admin conserva GET /api/ventas -> 200');

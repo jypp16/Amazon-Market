@@ -562,6 +562,11 @@ $pdoOrig = new PDO(
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]
 );
+$cloneBaselineCounts=[];foreach(['venta','compra','producto','kardex'] as $table)$cloneBaselineCounts[$table]=(int)$pdo->query('SELECT COUNT(*) FROM '.$table)->fetchColumn();
+$cloneBaselineHistorical=(int)$pdo->query('SELECT COUNT(*) FROM venta WHERE id_sesion_caja IS NULL')->fetchColumn();
+require_once $rootDir.'/database/tercerSprint/tools/DespliegueSprint3.php';
+$principalBeforeSnapshot=DespliegueSprint3::snapshot('amazon_market');
+
 
 try {
     ob_implicit_flush(true);
@@ -643,16 +648,19 @@ try {
     $unauthPost = httpRequest($serverUrl1, 'POST', '/api/caja/ingresos', ['type' => 'manual_income']);
     assertSameVal(401, $unauthPost['http_code'], 'SEGURIDAD', 'EP-13 sin sesión devuelve 401');
 
-    // Administrador rechazado en EP-10..EP-16
+    $adminPermissionId=(int)$pdo->query("SELECT id_permiso FROM permiso WHERE slug='turnos.movimientos'")->fetchColumn();
+    $pdo->prepare('DELETE FROM rol_permiso WHERE id_rol=1 AND id_permiso=?')->execute([$adminPermissionId]);
+    try {
+    // Administrador sin permiso efectivo en EP-10..EP-16
     $adminEp10 = httpRequest($serverUrl1, 'GET', '/api/caja/sesion-actual', null, [], $cookieAdmin);
-    assertSameVal(403, $adminEp10['http_code'], 'SEGURIDAD', 'EP-10 rechaza Administrador con 403');
+    assertSameVal(403, $adminEp10['http_code'], 'SEGURIDAD', 'EP-10 rechaza Administrador sin permiso con 403');
     assertSameVal('FORBIDDEN', $adminEp10['json']['code'] ?? null, 'SEGURIDAD', 'EP-10 Admin código FORBIDDEN');
 
     $adminEp13 = httpRequest($serverUrl1, 'POST', '/api/caja/ingresos', ['type' => 'manual_income'], ['X-CSRF-Token' => (string)$csrfAdmin], $cookieAdmin);
-    assertSameVal(403, $adminEp13['http_code'], 'SEGURIDAD', 'EP-13 rechaza Administrador con 403');
+    assertSameVal(403, $adminEp13['http_code'], 'SEGURIDAD', 'EP-13 rechaza Administrador sin permiso con 403');
 
     $adminEp16 = httpRequest($serverUrl1, 'POST', '/api/caja/movimientos/correcciones', ['original_movement_id' => 1], ['X-CSRF-Token' => (string)$csrfAdmin], $cookieAdmin);
-    assertSameVal(403, $adminEp16['http_code'], 'SEGURIDAD', 'EP-16 rechaza Administrador con 403');
+    assertSameVal(403, $adminEp16['http_code'], 'SEGURIDAD', 'EP-16 rechaza Administrador sin permiso con 403');
 
     // Usuario logueado y luego desactivado en BD
     $csrfV3 = loginHttp($serverUrl1, 'vndp8inact', 'Paso8Test#2026', $cookieV3);
@@ -660,6 +668,10 @@ try {
     $inactResp = httpRequest($serverUrl1, 'GET', '/api/caja/sesion-actual', null, [], $cookieV3);
     assertSameVal(401, $inactResp['http_code'], 'SEGURIDAD', 'Usuario desactivado en BD devuelve 401 AUTH_REQUIRED');
     assertSameVal('AUTH_REQUIRED', $inactResp['json']['code'] ?? null, 'SEGURIDAD', 'Usuario desactivado código AUTH_REQUIRED');
+
+    } finally {
+        $pdo->prepare('INSERT IGNORE INTO rol_permiso(id_rol,id_permiso) VALUES(1,?)')->execute([$adminPermissionId]);
+    }
 
     // Vendedor sin permiso turnos.movimientos (simulado temporalmente revocando en rol_permiso y restaurando)
     $idPermMov = (int)$pdo->query("SELECT id_permiso FROM permiso WHERE slug = 'turnos.movimientos'")->fetchColumn();
@@ -1429,15 +1441,16 @@ try {
     // SECCIÓN G: CONSERVACIÓN DE DATOS ORIGINALES
     // =========================================================================
     $ventasNull = (int)$pdo->query('SELECT COUNT(*) FROM venta WHERE id_sesion_caja IS NULL')->fetchColumn();
-    $ventasOrig = (int)$pdoOrig->query('SELECT COUNT(*) FROM venta')->fetchColumn();
+    $ventasOrig = $cloneBaselineHistorical;
     assertSameVal($ventasOrig, $ventasNull, 'CONSERVACION', 'Las 250 ventas históricas conservan id_sesion_caja = NULL');
 
     foreach (['venta', 'compra', 'producto', 'kardex'] as $tbl) {
         $cntTest = (int)$pdo->query("SELECT COUNT(*) FROM `{$tbl}`")->fetchColumn();
-        $cntOrig = (int)$pdoOrig->query("SELECT COUNT(*) FROM `{$tbl}`")->fetchColumn();
+        $cntOrig = $cloneBaselineCounts[$tbl];
         assertSameVal($cntOrig, $cntTest, 'CONSERVACION', "Tabla {$tbl} conserva conteo original ({$cntOrig})");
     }
 
+    assertSameVal($principalBeforeSnapshot, DespliegueSprint3::snapshot('amazon_market'), 'CONSERVACION', 'La fuente conserva tablas, filas y triggers durante la suite');
     echo "\n=== RESUMEN PASO 8 ===\n";
     foreach ($categories as $cat => $st) {
         echo sprintf("  - %-15s : %d passed, %d failed\n", $cat, $st['passed'], $st['failed']);

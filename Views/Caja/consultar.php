@@ -16,9 +16,9 @@ require_once 'Views/Header.php';
             <small>La fecha corresponde al día de apertura de la sesión.</small>
         </div>
         <div class="cash-query-filter">
-            <label for="cash_query_seller">Vendedor</label>
+            <label for="cash_query_seller">Responsable</label>
             <select id="cash_query_seller" name="seller_id" required>
-                <option value="">Selecciona un vendedor</option>
+                <option value="">Selecciona un responsable</option>
             </select>
             <span class="cash-query-field-error" id="cash_query_seller_error" aria-live="polite"></span>
         </div>
@@ -56,7 +56,7 @@ require_once 'Views/Header.php';
     </section>
     <section class="cash-query-message is-empty" id="cash_query_no_session" role="status" hidden>
         <h3 id="cash_query_empty_title">No hay información de caja</h3>
-        <p id="cash_query_empty_text">No hay aperturas para la fecha y el vendedor seleccionados.</p>
+        <p id="cash_query_empty_text">No hay aperturas para la fecha y el responsable seleccionados.</p>
         <a class="cash-movements-open-link" id="cash_query_open_link" href="<?= BASE_URL ?>/Caja/abrir" hidden>Abrir caja</a>
     </section>
 

@@ -52,7 +52,7 @@ $cierreId = (int)($data['cierre_id'] ?? 0);
                     <strong id="detail_code">—</strong>
                 </div>
                 <div class="close-detail-item">
-                    <span>Vendedor</span>
+                    <span>Responsable</span>
                     <strong id="detail_seller">—</strong>
                 </div>
                 <div class="close-detail-item">
@@ -139,7 +139,7 @@ $cierreId = (int)($data['cierre_id'] ?? 0);
                             <th>Tipo</th>
                             <th>Motivo / Referencia</th>
                             <th>Monto</th>
-                            <th>Vendedor</th>
+                            <th>Responsable</th>
                             <th>Administrador</th>
                         </tr>
                     </thead>

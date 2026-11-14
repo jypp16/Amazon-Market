@@ -203,3 +203,16 @@ Para habilitar el registro de movimientos `VENTA_EFECTIVO` vinculados a ventas c
 ## 9. Despliegue autorizado en XAMPP — Paso 15
 
 El despliegue local ya se realizó sobre `amazon_market`. Véase [DESPLIEGUE_LOCAL.md](DESPLIEGUE_LOCAL.md). El ejecutor autorizado usa **11 (contexto) antes de 10 (paquete 01..09)**; los ejecutores históricos continúan siendo exclusivos de ensayo. No repetir la migración sobre la base completada.
+
+
+## 10. Administrador operador sin horario — Migración 12
+
+Aplicada en XAMPP el 14/11/2026. [12_caja_administrador_sin_horario.sql](12_caja_administrador_sin_horario.sql) agrega modalidad inmutable y referencias horarias NULL condicionadas; conserva todas las sesiones anteriores como CON_TURNO. Reemplaza únicamente los dos triggers de sesión, conserva sus demás controles y SQL_MODE, y agrega permisos operativos al administrador sin retirar asignaciones.
+
+El [ejecutor](tools/ejecutar_caja_administrador_sprint3.php) requiere una base de ensayo nueva migrada con 01..09, o el destino local confirmado y un respaldo externo ya restaurado. En local activa mantenimiento, drena conexiones, compara con el respaldo, ejecuta DDL y valida las filas anteriores. La activación es separada. No repetir sobre una base con columna modalidad. Para una restauración antigua de 32 tablas: paquete 11 (contexto) → 10 (01..09) → 12. Para una base ya migrada con 01..09: solo 12.
+
+Ejemplo exclusivo de ensayo: `C:/xampp/php/php.exe database/tercerSprint/tools/ejecutar_caja_administrador_sprint3.php --db=amazon_market_admin_test_<numero>`.
+
+La base local ya está actualizada; no requiere comandos adicionales. Ante error DDL, conservar mantenimiento y evidencia; restaurar el respaldo en una base NUEVA y verificarla, sin eliminar ni reemplazar automáticamente la fuente parcial. No restaurar un respaldo anterior sobre operaciones registradas después de la activación.
+
+Evidencia y alcance: [VALIDACION_CAJA_ADMINISTRADOR.md](../../tests/sprint3/VALIDACION_CAJA_ADMINISTRADOR.md).

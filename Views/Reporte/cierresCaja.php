@@ -10,7 +10,7 @@ $defaultTo = htmlspecialchars((string)($data['default_to'] ?? date('Y-m-d')), EN
         <div>
             <span class="close-badge">Reportes administrativos</span>
             <h1>Cierres de caja</h1>
-            <p class="close-subtitle">Consulta los cierres registrados, filtra por fecha, turno o vendedor y abre el detalle completo de cada cierre.</p>
+            <p class="close-subtitle">Consulta los cierres registrados, filtra por fecha, turno o responsable y abre el detalle completo de cada cierre.</p>
         </div>
         <div class="close-header-actions">
             <a class="close-button close-button-secondary" href="<?= BASE_URL ?>/Reporte">Volver a reportes</a>
@@ -46,9 +46,9 @@ $defaultTo = htmlspecialchars((string)($data['default_to'] ?? date('Y-m-d')), EN
                 </select>
             </div>
             <div class="close-field">
-                <label for="closures_seller">Vendedor</label>
+                <label for="closures_seller">Responsable</label>
                 <select id="closures_seller" name="vendedor_id">
-                    <option value="">Todos los vendedores</option>
+                    <option value="">Todos los responsables</option>
                 </select>
             </div>
             <div class="close-filter-actions">
@@ -83,7 +83,7 @@ $defaultTo = htmlspecialchars((string)($data['default_to'] ?? date('Y-m-d')), EN
                 <thead>
                     <tr>
                         <th>Fecha y hora de cierre</th>
-                        <th>Vendedor</th>
+                        <th>Responsable</th>
                         <th>Turno</th>
                         <th>Fondo inicial</th>
                         <th>Dif. apertura</th>

@@ -34,7 +34,7 @@ class ReporteCierresCajaPDF extends ReportPDF
         $totales = $reporte['totals'] ?? [];
         $this->meta('Período', $this->textoPeriodo($filtros));
         $this->meta('Turno', $this->filtroNombre($filtros, $cierres, 'turno_id', 'turn'));
-        $this->meta('Vendedor', $this->filtroNombre($filtros, $cierres, 'vendedor_id', 'seller'));
+        $this->meta('Responsable', $this->filtroNombre($filtros, $cierres, 'vendedor_id', 'seller'));
         $this->meta('Generado por', $administrador);
         $this->meta('Emitido', $this->fechaHora($this->emitidoEn));
         if (isset($filtros['session_id'])) {
@@ -68,7 +68,7 @@ class ReporteCierresCajaPDF extends ReportPDF
             if ($this->GetY() > 190) $this->AddPage('P', 'A4');
             $this->seccion('Cierre ' . (string)($cierre['code'] ?? ('#' . ($cierre['session_id'] ?? ''))));
             $this->writeReportTable(
-                ['Fecha / hora', 'Caja', 'Turno', 'Vendedor', 'Esperado', 'Contado', 'Diferencia', 'Estado'],
+                ['Fecha / hora', 'Caja', 'Turno', 'Responsable', 'Esperado', 'Contado', 'Diferencia', 'Estado'],
                 [[
                     $this->fechaHora($cierre['closed_at'] ?? ''),
                     'Caja física #' . (string)($cierre['cashbox_id'] ?? 1),
@@ -331,6 +331,7 @@ class ReporteCierresCajaPDF extends ReportPDF
 
     private function filtroNombre(array $filtros, array $cierres, string $key, string $field): string
     {
+        if (($filtros[$key] ?? null) === 'sin_horario') return 'Sin horario';
         if (empty($filtros[$key])) {
             return 'Todos';
         }

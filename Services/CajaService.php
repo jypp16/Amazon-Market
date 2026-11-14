@@ -63,6 +63,17 @@ class CajaService
         $this->controlSolicitudService = new ControlSolicitudService($this->pdo);
     }
 
+    private function esAdministradorOperador(int $id): bool
+    {
+        $q = $this->pdo->prepare('SELECT id_rol, estado FROM usuario WHERE id_usuario=?');
+        $q->execute([$id]);
+        $u = $q->fetch(PDO::FETCH_ASSOC);
+        if (!$u || (int)$u['estado'] !== 1 || !in_array((int)$u['id_rol'], [1, 2], true)) {
+            throw new InventarioException('Se requiere un operador activo.', 'FORBIDDEN', 403);
+        }
+        return (int)$u['id_rol'] === 1;
+    }
+
     /**
      * EP-07: GET /api/caja/turno-hoy
      */
@@ -74,6 +85,14 @@ class CajaService
         $serverDate = $ahora->format('Y-m-d');
         $serverTime = $ahora->format('H:i');
 
+        if ($this->esAdministradorOperador($idVendedorAutenticado)) {
+            return ['status'=>true, 'code'=>'OK', 'message'=>'Operación administrativa sin horario.', 'data'=>[
+                'vendedor_id'=>$idVendedorAutenticado, 'server_date'=>$serverDate, 'server_time'=>$serverTime,
+                'mode'=>'SIN_HORARIO', 'status'=>'no_schedule', 'has_shift_today'=>false, 'shift'=>null,
+                'scheduled_shifts'=>[], 'available_shifts'=>[], 'recommended_shift_id'=>null,
+                'requires_authorization_to_open'=>false
+            ]];
+        }
         $scheduledShifts = $this->programacionService->obtenerTurnosProgramadosEnFecha($idVendedorAutenticado, $ahora);
         $catalogoActivo = $this->cajaModel->listarTurnosActivosCatalogo();
 
@@ -223,8 +242,8 @@ class CajaService
 
         $tieneCierreEnSesion = ((int)$sesionAbierta['tiene_cierre_anterior'] === 1);
         $shiftName = (string)$sesionAbierta['nombre_turno_referencia'];
-        $shiftStart = (string)$sesionAbierta['hora_inicio_referencia'];
-        $shiftEnd = (string)$sesionAbierta['hora_fin_referencia'];
+        $shiftStart = $sesionAbierta['hora_inicio_referencia'];
+        $shiftEnd = $sesionAbierta['hora_fin_referencia'];
 
         return [
             'status'  => true,
@@ -241,14 +260,14 @@ class CajaService
                 'counted_amount'     => round((float)$sesionAbierta['saldo_inicial'], 2),
                 'occupied_by'        => null,
                 'shift'              => [
-                    'id'    => (int)$sesionAbierta['id_turno'],
+                    'id'    => $sesionAbierta['id_turno'] === null ? null : (int)$sesionAbierta['id_turno'],
                     'name'  => $shiftName,
                     'start' => $shiftStart,
                     'end'   => $shiftEnd,
-                    'label' => $shiftName . ' · ' . $shiftStart . '–' . $shiftEnd,
+                    'label' => $sesionAbierta['modalidad'] === 'SIN_HORARIO' ? 'Sin horario' : $shiftName . ' · ' . $shiftStart . '–' . $shiftEnd,
                 ],
                 'opened_at'          => $this->formatearIsoLima((string)$sesionAbierta['fecha_hora_apertura']),
-                'expected_end_at'    => $this->formatearIsoLima((string)$sesionAbierta['fecha_hora_salida_referencia']),
+                'expected_end_at'    => $sesionAbierta['fecha_hora_salida_referencia'] !== null ? $this->formatearIsoLima((string)$sesionAbierta['fecha_hora_salida_referencia']) : null,
             ],
         ];
     }
@@ -282,7 +301,11 @@ class CajaService
 
         $referencia = $this->resolverReferenciaCuerpoOCabecera($input, $headerReferencia);
         $rawShiftId = $this->resolverAliasCuerpo($input, 'shift_id', 'turno_id');
-        $shiftId = $this->validarShiftIdEntrada($rawShiftId);
+        $sinHorario = $this->esAdministradorOperador((int)$vendedorAutenticado['id_usuario']);
+        if ($sinHorario && $rawShiftId !== null && $rawShiftId !== '') {
+            throw new InventarioException('El administrador abre sin turno.', 'VALIDATION_ERROR', 422, ['shift_id'=>['No corresponde asignar turno.']]);
+        }
+        $shiftId = $sinHorario ? null : $this->validarShiftIdEntrada($rawShiftId);
         $importeValidado = self::validarImporteApertura(
             $input['cash_counted'] ?? null,
             array_key_exists('cash_counted', $input),
@@ -306,7 +329,7 @@ class CajaService
             'CAJA_ABRIR',
             $referencia,
             $payloadCanonico,
-            function (PDO $pdo, int $idSolicitud) use ($idVendedor, $sellerName, $shiftId, $cashCountedStr, $cashCentimos, $cashCountedFloat): array {
+            function (PDO $pdo, int $idSolicitud) use ($idVendedor, $sellerName, $shiftId, $sinHorario, $cashCountedStr, $cashCentimos, $cashCountedFloat): array {
                 $cajaModel = new CajaModel($pdo);
                 $programacionService = new ProgramacionService($pdo);
 
@@ -328,8 +351,8 @@ class CajaService
                         );
                     }
 
-                    $turno = $cajaModel->obtenerTurnoPorId($shiftId, true);
-                    if ($turno === null || (int)$turno['estado'] !== 1) {
+                    $turno = $sinHorario ? null : $cajaModel->obtenerTurnoPorId($shiftId, true);
+                    if (!$sinHorario && ($turno === null || (int)$turno['estado'] !== 1)) {
                         throw new InventarioException(
                             'El turno seleccionado no existe o está inactivo.',
                             'INVALID_SHIFT',
@@ -361,15 +384,14 @@ class CajaService
                     $horaActual = $ahora->format('H:i');
                     $fechaHoraApertura = $ahora->format('Y-m-d H:i:s');
 
-                    $turnoNombre = (string)$turno['nombre'];
-                    $turnoInicio = (string)$turno['inicio'];
-                    $turnoFin = (string)$turno['fin'];
-                    $fechaHoraSalidaRef = $fechaLocal . ' ' . $turnoFin . ':00';
-
-                    $scheduledShifts = $programacionService->obtenerTurnosProgramadosEnFecha($idVendedor, $ahora);
+                    $turnoNombre = $sinHorario ? 'Sin horario' : (string)$turno['nombre'];
+                    $turnoInicio = $sinHorario ? null : (string)$turno['inicio'];
+                    $turnoFin = $sinHorario ? null : (string)$turno['fin'];
+                    $fechaHoraSalidaRef = $sinHorario ? null : $fechaLocal . ' ' . $turnoFin . ':00';
+                    $scheduledShifts = $sinHorario ? [] : $programacionService->obtenerTurnosProgramadosEnFecha($idVendedor, $ahora);
                     $scheduledIds = array_map(static fn (array $s): int => (int)$s['id'], $scheduledShifts);
-                    $esSuplencia = !in_array($shiftId, $scheduledIds, true);
-                    $fueraDeHorario = $esSuplencia || ($horaActual < $turnoInicio || $horaActual > $turnoFin);
+                    $esSuplencia = !$sinHorario && !in_array($shiftId, $scheduledIds, true);
+                    $fueraDeHorario = !$sinHorario && ($esSuplencia || ($horaActual < $turnoInicio || $horaActual > $turnoFin));
 
                     $hasPreviousClose = ($ultimoCierre !== null);
 
@@ -403,10 +425,11 @@ class CajaService
 
                     $idSesion = $cajaModel->insertarSesionApertura([
                         'id_usuario_vendedor'              => $idVendedor,
+                        'modalidad'                        => $sinHorario ? 'SIN_HORARIO' : 'CON_TURNO',
                         'id_turno'                         => $shiftId,
                         'nombre_turno_referencia'          => $turnoNombre,
-                        'hora_inicio_referencia'           => $turnoInicio . ':00',
-                        'hora_fin_referencia'              => $turnoFin . ':00',
+                        'hora_inicio_referencia'           => $sinHorario ? null : $turnoInicio . ':00',
+                        'hora_fin_referencia'              => $sinHorario ? null : $turnoFin . ':00',
                         'fecha_hora_salida_referencia'     => $fechaHoraSalidaRef,
                         'es_suplencia'                     => $esSuplencia ? 1 : 0,
                         'abierta_fuera_horario'            => $fueraDeHorario ? 1 : 0,
@@ -429,6 +452,7 @@ class CajaService
                         'message'           => 'Sesión de caja abierta correctamente.',
                         'data'              => [
                             'result_code'             => 'OPENED',
+                            'mode'                    => $sinHorario ? 'SIN_HORARIO' : 'CON_TURNO',
                             'session_id'              => $idSesion,
                             'seller_id'               => $idVendedor,
                             'seller_name'             => $sellerName,
@@ -437,7 +461,7 @@ class CajaService
                                 'name'  => $turnoNombre,
                                 'start' => $turnoInicio,
                                 'end'   => $turnoFin,
-                                'label' => $turnoNombre . ' · ' . $turnoInicio . '–' . $turnoFin,
+                                'label' => $sinHorario ? 'Sin horario' : $turnoNombre . ' · ' . $turnoInicio . '–' . $turnoFin,
                             ],
                             'is_substitution'         => $esSuplencia,
                             'opened_outside_schedule' => $fueraDeHorario,
@@ -518,7 +542,7 @@ class CajaService
                 'seller_id'       => (int)$sesionAbierta['id_usuario_vendedor'],
                 'seller'          => (string)$sesionAbierta['seller_name'],
                 'turn'            => $turn,
-                'shift_label'     => $turn . ' · ' . $start . '–' . $end,
+                'shift_label'     => $sesionAbierta['modalidad'] === 'SIN_HORARIO' ? 'Sin horario' : $turn . ' · ' . $start . '–' . $end,
                 'opening_balance' => round((float)$sesionAbierta['saldo_inicial'], 2),
                 'cash_sales'      => round((float)$sesionAbierta['total_ventas_efectivo'], 2),
                 'income'          => round((float)$sesionAbierta['total_ingresos'], 2),
@@ -2092,13 +2116,7 @@ class CajaService
                 'seller_id'                            => $idVendedorAutenticado,
                 'seller'                               => $sellerName,
                 'turn'                                 => $nombreTurno,
-                'reference_schedule'                   => [
-                    'shift_id'   => (int)$sesion['id_turno'],
-                    'shift_name' => $nombreTurno,
-                    'start'      => $horaInicio,
-                    'end'        => $horaFin,
-                    'label'      => "{$nombreTurno} · {$horaInicio}–{$horaFin}",
-                ],
+                'reference_schedule'                   => $this->proyectarReferenceSchedule($sesion),
                 'opening_fund'                         => $this->decimalDbANumero((string)$sesion['saldo_inicial']),
                 'cash_sales'                           => $this->decimalDbANumero((string)$sesion['total_ventas_efectivo']),
                 'income'                               => $this->decimalDbANumero((string)$sesion['total_ingresos']),
@@ -2386,6 +2404,12 @@ class CajaService
 
     private function evaluarHorarioCierre(array $sesion, ?DateTimeImmutable $nowOverride = null): array
     {
+        if (($sesion['modalidad'] ?? 'CON_TURNO') === 'SIN_HORARIO') {
+            return ['mode'=>'SIN_HORARIO', 'scheduled_end'=>null,
+                'current_time'=>($nowOverride ?? $this->ahoraLima())->format('H:i'),
+                'tolerance_minutes'=>null, 'early_threshold'=>null, 'minutes_remaining_to_end'=>null,
+                'requires_authorization'=>false, 'reason'=>null];
+        }
         $tz = new DateTimeZone(self::LIMA_TZ);
         $salidaDt = new DateTimeImmutable((string)$sesion['fecha_hora_salida_referencia'], $tz);
         $nowDt = ($nowOverride ?? $this->ahoraLima())->setTimezone($tz);
@@ -2620,7 +2644,7 @@ class CajaService
                 $ahoraDt = $this->ahoraLima()->setTimezone($tz);
                 $ahoraDb = $ahoraDt->format('Y-m-d H:i:s');
                 $ahoraIso = $ahoraDt->format('Y-m-d\TH:i:sP');
-                $salidaDt = new DateTimeImmutable((string)$sesion['fecha_hora_salida_referencia'], $tz);
+                $salidaDt = $sesion['fecha_hora_salida_referencia'] === null ? null : new DateTimeImmutable((string)$sesion['fecha_hora_salida_referencia'], $tz);
                 $scheduleEval = $this->evaluarHorarioCierre($sesion, $ahoraDt);
 
                 $authorizationResource = null;
@@ -2706,13 +2730,7 @@ class CajaService
                     'seller_id'          => $idVendedor,
                     'seller'             => $sellerName,
                     'turn'               => $turnName,
-                    'reference_schedule' => [
-                        'shift_id'   => (int)$sesion['id_turno'],
-                        'shift_name' => $turnName,
-                        'start'      => $startHm,
-                        'end'        => $endHm,
-                        'label'      => "{$turnName} · {$startHm}–{$endHm}",
-                    ],
+                    'reference_schedule' => $this->proyectarReferenceSchedule($sesion),
                     'opened_at'          => $this->formatearIsoLima((string)$sesion['fecha_hora_apertura']),
                     'closed_at'          => $ahoraIso,
                     'arqueo_id'          => $arqueoId,
@@ -2981,7 +2999,7 @@ class CajaService
                 'session_id' => (int)$row['id_sesion_caja'],
                 'seller_id'  => (int)$row['id_usuario_vendedor'],
                 'seller'     => (string)$row['seller_name'],
-                'turn_id'    => (int)$row['id_turno'],
+                'turn_id'    => $row['id_turno'] === null ? null : (int)$row['id_turno'],
                 'turn'       => (string)$row['nombre_turno_referencia'],
                 'status'     => $this->formatearEstadoPublicoSesion((string)$row['estado']),
                 'opened_at'  => $this->formatearIsoLima((string)$row['fecha_hora_apertura']),
@@ -3231,7 +3249,7 @@ class CajaService
                     'closed_at'                     => $this->formatearIsoLima((string)$s['fecha_hora_cierre']),
                     'closing_date'                  => $cierreDt->format('Y-m-d'),
                     'closing_time'                  => $cierreDt->format('H:i'),
-                    'shift_id'                      => (int)$s['id_turno'],
+                    'shift_id'                      => $s['id_turno'] === null ? null : (int)$s['id_turno'],
                     'turn'                          => (string)$s['nombre_turno_referencia'],
                     'seller_id'                     => (int)$s['id_usuario_vendedor'],
                     'seller'                        => (string)$s['seller_name'],
@@ -3414,7 +3432,7 @@ class CajaService
             'code' => sprintf('CIE-%04d', $sessionId),
             'seller_id' => (int)$row['id_usuario_vendedor'],
             'seller' => (string)$row['seller_name'],
-            'shift_id' => (int)$row['id_turno'],
+            'shift_id' => $row['id_turno'] === null ? null : (int)$row['id_turno'],
             'turn' => (string)$row['nombre_turno_referencia'],
             'opened_at' => $this->formatearIsoLima((string)$row['fecha_hora_apertura']),
             'closed_at' => $this->formatearIsoLima((string)$row['fecha_hora_cierre']),
@@ -3535,7 +3553,7 @@ class CajaService
             'code'               => sprintf('CIE-%04d', (int)$detalle['id_sesion_caja']),
             'seller_id'          => (int)$detalle['id_usuario_vendedor'],
             'seller'             => (string)$detalle['seller_name'],
-            'shift_id'           => (int)$detalle['id_turno'],
+            'shift_id'           => $detalle['id_turno'] === null ? null : (int)$detalle['id_turno'],
             'turn'               => (string)$detalle['nombre_turno_referencia'],
             'reference_schedule' => $this->proyectarReferenceSchedule($detalle),
             'opened_at'          => $this->formatearIsoLima((string)$detalle['fecha_hora_apertura']),
@@ -3804,7 +3822,7 @@ class CajaService
         $rawTurnoId = $this->resolverAliasQuery($queryParams, 'turno_id', 'turno');
         $hasTurnoKey = array_key_exists('turno_id', $queryParams) || array_key_exists('turno', $queryParams);
         if ($hasTurnoKey) {
-            $turnoId = $this->validarEnteroPositivoEstricto($rawTurnoId, 'turno_id');
+            $turnoId = $rawTurnoId === 'sin_horario' ? 'sin_horario' : $this->validarEnteroPositivoEstricto($rawTurnoId, 'turno_id');
         } else {
             $turnoId = $snapshotFilters !== null && array_key_exists('turno_id', $snapshotFilters)
                 ? $snapshotFilters['turno_id']
@@ -3824,7 +3842,7 @@ class CajaService
         return [
             'desde'       => $desde,
             'hasta'       => $hasta,
-            'turno_id'    => $turnoId !== null ? (int)$turnoId : null,
+            'turno_id'    => $turnoId,
             'vendedor_id' => $vendedorId !== null ? (int)$vendedorId : null,
         ];
     }
@@ -3836,12 +3854,16 @@ class CajaService
 
     private function proyectarReferenceSchedule(array $detalle): array
     {
+        if (($detalle['modalidad'] ?? 'CON_TURNO') === 'SIN_HORARIO') {
+            return ['mode'=>'SIN_HORARIO', 'shift_id'=>null, 'shift_name'=>'Sin horario', 'start'=>null, 'end'=>null, 'label'=>'Sin horario'];
+        }
+
         $turnName = (string)$detalle['nombre_turno_referencia'];
         $start = (string)$detalle['hora_inicio_referencia'];
         $end = (string)$detalle['hora_fin_referencia'];
 
         return [
-            'shift_id'   => (int)$detalle['id_turno'],
+            'shift_id'   => $detalle['id_turno'] === null ? null : (int)$detalle['id_turno'],
             'shift_name' => $turnName,
             'start'      => $start,
             'end'        => $end,
@@ -3875,7 +3897,7 @@ class CajaService
             'session_id'         => (int)$detalle['id_sesion_caja'],
             'seller_id'          => (int)$detalle['id_usuario_vendedor'],
             'seller'             => (string)$detalle['seller_name'],
-            'turn_id'            => (int)$detalle['id_turno'],
+            'turn_id'            => $detalle['id_turno'] === null ? null : (int)$detalle['id_turno'],
             'turn'               => (string)$detalle['nombre_turno_referencia'],
             'reference_schedule' => $this->proyectarReferenceSchedule($detalle),
             'status'             => $this->formatearEstadoPublicoSesion((string)$detalle['estado']),

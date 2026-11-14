@@ -269,7 +269,7 @@ try {
         assertSameVal(403, $asSeller['status'], 'RBAC', "Vendedor en {$ep} -> 403");
     }
     assertSameVal(401, httpRequest('GET', $baseUrl . '/api/caja/consulta/activa')['status'], 'RBAC', 'Sin sesión EP-22 -> 401');
-    assertSameVal(403, httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieAdmin)['status'], 'RBAC', 'Admin en EP-22 -> 403');
+    assertSameVal(200, httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieAdmin)['status'], 'RBAC', 'Admin puede consultar su propia sesión -> 200');
 
     // 2. EP-22 sin sesión abierta
     $ep22Empty = httpRequest('GET', $baseUrl . '/api/caja/consulta/activa', $cookieSeller1);
@@ -289,6 +289,8 @@ try {
     }
 
     // 3. Sesión 1 (primera sesión, diferencia_apertura NULL) - apertura sin movimientos primero
+    $previousCounted = $pdo->query("SELECT efectivo_contado_cierre FROM sesion_caja WHERE estado='CERRADA' ORDER BY id_sesion_caja DESC LIMIT 1")->fetchColumn();
+    $expectedFirstDifference = $previousCounted === false ? null : round(100.00 - (float)$previousCounted, 2);
     $open1 = httpRequest('POST', $baseUrl . '/api/caja/abrir', $cookieSeller1, [
         'shift_id'     => $shiftId,
         'cash_counted' => 100.00,
@@ -543,7 +545,7 @@ try {
     assertSameVal(200, $ep23cAlias['status'], 'EP-23C', 'Alias sesion_id aceptado -> 200');
     $d23c = $ep23cAlias['json']['data'] ?? [];
     assertSameVal('result', $d23c['type'] ?? null, 'EP-23C', 'data.type=result');
-    assertTrue(array_key_exists('opening_difference', $d23c['session'] ?? []) && $d23c['session']['opening_difference'] === null, 'EP-23C', 'Primera sesión opening_difference=null');
+    assertTrue(array_key_exists('opening_difference', $d23c['session'] ?? []) && $d23c['session']['opening_difference'] === $expectedFirstDifference, 'EP-23C', 'Primera sesión diferencia de apertura según cierre anterior');
     $auth0 = $d23c['authorizations'][0] ?? [];
     assertSameVal($sesion1Id, $auth0['session_id'] ?? null, 'EP-23C', 'auth.session_id');
     assertSameVal('CIERRE_ANTICIPADO', $auth0['operation'] ?? null, 'EP-23C', 'auth.operation');
@@ -638,7 +640,7 @@ try {
     assertSameVal(-10.0, (float)($d24a['closures'][0]['opening_difference'] ?? 0), 'EP-24A', 'Sesión 2 opening_difference = -10.0');
     assertSameVal(true, $d24a['closures'][0]['has_omitted_withdrawals'] ?? null, 'EP-24A', 'Sesión 2 has_omitted_withdrawals=true');
     assertSameVal($sesion1Id, $d24a['closures'][1]['session_id'] ?? null, 'EP-24A', 'Sesión 1 segunda');
-    assertTrue(array_key_exists('opening_difference', $d24a['closures'][1]) && $d24a['closures'][1]['opening_difference'] === null, 'EP-24A', 'Primera sesión conserva opening_difference=null');
+    assertTrue(array_key_exists('opening_difference', $d24a['closures'][1]) && $d24a['closures'][1]['opening_difference'] === $expectedFirstDifference, 'EP-24A', 'Primera sesión conserva diferencia de apertura según cierre anterior');
 
     // Lectura por snapshot_id con filtro parcial coincidente (hereda desde/hasta del snapshot)
     $ep24aSnapOk = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja?snapshot_id={$snapId}&vendedor_id={$seller1Id}&page=1&limit=1", $cookieAdmin);
@@ -682,11 +684,11 @@ try {
     $stmtCntSnap->execute([$snapId]);
     assertSameVal(1, (int)$stmtCntSnap->fetchColumn(), 'EP-24A', 'Snapshot expirado NO es eliminado físicamente');
 
-    // 10. EP-24B: detalle cierre 1 (opening_difference=null, reference_schedule objeto) y sesión abierta -> 409 CASH_SESSION_NOT_CLOSED
+    // 10. EP-24B: detalle cierre 1 (diferencia de apertura según cierre anterior, reference_schedule objeto) y sesión abierta -> 409 CASH_SESSION_NOT_CLOSED
     $ep24bS1 = httpRequest('GET', $baseUrl . "/api/reportes/cierres-caja/{$sesion1Id}", $cookieAdmin);
     assertSameVal(200, $ep24bS1['status'], 'EP-24B', 'Detalle cierre 1 -> 200');
     $d24b1 = $ep24bS1['json']['data'] ?? [];
-    assertTrue(array_key_exists('opening_difference', $d24b1['closure'] ?? []) && $d24b1['closure']['opening_difference'] === null, 'EP-24B', 'Detalle primer cierre opening_difference=null');
+    assertTrue(array_key_exists('opening_difference', $d24b1['closure'] ?? []) && $d24b1['closure']['opening_difference'] === $expectedFirstDifference, 'EP-24B', 'Detalle primer cierre diferencia de apertura según cierre anterior');
     assertTrue(is_array($d24b1['closure']['reference_schedule'] ?? null) && isset($d24b1['closure']['reference_schedule']['label']), 'EP-24B', 'closure.reference_schedule es objeto');
     assertSameVal(20, $d24b1['pagination']['page_size'] ?? -1, 'EP-24B', 'Default page_size=20');
     assertSameVal(0, $d24b1['pagination']['total_movements'] ?? -1, 'EP-24B', 'total_movements=0');

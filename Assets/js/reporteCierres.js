@@ -237,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (turnEl && Array.isArray(shifts)) {
                     const current = turnEl.value;
-                    turnEl.innerHTML = '<option value="">Todos los turnos</option>';
+                    turnEl.innerHTML = '<option value="">Todos los turnos</option><option value="sin_horario">Sin horario (administrador)</option>';
                     shifts.forEach((shift) => {
                         const opt = document.createElement('option');
                         opt.value = String(shift.id);
@@ -254,11 +254,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (sellerEl && Array.isArray(sellers)) {
                     const current = sellerEl.value;
-                    sellerEl.innerHTML = '<option value="">Todos los vendedores</option>';
+                    sellerEl.innerHTML = '<option value="">Todos los responsables</option>';
                     sellers.forEach((seller) => {
                         const opt = document.createElement('option');
                         opt.value = String(seller.id);
-                        opt.textContent = seller.name || seller.nombre || seller.email || `Vendedor #${seller.id}`;
+                        opt.textContent = seller.name || seller.nombre || seller.email || `Responsable #${seller.id}`;
                         sellerEl.appendChild(opt);
                     });
                     sellerEl.value = current;
@@ -516,7 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 setText('detail_code', c.code || `#${c.id}`);
                 setText('detail_seller', c.seller || '—');
-                const sched = c.reference_schedule
+                const sched = c.turn === 'Sin horario' ? 'Sin horario' : c.reference_schedule
                     ? `${c.turn || 'Turno'} (${c.reference_schedule.start_time || '--:--'} – ${c.reference_schedule.end_time || '--:--'})`
                     : (c.turn || '—');
                 setText('detail_schedule', sched);

@@ -42,16 +42,20 @@ class RBACMiddleware extends Middleware {
             return;
         }
 
-        if (self::esRutaExclusivaVendedorSprint3($controller, $method) && $rol !== 2) {
-            $this->denegarAccesoVendedorSprint3();
+        if (self::esRutaOperativaCajaSprint3($controller, $method) && !in_array($rol, [1, 2], true)) {
+            $this->denegarAccesoOperadorCajaSprint3();
             return;
         }
 
         $slug = self::mapControllerMethodToSlug($controller, $method);
         if ($controller === 'caja' && $method === 'consultar' && $rol === 1) {
-            $slug = 'turnos.consultar_historico';
+            $slug = (string)($_GET['propia'] ?? '') === '1' ? 'turnos.acceder' : 'turnos.consultar_historico';
         }
-        if ($slug && !self::tienePermiso($rol, $slug)) {
+        $permisoEfectivo = $slug && (self::esRutaOperativaCajaSprint3($controller, $method)
+            || ($controller === 'caja' && $method === 'consultar' && (string)($_GET['propia'] ?? '') === '1'))
+            ? self::tienePermisoAsignado($rol, $slug)
+            : ($slug ? self::tienePermiso($rol, $slug) : true);
+        if ($slug && !$permisoEfectivo) {
             if ($this->isApiRequest()) {
                 $this->jsonResponse([
                     'status' => false,
@@ -95,7 +99,7 @@ class RBACMiddleware extends Middleware {
         return false;
     }
 
-    public static function esRutaExclusivaVendedorSprint3(string $controller, string $method): bool {
+    public static function esRutaOperativaCajaSprint3(string $controller, string $method): bool {
         $controller = strtolower($controller);
         $method = strtolower($method);
 
@@ -110,16 +114,16 @@ class RBACMiddleware extends Middleware {
         return false;
     }
 
-    private function denegarAccesoVendedorSprint3(): void {
+    private function denegarAccesoOperadorCajaSprint3(): void {
         if ($this->isApiRequest()) {
             $this->jsonResponse([
                 'status' => false,
-                'code' => 'FORBIDDEN_SELLER_ONLY',
-                'message' => 'Acceso denegado. Esta operación está reservada exclusivamente a usuarios con rol Vendedor.',
+                'code' => 'FORBIDDEN_OPERATOR_ONLY',
+                'message' => 'Acceso denegado. Esta operación está reservada a administradores y vendedores activos.',
                 'data' => null,
             ], 403);
         } else {
-            $_SESSION['error'] = 'Acceso denegado. Esta sección operativa está reservada exclusivamente al Vendedor.';
+            $_SESSION['error'] = 'Acceso denegado. Esta sección operativa está reservada a administradores y vendedores activos.';
             $this->redirect('/Home');
         }
     }
@@ -168,6 +172,10 @@ class RBACMiddleware extends Middleware {
         }
 
         return $rol === 1;
+    }
+
+    public static function getPermisosAsignadosRol(int $rol): array {
+        return (new PermisoModel())->obtenerPermisosPorRol($rol);
     }
 
     public static function getPermisosRol(int $rol): array {

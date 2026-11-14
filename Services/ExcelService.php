@@ -241,7 +241,7 @@ class ExcelService {
             $this->addTypedRow($writer, ['Fecha de emisión', $this->fechaHoraExcel($generatedAt)], ['text', 'text'], [$labelStyle, $textStyle]);
             $this->addTypedRow($writer, ['Período', isset($filters['session_id']) ? 'Sesión individual' : (($filters['desde'] ?? '—') . ' al ' . ($filters['hasta'] ?? '—'))], ['text', 'text'], [$labelStyle, $textStyle]);
             $this->addTypedRow($writer, ['Turno', $this->filtroExcel($filters, $closures, 'turno_id', 'shift_id', 'turn')], ['text', 'text'], [$labelStyle, $textStyle]);
-            $this->addTypedRow($writer, ['Vendedor', $this->filtroExcel($filters, $closures, 'vendedor_id', 'seller_id', 'seller')], ['text', 'text'], [$labelStyle, $textStyle]);
+            $this->addTypedRow($writer, ['Responsable', $this->filtroExcel($filters, $closures, 'vendedor_id', 'seller_id', 'seller')], ['text', 'text'], [$labelStyle, $textStyle]);
             $this->addTypedRow($writer, ['Cantidad de cierres', (int)($totals['total_closures'] ?? count($closures))], ['text', 'number'], [$labelStyle, $this->numberStyle]);
             $this->addTypedRow($writer, ['Cierres con diferencia', (int)($totals['closures_with_difference'] ?? 0)], ['text', 'number'], [$labelStyle, $this->numberStyle]);
             $this->addTypedRow($writer, ['Efectivo esperado', (float)($totals['expected_cash_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
@@ -268,7 +268,7 @@ class ExcelService {
             foreach ($widths as $i => $width) {
                 $sheet->setColumnWidth($width, $i + 1);
             }
-            $headers = ['ID cierre', 'Fecha de cierre', 'Hora de cierre', 'Caja', 'Turno', 'Vendedor', 'Fondo inicial', 'Ventas en efectivo', 'Ventas con tarjeta', 'Ventas Yape/Plin', 'Total ventas', 'Ingresos', 'Egresos', 'Efectivo esperado', 'Efectivo contado', 'Diferencia de cierre', 'Diferencia de apertura', 'Estado'];
+            $headers = ['ID cierre', 'Fecha de cierre', 'Hora de cierre', 'Caja', 'Turno', 'Responsable', 'Fondo inicial', 'Ventas en efectivo', 'Ventas con tarjeta', 'Ventas Yape/Plin', 'Total ventas', 'Ingresos', 'Egresos', 'Efectivo esperado', 'Efectivo contado', 'Diferencia de cierre', 'Diferencia de apertura', 'Estado'];
             $this->addTypedRow($writer, $headers, array_fill(0, 18, 'text'), array_fill(0, 18, $headerStyle));
             foreach ($closures as $c) {
                 $diff = (float)($c['closing_difference'] ?? 0);
@@ -413,6 +413,7 @@ class ExcelService {
 
     private function filtroExcel(array $filters, array $closures, string $filterKey, string $idKey, string $labelKey): string
     {
+        if (($filters[$filterKey] ?? null) === 'sin_horario') return 'Sin horario';
         if (empty($filters[$filterKey])) return 'Todos';
         foreach ($closures as $closure) {
             if ((int)($closure[$idKey] ?? 0) === (int)$filters[$filterKey]) return (string)($closure[$labelKey] ?? ('#' . $filters[$filterKey]));

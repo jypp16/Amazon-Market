@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-14",
+  "database": "amazon_market",
+  "state": "ACTIVATED",
+  "migration": "12_caja_administrador_sin_horario.sql",
+  "tests": {
+    "administrador": [
+      44,
+      44
+    ],
+    "paso7": [
+      214,
+      214
+    ],
+    "paso8": [
+      163,
+      163
+    ],
+    "paso9": [
+      107,
+      107
+    ],
+    "paso10": [
+      154,
+      154
+    ],
+    "paso11": [
+      160,
+      160
+    ],
+    "paso12": [
+      190,
+      190
+    ],
+    "paso14": [
+      88,
+      88
+    ]
+  },
+  "pre_backup": "amazon_market_post_sprint3_20261114_143604_115740c6.sql",
+  "pre_sha256": "903822230664d75f21bcd0ae0fc1b724d4fa537dd9ec22436a44e7df3ee1e000",
+  "post_backup": "amazon_market_post_sprint3_20261114_150213_69ae7cc6.sql",
+  "post_sha256": "663923a21fe857fc10e387e5466f88c27eb2a16ba9568a272d0faaee866f9972",
+  "gui": {
+    "before": {
+      "mode": "Administrador Â· Sin horario",
+      "selectorHidden": true
+    },
+    "schedule": "Administrador Â· Sin horario",
+    "ready": {
+      "button": "Confirmar cierre",
+      "authorizationHidden": true,
+      "feedback": "Arqueo guardado. El nuevo arqueo estÃ¡ vigente."
+    },
+    "errors": []
+  },
+  "gui_close": {
+    "status": "Caja cerrada Â· Admin Â· Sin horario",
+    "summary": "Cierre confirmado por el servidorEfectivo esperado: S/ 0,00Efectivo contado: S/ 0,00Diferencia: S/ 0,00ObservaciÃ³n: Sin observaciÃ³nHora de cierre: 14/11/26, 2:59 p. m.",
+    "authorizationHidden": true
+  },
+  "checks_total": 1120,
+  "sql_sha256": "dbbe2f637cf4196afb8c4fca49d875ba9fa7bec0b66d33bc4768289318b51839"
+}

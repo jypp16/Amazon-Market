@@ -1,0 +1,28 @@
+{
+  "files": [
+    "ACUERDOS_Y_PLAN_BACKEND_SPRINT_3.md",
+    "Assets/js/caja.js",
+    "Assets/js/cajaArqueo.js",
+    "Assets/js/cajaService.js",
+    "Assets/js/reporteCierres.js",
+    "Controllers/API/CajaApiController.php",
+    "Controllers/API/VentaApiController.php",
+    "Controllers/CajaController.php",
+    "Controllers/VentaController.php",
+    "Libraries/Core/ApiController.php",
+    "Libraries/Middleware/RBACMiddleware.php",
+    "Libraries/PDF/ReporteCierresCajaPDF.php",
+    "Models/CajaModel.php",
+    "Services/CajaService.php",
+    "Services/ExcelService.php",
+    "Services/VentaService.php",
+    "Views/Caja/consultar.php",
+    "Views/Header.php",
+    "Views/Reporte/cierresCaja.php",
+    "Views/Reporte/detalleCierreCaja.php",
+    "tests/sprint3/paso11_cierre_autorizacion_test.php",
+    "tests/sprint3/paso12_consultas_reportes_test.php",
+    "tests/sprint3/paso14_exportaciones_test.php",
+    "tests/sprint3/paso9_ventas_caja_test.php"
+  ]
+}
