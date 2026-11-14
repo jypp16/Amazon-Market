@@ -7,7 +7,6 @@ $auth_help_text = 'Obligatorio. La autorización vale una sola vez, solo para es
 ?>
 <section class="cash-count">
     <header class="cash-count-heading">
-        <h2>Arqueo y cierre</h2>
         <p>Compara el efectivo contado con el esperado y cierra tu sesión.</p>
     </header>
 

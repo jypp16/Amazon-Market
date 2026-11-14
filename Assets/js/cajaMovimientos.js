@@ -13,6 +13,9 @@
     var incomeForm = document.getElementById('cash_income_form');
     var expenseForm = document.getElementById('cash_expense_form');
     var correctionForm = document.getElementById('cash_correction_form');
+    var incomeActions = document.getElementById('cash_income_actions');
+    var expenseActions = document.getElementById('cash_expense_actions');
+    var correctionActions = document.getElementById('cash_correction_actions');
     if (!service || !workspace) return;
 
     var session = null;
@@ -771,6 +774,9 @@
         incomeForm.hidden = !incomeActive;
         expenseForm.hidden = !expenseActive;
         correctionForm.hidden = !correctionActive;
+        incomeActions.hidden = !incomeActive;
+        expenseActions.hidden = !expenseActive;
+        correctionActions.hidden = !correctionActive;
         incomeForm.setAttribute('aria-hidden', String(!incomeActive));
         expenseForm.setAttribute('aria-hidden', String(!expenseActive));
         correctionForm.setAttribute('aria-hidden', String(!correctionActive));

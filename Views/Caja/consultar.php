@@ -3,7 +3,6 @@ require_once 'Views/Header.php';
 ?>
 <section class="cash-query">
     <header class="cash-query-heading">
-        <h2>Consultar caja</h2>
         <p>Saldo y movimientos de la sesión. Solo lectura.</p>
     </header>
 

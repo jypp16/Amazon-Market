@@ -26,11 +26,7 @@ $tiposEgreso = [
     </section>
 
     <div id="cash_movements_workspace" hidden>
-        <header class="cash-movements-heading">
-            <h2>Movimientos de caja</h2>
-            <p>Registra ingresos y egresos de efectivo de tu sesión abierta.</p>
-        </header>
-
+        <p class="cash-movements-description">Registra ingresos y egresos de efectivo de tu sesión abierta.</p>
         <div class="cash-movements-tabs" role="tablist" aria-label="Tipo de movimiento">
             <button type="button" class="cash-movements-tab is-active" id="cash_income_tab"
                 role="tab" aria-selected="true" aria-controls="cash_income_panel" tabindex="0">
@@ -97,10 +93,6 @@ $tiposEgreso = [
                     </div>
 
                     <div class="cash-movement-feedback" id="cash_income_feedback" role="status" aria-live="polite" hidden></div>
-                    <div class="cash-movement-actions">
-                        <button class="btn btn-secondary" type="reset" id="cash_income_cancel">Cancelar</button>
-                        <button class="btn btn-cash-primary" type="submit" id="cash_income_submit">Confirmar ingreso</button>
-                    </div>
                 </form>
 
                 <form class="cash-movement-card cash-movement-form" id="cash_expense_form"
@@ -170,10 +162,6 @@ $tiposEgreso = [
                     </div>
 
                     <div class="cash-movement-feedback" id="cash_expense_feedback" role="status" aria-live="polite" hidden></div>
-                    <div class="cash-movement-actions">
-                        <button class="btn btn-secondary" type="reset" id="cash_expense_cancel">Cancelar</button>
-                        <button class="btn btn-cash-primary" type="submit" id="cash_expense_submit">Confirmar egreso</button>
-                    </div>
                 </form>
 
                 <form class="cash-movement-card cash-movement-form" id="cash_correction_form"
@@ -217,10 +205,6 @@ $tiposEgreso = [
                         el efecto en el saldo lo confirma el servidor.
                     </p>
                     <div class="cash-movement-feedback" id="cash_correction_feedback" role="status" aria-live="polite" hidden></div>
-                    <div class="cash-movement-actions">
-                        <button class="btn btn-secondary" type="reset" id="cash_correction_cancel">Cancelar</button>
-                        <button class="btn btn-cash-primary" type="submit" id="cash_correction_submit">Solicitar corrección</button>
-                    </div>
 
                     <section class="cash-correction-history" aria-labelledby="cash_correction_history_title">
                         <h4 id="cash_correction_history_title">Originales y correcciones vinculadas</h4>
@@ -267,6 +251,21 @@ $tiposEgreso = [
                 </section>
                 <p class="cash-balance-note" id="cash_balance_note">El saldo se actualiza una sola vez, aunque se repita el envío.</p>
             </aside>
+        </div>
+
+        <div class="cash-movements-actions" aria-label="Acciones del movimiento">
+            <div class="cash-movement-actions" id="cash_income_actions">
+                <button class="btn btn-secondary" type="reset" form="cash_income_form" id="cash_income_cancel">Cancelar</button>
+                <button class="btn btn-cash-primary" type="submit" form="cash_income_form" id="cash_income_submit">Confirmar ingreso</button>
+            </div>
+            <div class="cash-movement-actions" id="cash_expense_actions" hidden>
+                <button class="btn btn-secondary" type="reset" form="cash_expense_form" id="cash_expense_cancel">Cancelar</button>
+                <button class="btn btn-cash-primary" type="submit" form="cash_expense_form" id="cash_expense_submit">Confirmar egreso</button>
+            </div>
+            <div class="cash-movement-actions" id="cash_correction_actions" hidden>
+                <button class="btn btn-secondary" type="reset" form="cash_correction_form" id="cash_correction_cancel">Cancelar</button>
+                <button class="btn btn-cash-primary" type="submit" form="cash_correction_form" id="cash_correction_submit">Solicitar corrección</button>
+            </div>
         </div>
     </div>
 

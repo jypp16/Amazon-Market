@@ -2,7 +2,6 @@
 
 <section class="cash-opening">
     <header class="cash-opening-heading">
-        <h2>Abrir caja</h2>
         <p>Cuenta el efectivo que recibes antes de empezar a vender.</p>
     </header>
 
@@ -51,43 +50,44 @@
 
             <p class="cash-opening-feedback" id="cash_opening_feedback" role="status" tabindex="-1" hidden></p>
             <section class="cash-opening-no-shift" id="cash_opening_schedule_notice" role="status" hidden></section>
-
-            <div class="cash-opening-actions">
-                <a class="btn btn-secondary" href="<?= BASE_URL ?>/Home">Cancelar</a>
-                <button class="btn btn-cash-primary" type="submit" id="cash_opening_confirm">
-                    Confirmar apertura
-                </button>
-            </div>
         </form>
 
-        <section class="cash-opening-card cash-opening-already-open" id="cash_opening_already_open" role="status" hidden>
-            <h3 id="cash_opening_occupied_title">Ya tienes una caja abierta</h3>
-            <p id="cash_opening_occupied_message">No puedes abrir otra sesión mientras esta caja siga abierta.</p>
-            <a class="btn btn-cash-primary" id="cash_opening_occupied_link" href="<?= BASE_URL ?>/Caja/movimientos">Ir a Movimientos</a>
-        </section>
+        <div class="cash-opening-side">
+            <aside class="cash-opening-card cash-opening-summary" aria-labelledby="cash_summary_title">
+                <h3 id="cash_summary_title">Resumen de la apertura</h3>
+                <dl>
+                    <div><dt>Vendedor</dt><dd><?= e($_SESSION['nombre'] ?? 'Operador') ?></dd></div>
+                    <div><dt>Turno</dt><dd id="cash_summary_turn">Cargando…</dd></div>
+                    <div>
+                        <dt>Horario</dt>
+                        <dd><span class="cash-schedule-badge" id="cash_schedule_status">Cargando…</span></dd>
+                    </div>
+                    <div><dt>Referencia anterior</dt><dd id="cash_summary_reference">—</dd></div>
+                    <div><dt>Efectivo contado</dt><dd id="cash_summary_counted">—</dd></div>
+                    <div class="cash-summary-difference">
+                        <dt>Diferencia de apertura</dt>
+                        <dd id="cash_summary_difference">—</dd>
+                    </div>
+                    <div class="cash-summary-balance">
+                        <dt>Saldo inicial</dt>
+                        <dd id="cash_summary_balance">—</dd>
+                    </div>
+                </dl>
+                <p>La fecha y la hora reales de apertura se registran al confirmar. Un reenvío recupera la misma apertura.</p>
+            </aside>
 
-        <aside class="cash-opening-card cash-opening-summary" aria-labelledby="cash_summary_title">
-            <h3 id="cash_summary_title">Resumen de la apertura</h3>
-            <dl>
-                <div><dt>Vendedor</dt><dd><?= e($_SESSION['nombre'] ?? 'Operador') ?></dd></div>
-                <div><dt>Turno</dt><dd id="cash_summary_turn">Cargando…</dd></div>
-                <div>
-                    <dt>Horario</dt>
-                    <dd><span class="cash-schedule-badge" id="cash_schedule_status">Cargando…</span></dd>
-                </div>
-                <div><dt>Referencia anterior</dt><dd id="cash_summary_reference">—</dd></div>
-                <div><dt>Efectivo contado</dt><dd id="cash_summary_counted">—</dd></div>
-                <div class="cash-summary-difference">
-                    <dt>Diferencia de apertura</dt>
-                    <dd id="cash_summary_difference">—</dd>
-                </div>
-                <div class="cash-summary-balance">
-                    <dt>Saldo inicial</dt>
-                    <dd id="cash_summary_balance">—</dd>
-                </div>
-            </dl>
-            <p>La fecha y la hora reales de apertura se registran al confirmar. Un reenvío recupera la misma apertura.</p>
-        </aside>
+            <section class="cash-opening-card cash-opening-already-open" id="cash_opening_already_open" role="status" hidden>
+                <h3 id="cash_opening_occupied_title">Ya tienes una caja abierta</h3>
+                <p id="cash_opening_occupied_message">No puedes abrir otra sesión mientras esta caja siga abierta.</p>
+                <a class="btn btn-cash-primary" id="cash_opening_occupied_link" href="<?= BASE_URL ?>/Caja/movimientos">Ir a Movimientos</a>
+            </section>
+        </div>
+    </div>
+    <div class="cash-opening-actions">
+        <a class="btn btn-secondary" href="<?= BASE_URL ?>/Home">Cancelar</a>
+        <button class="btn btn-cash-primary" type="submit" id="cash_opening_confirm" form="cash_opening_form">
+            Confirmar apertura
+        </button>
     </div>
 </section>
 

@@ -5,10 +5,7 @@
     <header class="purchase-register-heading">
         <nav class="purchase-breadcrumb" aria-label="Ruta de navegación">
             <a href="<?= BASE_URL ?>/Compra">Compras</a>
-            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-            <span aria-current="page"><?= $esCorreccion ? 'Corregir compra' : 'Registrar compra' ?></span>
         </nav>
-        <br>
         <p><?= $esCorreccion
             ? 'Revisa y corrige el documento y sus líneas. El cambio de inventario y la auditoría se aplicarán al confirmar.'
             : 'Registra solo la mercadería que ya revisaste y aceptaste. El stock aumenta una sola vez, cuando confirmas.' ?></p>
