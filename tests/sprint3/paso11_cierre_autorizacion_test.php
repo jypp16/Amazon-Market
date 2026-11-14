@@ -69,7 +69,7 @@ function assertTrue(bool $cond, string $cat, string $label, string $detail = '')
 function startPhpServer(string $phpBin, string $rootDir, int $port, string $dbName, string $sessionDir): array
 {
     $router = $rootDir . '/tests/sprint3/server_router_sprint3.php';
-    $cmd = sprintf('"%s" -S 127.0.0.1:%d "%s"', $phpBin, $port, $router);
+    $cmd = [$phpBin, '-S', '127.0.0.1:' . $port, $router];
     $env = array_merge($_ENV, getenv(), [
         'DB_NAME'          => $dbName,
         'TEST_DB_NAME'     => $dbName,

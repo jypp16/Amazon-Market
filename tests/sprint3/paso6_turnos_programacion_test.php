@@ -137,17 +137,11 @@ function httpRequest(
 
 $probe = httpRequest('GET', "{$baseUrl}/__test_env_verify", null, null, [], 'NONE');
 if ($probe['status_code'] !== 200) {
-    $cmd = sprintf(
-        '"%s" -S %s:%d -t "%s" "%s"',
-        $phpBin,
-        $serverHost,
-        $serverPort,
-        $projectRoot,
-        $routerPath
-    );
+    $cmd = [$phpBin, '-S', $serverHost . ':' . $serverPort, '-t', $projectRoot, $routerPath];
     $envVars = array_merge($_ENV, [
         'DB_NAME'    => $testDbName,
         'BASE_URL'   => $baseUrl,
+        'PHPRC' => getenv('PHPRC') ?: '',
         'SystemRoot' => getenv('SystemRoot') ?: 'C:\Windows',
         'PATH'       => getenv('PATH') ?: '',
         'TEMP'       => getenv('TEMP') ?: sys_get_temp_dir(),
@@ -240,6 +234,11 @@ assertCond(
     $probe['json']['php_timezone'] === 'America/Lima' && $probe['json']['db_timezone'] === '-05:00',
     'PRE-02: Timezone centralizado en America/Lima y SET SESSION time_zone = -05:00'
 );
+
+// Comparación relativa: la principal puede estar en Sprint 2 o ya activada en Sprint 3.
+require_once $projectRoot . '/database/tercerSprint/tools/DespliegueSprint3.php';
+$principalBaseline = \DespliegueSprint3::snapshot('amazon_market');
+if (!in_array(count($principalBaseline['tables']), [32, 43], true)) throw new RuntimeException('Esquema principal parcial o inesperado.');
 
 // 3. Verificar que la copia aislada sea una base limpia recién migrada (sin datos de prueba previos ni DELETE FROM)
 $cntExistentes = (int)$pdo->query("SELECT COUNT(*) FROM turno")->fetchColumn()
@@ -1679,6 +1678,7 @@ function runParallelWorkers(array $tasks, string $phpBin, string $projectRoot, s
     $procs = [];
     $env = array_merge($_ENV, [
         'DB_NAME'    => $testDbName,
+        'PHPRC' => getenv('PHPRC') ?: '',
         'SystemRoot' => getenv('SystemRoot') ?: 'C:\Windows',
         'PATH'       => getenv('PATH') ?: '',
         'TEMP'       => getenv('TEMP') ?: sys_get_temp_dir(),
@@ -2142,49 +2142,10 @@ assertCond(
     'F-04: Los datos comerciales históricos en la base de pruebas (productos=108, stock=2497, ventas=250, compras=80, kardex=470, op_inv=75) permanecen intactos'
 );
 
-// F.3 Verificación de que la base principal amazon_market NO fue migrada ni alterada
-$pdoMain = new \PDO("mysql:host=localhost;dbname=amazon_market;charset=utf8mb4", 'root', '');
-$pdoMain->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
-$conteosMain = [
-    'tablas_base'                => (int)$pdoMain->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'amazon_market' AND TABLE_TYPE = 'BASE TABLE'")->fetchColumn(),
-    'triggers'                   => (int)$pdoMain->query("SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = 'amazon_market'")->fetchColumn(),
-    'usuario'                    => (int)$pdoMain->query("SELECT COUNT(*) FROM usuario")->fetchColumn(),
-    'rol'                        => (int)$pdoMain->query("SELECT COUNT(*) FROM rol")->fetchColumn(),
-    'permiso'                    => (int)$pdoMain->query("SELECT COUNT(*) FROM permiso")->fetchColumn(),
-    'rol_permiso'                => (int)$pdoMain->query("SELECT COUNT(*) FROM rol_permiso")->fetchColumn(),
-    'producto'                   => (int)$pdoMain->query("SELECT COUNT(*) FROM producto")->fetchColumn(),
-    'suma_stock'                 => (int)$pdoMain->query("SELECT COALESCE(SUM(stock_actual), 0) FROM producto")->fetchColumn(),
-    'venta'                      => (int)$pdoMain->query("SELECT COUNT(*) FROM venta")->fetchColumn(),
-    'detalle_venta'              => (int)$pdoMain->query("SELECT COUNT(*) FROM detalle_venta")->fetchColumn(),
-    'compra'                     => (int)$pdoMain->query("SELECT COUNT(*) FROM compra")->fetchColumn(),
-    'detalle_compra'             => (int)$pdoMain->query("SELECT COUNT(*) FROM detalle_compra")->fetchColumn(),
-    'kardex'                     => (int)$pdoMain->query("SELECT COUNT(*) FROM kardex")->fetchColumn(),
-    'operacion_inventario'       => (int)$pdoMain->query("SELECT COUNT(*) FROM operacion_inventario")->fetchColumn(),
-    'control_idempotencia'       => (int)$pdoMain->query("SELECT COUNT(*) FROM control_solicitud_idempotencia")->fetchColumn(),
-    'reporte_consulta_snapshot'  => (int)$pdoMain->query("SELECT COUNT(*) FROM reporte_consulta_snapshot")->fetchColumn(),
-    'reporte_consulta_snap_it'   => (int)$pdoMain->query("SELECT COUNT(*) FROM reporte_consulta_snapshot_item")->fetchColumn(),
-];
-
-assertCond(
-    $conteosMain['tablas_base'] === 32
-    && $conteosMain['triggers'] === 5
-    && $conteosMain['usuario'] === 6
-    && $conteosMain['rol'] === 2
-    && $conteosMain['permiso'] === 31
-    && $conteosMain['rol_permiso'] === 30
-    && $conteosMain['producto'] === 108
-    && $conteosMain['suma_stock'] === 2497
-    && $conteosMain['venta'] === 250
-    && $conteosMain['detalle_venta'] === 295
-    && $conteosMain['compra'] === 80
-    && $conteosMain['detalle_compra'] === 100
-    && $conteosMain['kardex'] === 470
-    && $conteosMain['operacion_inventario'] === 75
-    && $conteosMain['control_idempotencia'] === 405
-    && $conteosMain['reporte_consulta_snapshot'] === 2
-    && $conteosMain['reporte_consulta_snap_it'] === 150,
-    'F-05: La base principal amazon_market permanece 100% intacta (32 tablas, 5 triggers, 6 usuarios, 250 ventas, stock 2497, 405 idempotencia)'
-);
+// F.3 La suite no debe cambiar la principal, esté o no desplegado el Sprint 3.
+$principalAfter = \DespliegueSprint3::snapshot('amazon_market');
+assertCond($principalBaseline === $principalAfter,
+    'F-05: La base principal conserva exactamente sus tablas, filas y triggers respecto al inicio de la suite');
 
 // Limpiar archivos de cookies temporales
 @unlink($sessAdmin['cookie_file']);

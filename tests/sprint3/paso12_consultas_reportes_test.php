@@ -68,7 +68,7 @@ function assertTrue(bool $cond, string $cat, string $label, string $detail = '')
 function startPhpServer(string $phpBin, string $rootDir, int $port, string $dbName, string $sessionDir): array
 {
     $router = $rootDir . '/tests/sprint3/server_router_sprint3.php';
-    $cmd = sprintf('"%s" -S 127.0.0.1:%d "%s"', $phpBin, $port, $router);
+    $cmd = [$phpBin, '-S', '127.0.0.1:' . $port, $router];
     $env = array_merge($_ENV, getenv(), [
         'DB_NAME'          => $dbName,
         'TEST_DB_NAME'     => $dbName,
@@ -202,6 +202,8 @@ function loginViaHttp(string $baseUrl, string $cookieFile, string $username, str
     $ok = ($code >= 200 && $code < 400 && $csrf2 !== '' && $loc !== '' && !str_ends_with($loc, '/Auth'));
     return ['status' => $code, 'csrf' => $csrf2, 'ok' => $ok];
 }
+
+if (defined('SPRINT3_PASO12_SOLO_HELPERS') && SPRINT3_PASO12_SOLO_HELPERS) return;
 
 $sessionDir = sys_get_temp_dir() . '\\am_p12_sess_' . uniqid();
 @mkdir($sessionDir, 0777, true);

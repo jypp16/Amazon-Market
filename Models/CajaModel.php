@@ -1533,6 +1533,20 @@ class CajaModel extends Model
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** Referencias posteriores al cierre: informativas, sin alterar sus cifras. */
+    public function listarRetirosOmitidosVinculados(int $idSesion): array
+    {
+        $stmt = $this->conect->prepare("SELECT m.id_movimiento_caja AS id, m.monto AS amount,
+            m.fecha_hora_registro AS recorded_at, m.id_sesion_caja AS registered_session_id,
+            s.nombre_turno_referencia AS registered_turn, u.nombre AS responsible
+            FROM movimiento_caja m INNER JOIN sesion_caja s ON s.id_sesion_caja=m.id_sesion_caja
+            INNER JOIN usuario u ON u.id_usuario=m.id_usuario_registro
+            WHERE m.id_sesion_origen_omitido=:id AND m.tipo_movimiento='RETIRO_OMITIDO'
+            ORDER BY m.fecha_hora_registro, m.id_movimiento_caja");
+        $stmt->execute([':id'=>$idSesion]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     /** Obtiene el conjunto completo del snapshot para exportar sin depender de page_size. */
     public function listarTodosItemsSnapshotCierresCaja(int $idSnapshot): array
     {

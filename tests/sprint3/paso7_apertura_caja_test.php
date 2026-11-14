@@ -230,6 +230,7 @@ function runParallelWorkers(string $phpBin, string $workerPath, string $dbName, 
     $pipesList = [];
     $env = array_merge($_ENV, [
         'DB_NAME'    => $dbName,
+        'PHPRC' => getenv('PHPRC') ?: '',
         'SystemRoot' => getenv('SystemRoot') ?: 'C:\\Windows',
         'PATH'       => getenv('PATH') ?: '',
         'TEMP'       => getenv('TEMP') ?: sys_get_temp_dir(),
@@ -324,6 +325,7 @@ try {
     $serverEnv = array_merge($_ENV, [
         'DB_NAME'    => $dbName,
         'BASE_URL'   => $serverUrl,
+        'PHPRC' => getenv('PHPRC') ?: '',
         'SystemRoot' => getenv('SystemRoot') ?: 'C:\\Windows',
         'PATH'       => getenv('PATH') ?: '',
         'TEMP'       => getenv('TEMP') ?: sys_get_temp_dir(),

@@ -199,6 +199,10 @@ class ExcelService {
         try {
             $options = new XLSXOptions();
             $options->setTempFolder($folder);
+            $options->setPageSetup(new \OpenSpout\Writer\XLSX\Options\PageSetup(
+                \OpenSpout\Writer\XLSX\Options\PageOrientation::LANDSCAPE,
+                \OpenSpout\Writer\XLSX\Options\PaperSize::A4, 0, 1
+            ));
             $writer = new XLSXWriter($options);
             $writer->openToFile($path);
 
@@ -218,7 +222,7 @@ class ExcelService {
             $headerStyle = (new Style())->setFontBold()->setBackgroundColor('1E293B')->setFontColor('D4AF37')->setShouldWrapText();
             $moneyStyle = (new Style())->setFormat('"S/" #,##0.00;[Red]("S/" #,##0.00)');
             $textStyle = (new Style())->setShouldWrapText();
-            $totalStyle = (new Style())->setFontBold()->setBackgroundColor('F3F4F6');
+            $totalStyle = (new Style())->setFontBold()->setBackgroundColor('F3F4F6')->setFormat('"S/" #,##0.00;[Red]("S/" #,##0.00)');
             $statusOk = (new Style())->setFontBold()->setBackgroundColor('DCFCE7')->setFontColor('166534');
             $statusShort = (new Style())->setFontBold()->setBackgroundColor('FEE2E2')->setFontColor('991B1B');
             $statusSurplus = (new Style())->setFontBold()->setBackgroundColor('FEF3C7')->setFontColor('92400E');
@@ -249,6 +253,7 @@ class ExcelService {
             $this->addTypedRow($writer, ['Ventas en efectivo', (float)($totals['cash_sales_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
             $this->addTypedRow($writer, ['Ventas con tarjeta', (float)($totals['card_sales_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
             $this->addTypedRow($writer, ['Ventas Yape / Plin', (float)($totals['yape_plin_sales_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Total ventas', round((float)($totals['cash_sales_total'] ?? 0) + (float)($totals['card_sales_total'] ?? 0) + (float)($totals['yape_plin_sales_total'] ?? 0), 2)], ['text', 'money'], [$labelStyle, $moneyStyle]);
             $this->addTypedRow($writer, ['Fondo inicial total', (float)($totals['opening_fund_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
             $this->addTypedRow($writer, ['Ingresos netos', (float)($totals['income_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
             $this->addTypedRow($writer, ['Egresos netos', (float)($totals['expenses_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
@@ -342,7 +347,7 @@ class ExcelService {
                     $detail,
                     (string)($m['responsible'] ?? ''),
                     (string)($m['administrator_name'] ?? ''),
-                    !empty($m['administrator_name']) ? 'Administrador' : '',
+                    !empty($m['administrator_name']) ? (($m['type'] ?? '') === 'admin_injection' ? 'Entregó' : (in_array($m['type'] ?? '', ['admin_withdrawal', 'omitted_withdrawal'], true) ? 'Recibió' : 'Administrador')) : '',
                     (float)($m['amount'] ?? 0),
                     isset($m['origin_session_id']) ? (string)$m['origin_session_id'] : '',
                     (float)($m['impact'] ?? 0) !== 0.0 ? 'Sí' : 'No',

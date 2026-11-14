@@ -1,0 +1,195 @@
+{
+  "status": "PASO_14_COMPLETO",
+  "baseCommit": "f175a2e5d79496aa023c554c00c38f461cac2acf",
+  "dateLocal": "2026-11-13",
+  "testDatabase": "amazon_market_sprint3_final14_complete_1794621341433",
+  "acceptance": {
+    "checks": 88,
+    "exitCode": 0,
+    "artifactDirectory": "C:/Users/LOQ/AppData/Local/Temp/am14final_1794620538378/p14_acceptance_9399ee8f7a10"
+  },
+  "tests": [
+    {
+      "file": "tests/sprint3/paso12_consultas_reportes_test.php",
+      "exitCode": 0,
+      "result": "PASS] [EP-24B] Detalle cierre 1 -> 200\n[PASS] [EP-24B] Detalle primer cierre opening_difference=null\n[PASS] [EP-24B] closure.reference_schedule es objeto\n[PASS] [EP-24B] Default page_size=20\n[PASS] [EP-24B] total_movements=0\n[PASS] [EP-24B] Detalle cierre 2 -> 200\n[PASS] [EP-24B] mov.session_id consistente\n[PASS] [EP-24B] mov.reason consistente\n[PASS] [EP-24B] mov.status=Corregido consistente\n[PASS] [EP-24B] mov.current_amount=35.0 consistente\n[PASS] [EP-24B] egreso a cero status=Corregido consistente\n[PASS] [EP-24B] egreso a cero current_amount=0.0 consistente\n[PASS] [EP-24B] inyección status=Confirmado\n[PASS] [EP-24B] inyección administrator_id consistente\n[PASS] [EP-24B] retiro omitido declared=true consistente\n[PASS] [EP-24B] retiro omitido confirmed=true consistente\n[PASS] [CONSERVACION] Monto original inmutable en BD\n[PASS] [SETUP] Apertura sesión 3 HTTP 201\n[PASS] [EP-24B] Sesión abierta en EP-24B -> 409\n[PASS] [EP-24B] code=CASH_SESSION_NOT_CLOSED\n\n=== RESUMEN PASO 12 ===\n - AUTH      : 4 PASS, 0 FAIL\n - RBAC      : 12 PASS, 0 FAIL\n - EP-22     : 43 PASS, 0 FAIL\n - SETUP     : 17 PASS, 0 FAIL\n - VERSION   : 9 PASS, 0 FAIL\n - MOV       : 9 PASS, 0 FAIL\n - EP-23A    : 6 PASS, 0 FAIL\n - EP-23B    : 9 PASS, 0 FAIL\n - EP-23C    : 37 PASS, 0 FAIL\n - EP-24A    : 25 PASS, 0 FAIL\n - EP-24B    : 18 PASS, 0 FAIL\n - CONSERVACION: 1 PASS, 0 FAIL\nTOTAL: 190/190 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso11_cierre_autorizacion_test.php",
+      "exitCode": 0,
+      "result": " arqueo -> 409 CASH_SESSION_CLOSED\n[PASS] [Concurrencia] 5J Orden 2 esperó contención real en MariaDB\n[PASS] [Concurrencia] 5J Orden 2 (Arqueo->Cierre): nuevo arqueo -> 201\n[PASS] [Concurrencia] 5J Orden 2 (Arqueo->Cierre): cierre con arqueo reemplazado -> 409 ARQUEO_STALE\n[PASS] [Concurrencia] 5K Orden 1 (Cierre->Venta): cierre -> 200\n[PASS] [Concurrencia] 5K Orden 1 (Cierre->Venta): venta -> 409 CASH_SESSION_CLOSED\n[PASS] [Concurrencia] 5K Orden 2 (Venta->Cierre): venta -> 201\n[PASS] [Concurrencia] 5K Orden 2 (Venta->Cierre): cierre -> 409 ARQUEO_STALE\n[PASS] [Concurrencia] 5L Orden 1 (Cierre->Corrección): cierre -> 200\n[PASS] [Concurrencia] 5L Orden 1 (Cierre->Corrección): corrección -> 409 CASH_SESSION_CLOSED\n[PASS] [Concurrencia] 5L Orden 2 (Corrección->Cierre): corrección -> 201\n[PASS] [Concurrencia] 5L Orden 2 (Corrección->Cierre): cierre -> 409 ARQUEO_STALE\n[PASS] [Concurrencia] 5L Orden 2: cierre posterior con arqueo vigente -> 200\n[PASS] [Concurrencia] 5L Orden 2: guardia liberada tras cierre\n[PASS] [Concurrencia] 5L Orden 2: guardia apunta al último cierre\n[PASS] [Concurrencia] SHOW ENGINE INNODB STATUS sin nuevo deadlock tras barreras 5I-5L\n\n=== RESUMEN PASO 11 ===\n  PRE: 7/7\n  Seguridad: 25/25\n  Recuperación: 21/21\n  Arqueo: 9/9\n  Horario: 14/14\n  Persistencia: 27/27\n  Rendimiento: 1/1\n  Inmutabilidad: 3/3\n  Concurrencia: 53/53\nTOTAL: 160/160 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso10_arqueos_test.php",
+      "exitCode": 0,
+      "result": "nciales admin -> 201\n[PASS] [Horario] guardarArqueo antes del margen code = ARQUEO_SAVED\n[PASS] [Horario] guardarArqueo antes del margen persiste VIGENTE en BD\n[PASS] [Horario] 11:45:00 para salida 12:00 -> requires_authorization=false\n[PASS] [Horario] 11:45:00 reason=null\n[PASS] [Horario] guardarArqueo en el instante del margen (11:45:00) -> 201\n[PASS] [Horario] 12:35:00 después de salida -> requires_authorization=false\n[PASS] [Horario] Después de medianoche conserva salida original -> false\n[PASS] [Horario] Editar turno no altera reference_schedule de sesión abierta\n[PASS] [Idempotencia] Arqueo vigente previo a cierre -> 201\n[PASS] [Idempotencia] Replay post-cierre de EP-19 -> 200\n[PASS] [Idempotencia] Replay post-cierre code OPERATION_ALREADY_CONFIRMED\n[PASS] [Idempotencia] Replay post-cierre conserva data original (no recalcula historial actual)\n[PASS] [Horario] Apertura sesión para prueba horaria HTTP -> 201\n[PASS] [Horario] EP-17 HTTP responde 200 en sesión abierta\n[PASS] [Horario] EP-17 HTTP coincide con cálculo horario esperado respecto al margen de 15m\n[PASS] [Horario] EP-19 HTTP permitido sin credenciales admin en cualquier horario\n\n=== RESUMEN PASO 10 ===\n  PRE: 4/4\n  Seguridad: 22/22\n  Estado: 21/21\n  Conteo: 12/12\n  Historial: 6/6\n  Persistencia: 13/13\n  Idempotencia: 10/10\n  Vigencia: 43/43\n  Concurrencia: 8/8\n  Horario: 15/15\nTOTAL: 154/154 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso12_consultas_reportes_test.php",
+      "exitCode": 0,
+      "result": "PASS] [EP-24B] Detalle cierre 1 -> 200\n[PASS] [EP-24B] Detalle primer cierre opening_difference=null\n[PASS] [EP-24B] closure.reference_schedule es objeto\n[PASS] [EP-24B] Default page_size=20\n[PASS] [EP-24B] total_movements=0\n[PASS] [EP-24B] Detalle cierre 2 -> 200\n[PASS] [EP-24B] mov.session_id consistente\n[PASS] [EP-24B] mov.reason consistente\n[PASS] [EP-24B] mov.status=Corregido consistente\n[PASS] [EP-24B] mov.current_amount=35.0 consistente\n[PASS] [EP-24B] egreso a cero status=Corregido consistente\n[PASS] [EP-24B] egreso a cero current_amount=0.0 consistente\n[PASS] [EP-24B] inyección status=Confirmado\n[PASS] [EP-24B] inyección administrator_id consistente\n[PASS] [EP-24B] retiro omitido declared=true consistente\n[PASS] [EP-24B] retiro omitido confirmed=true consistente\n[PASS] [CONSERVACION] Monto original inmutable en BD\n[PASS] [SETUP] Apertura sesión 3 HTTP 201\n[PASS] [EP-24B] Sesión abierta en EP-24B -> 409\n[PASS] [EP-24B] code=CASH_SESSION_NOT_CLOSED\n\n=== RESUMEN PASO 12 ===\n - AUTH      : 4 PASS, 0 FAIL\n - RBAC      : 12 PASS, 0 FAIL\n - EP-22     : 43 PASS, 0 FAIL\n - SETUP     : 17 PASS, 0 FAIL\n - VERSION   : 9 PASS, 0 FAIL\n - MOV       : 9 PASS, 0 FAIL\n - EP-23A    : 6 PASS, 0 FAIL\n - EP-23B    : 9 PASS, 0 FAIL\n - EP-23C    : 37 PASS, 0 FAIL\n - EP-24A    : 25 PASS, 0 FAIL\n - EP-24B    : 18 PASS, 0 FAIL\n - CONSERVACION: 1 PASS, 0 FAIL\nTOTAL: 190/190 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso9_ventas_caja_test.php",
+      "exitCode": 0,
+      "result": "lbackPostEscritura] Reintento con misma referencia tras rollback -> 201 SALE_CREATED\n[PASS] [RollbackPostEscritura] Reintento code exterior = SALE_CREATED\n[PASS] [RollbackPostEscritura] Reintento incrementa version_caja a 6 una sola vez\n[PASS] [RollbackPostEscritura] Correlativo comercial avanza exactamente 1 sin huecos\n[PASS] [Concurrencia] Competencia por última unidad: exactamente 1 gana (201) y 1 falla (409)\n[PASS] [Concurrencia] Stock final exacto = 0 sin sobreventa\n[PASS] [Concurrencia] Worker adquirió bloqueo FOR UPDATE sobre sesion_caja\n[PASS] [Concurrencia] Venta concurrente con cierre que confirma primero -> 409\n[PASS] [Concurrencia] Code CASH_SESSION_CLOSED tras esperar bloqueo de cierre\n[PASS] [Concurrencia] Sesión quedó efectivamente CERRADA por el worker\n[PASS] [Idempotencia] Replay post-cierre -> 200\n[PASS] [Idempotencia] Replay post-cierre code exterior = OPERATION_ALREADY_CONFIRMED\n[PASS] [Idempotencia] Replay post-cierre idempotent_replay = true\n[PASS] [Idempotencia] Replay post-cierre conserva data.result_code = SALE_CREATED\n[PASS] [Conservacion] 250 ventas históricas mantienen id_sesion_caja IS NULL\n\n=== RESUMEN PASO 9 ===\n  Auth: 7/7\n  SesionCaja: 8/8\n  Validacion: 20/20\n  RouterSeguridad: 4/4\n  VentasCaja: 34/34\n  Idempotencia: 12/12\n  Overflow: 3/3\n  RollbackPostEscritura: 12/12\n  Concurrencia: 6/6\n  Conservacion: 1/1\nTOTAL: 107/107 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso14_exportaciones_test.php",
+      "exitCode": 0,
+      "result": "ciliación Ventas Yape / Plin\r\nPASS reconciliación Ingresos netos\r\nPASS reconciliación Egresos netos\r\nPASS motivo largo y fórmula aparente conservados\r\nPASS administrador entregó y recibió\r\nPASS permiso existente reportes.exportar\r\nPASS permiso retirado reportes.exportar pdf\r\nPASS permiso retirado reportes.exportar excel\r\nPASS botón acorde a permisos reportes.exportar\r\nPASS permiso existente reportes.cierres_caja\r\nPASS permiso retirado reportes.cierres_caja pdf\r\nPASS permiso retirado reportes.cierres_caja excel\r\nPASS botón acorde a permisos reportes.cierres_caja\r\nPASS permiso existente reportes.ver\r\nPASS permiso retirado reportes.ver pdf\r\nPASS permiso retirado reportes.ver excel\r\nPASS botón acorde a permisos reportes.ver\r\nPASS admin inactivo pdf\r\nPASS admin inactivo excel\r\nPASS restaurar login\r\nPASS rechazar sesión abierta pdf\r\nPASS rechazar sesión abierta excel\r\nPASS snapshot inmutable tras retiro declarado posteriormente\r\nPASS nueva captura incorpora vínculo posterior sin alterar cierre\r\nPASS fallo controlado JSON pdf\r\nPASS sin trazas pdf\r\nPASS fallo controlado JSON excel\r\nPASS sin trazas excel\r\nPASS reintento tras fallo pdf\r\nPASS reintento tras fallo excel\r\nPASS snapshot vencido pdf\r\nPASS snapshot vencido excel\r\nPASS snapshot vencido conserva registro\r\nARTIFACTS C:/Users/LOQ/AppData/Local/Temp/am14final_1794620538378/p14_acceptance_dab83594d39e\r\nTOTAL PASO14 75 PASS, 0 FAIL\r\n"
+    },
+    {
+      "file": "tests/sprint3/paso8_movimientos_correcciones_test.php",
+      "exitCode": 0,
+      "result": "eplay código OPERATION_ALREADY_CONFIRMED\n[PASS] [IDEMPOTENCIA] Replay NO incrementa version_caja\n[PASS] [IDEMPOTENCIA] Replay NO invalida el arqueo vigente\n[PASS] [IDEMPOTENCIA] Misma referencia con distinto payload devuelve 409\n[PASS] [IDEMPOTENCIA] Código IDEMPOTENCY_PAYLOAD_MISMATCH\n[PASS] [IDEMPOTENCIA] Nueva sesión abierta tras cierre con 50.00\n[PASS] [IDEMPOTENCIA] Replay posterior al cierre y nueva apertura devuelve 200\n[PASS] [IDEMPOTENCIA] Replay devuelve session_id de la sesión original\n[PASS] [IDEMPOTENCIA] Replay NO altera el saldo de la nueva sesión abierta\n[PASS] [CONSERVACION] Las 250 ventas históricas conservan id_sesion_caja = NULL\n[PASS] [CONSERVACION] Tabla venta conserva conteo original (250)\n[PASS] [CONSERVACION] Tabla compra conserva conteo original (80)\n[PASS] [CONSERVACION] Tabla producto conserva conteo original (108)\n[PASS] [CONSERVACION] Tabla kardex conserva conteo original (470)\n\n=== RESUMEN PASO 8 ===\n  - PRE             : 3 passed, 0 failed\n  - SEGURIDAD       : 30 passed, 0 failed\n  - CONSULTAS       : 30 passed, 0 failed\n  - MOVIMIENTOS     : 41 passed, 0 failed\n  - ARQUEOS         : 2 passed, 0 failed\n  - RETIRO_OMITIDO  : 12 passed, 0 failed\n  - CORRECCIONES    : 20 passed, 0 failed\n  - CONCURRENCIA    : 8 passed, 0 failed\n  - IDEMPOTENCIA    : 11 passed, 0 failed\n  - CONSERVACION    : 5 passed, 0 failed\nTOTAL: 162 / 162 aserciones superadas.\n"
+    },
+    {
+      "file": "tests/sprint2/fase4_ventas_kardex_test.php",
+      "exitCode": 0,
+      "result": "do_kardex=4)\r\n[PASS] F4-VTA-08: Atomicidad y Rollback completo: fallo inducido revierte venta, kardex, stock y correlativo sin efectos residuales (fallo_capturado=SI, stock_intacto=SI, serie_intacta=SI)\r\n[PASS] F4-VTA-09: Idempotencia de Venta: reintento devuelve respuesta idéntica sin doble descuento; payload alterado rechaza 409 IDEMPOTENCY_PAYLOAD_MISMATCH (id_v1=380, id_v2=380, stock_post1=13, stock_post2=13, mismatch=IDEMPOTENCY_PAYLOAD_MISMATCH)\r\n[PASS] F4-VTA-10: Seguridad de identidad del responsable: rechaza usuarios inexistentes (403/401) o no autenticados (401) (rechazo_inexistente=SI, rechazo_vacio=SI)\r\n[PASS] F4-VTA-11: Validación comercial: Factura exige obligatoriamente cliente con RUC; rechaza DNI (422) y acepta RUC con serie F001 (rechazo_sin_ruc=SI, factura_ok_id=381, serie=F001)\r\n[PASS] F4-VTA-12: Anulación de Venta: restituye existencias mediante ANULACION_VENTA (INCREMENTO), marca venta anulada y previene doble anulación (stock_tras_venta=7, stock_restituido=10, kardex_sentido=INCREMENTO, reanulacion_rechazada=SI)\r\n[PASS] F4-CLEAN-01: Conservación de registros históricos en base aislada tras pruebas de venta y Kardex (hist_ventas=250/250, kardex=470->481)\r\n[PASS] F4-ISO-01: Aislamiento verificado: Base principal amazon_market no sufrió modificaciones (tablas=32, productos=108, ventas=250, compras=80, kardex=470)\r\n\r\n=== RESUMEN FASE 4: 14 PASS / 0 FAIL ===\r\n"
+    },
+    {
+      "file": "tests/sprint3/paso7_apertura_caja_test.php",
+      "exitCode": 0,
+      "result": "zado 190.50\n[PASS] [V] Válido 190.50 str -> céntimos 19050\n[PASS] [V] Válido 190.50 str -> normalizado 190.50\n[PASS] [V] Válido 99999999.99 num -> céntimos 9999999999\n[PASS] [V] Válido 99999999.99 num -> normalizado 99999999.99\n[PASS] [V] Válido 99999999.99 str -> céntimos 9999999999\n[PASS] [V] Válido 99999999.99 str -> normalizado 99999999.99\n[PASS] [V] Inválido directo 1.00000000001 float -> INVALID_AMOUNT\n[PASS] [V] Inválido directo 0.00000000001 float -> INVALID_AMOUNT\n[PASS] [V] Inválido directo 1.0000000000000000001 -> INVALID_AMOUNT\n[PASS] [V] Inválido directo 1.001 float -> INVALID_AMOUNT\n[PASS] [V] Inválido directo -0.01 float -> INVALID_AMOUNT\n[PASS] [V] Inválido directo 100000000.00 str -> AMOUNT_OUT_OF_RANGE\n[PASS] [V] Extractor ignora cash_counted en objeto anidado, cadena y arreglo (count=1)\n[PASS] [V] Extractor devuelve literal raíz 15.25\n[PASS] [V] Extractor detecta duplicado literal + escape Unicode (count=2)\n[PASS] [V] Extractor anula number_literal ante duplicado\n\n=== RESUMEN PASO 7 ===\nCategoría PRE: 6 superadas, 0 fallidas\nCategoría A: 24 superadas, 0 fallidas\nCategoría B: 16 superadas, 0 fallidas\nCategoría C: 85 superadas, 0 fallidas\nCategoría D: 8 superadas, 0 fallidas\nCategoría E: 30 superadas, 0 fallidas\nCategoría F: 7 superadas, 0 fallidas\nCategoría G: 8 superadas, 0 fallidas\nCategoría V: 30 superadas, 0 fallidas\nTOTAL: 214 / 214 aserciones superadas.\n"
+    },
+    {
+      "file": "tests/sprint2/fase4_ventas_kardex_test.php",
+      "exitCode": 0,
+      "result": "do_kardex=4)\r\n[PASS] F4-VTA-08: Atomicidad y Rollback completo: fallo inducido revierte venta, kardex, stock y correlativo sin efectos residuales (fallo_capturado=SI, stock_intacto=SI, serie_intacta=SI)\r\n[PASS] F4-VTA-09: Idempotencia de Venta: reintento devuelve respuesta idéntica sin doble descuento; payload alterado rechaza 409 IDEMPOTENCY_PAYLOAD_MISMATCH (id_v1=380, id_v2=380, stock_post1=13, stock_post2=13, mismatch=IDEMPOTENCY_PAYLOAD_MISMATCH)\r\n[PASS] F4-VTA-10: Seguridad de identidad del responsable: rechaza usuarios inexistentes (403/401) o no autenticados (401) (rechazo_inexistente=SI, rechazo_vacio=SI)\r\n[PASS] F4-VTA-11: Validación comercial: Factura exige obligatoriamente cliente con RUC; rechaza DNI (422) y acepta RUC con serie F001 (rechazo_sin_ruc=SI, factura_ok_id=381, serie=F001)\r\n[PASS] F4-VTA-12: Anulación de Venta: restituye existencias mediante ANULACION_VENTA (INCREMENTO), marca venta anulada y previene doble anulación (stock_tras_venta=7, stock_restituido=10, kardex_sentido=INCREMENTO, reanulacion_rechazada=SI)\r\n[PASS] F4-CLEAN-01: Conservación de registros históricos en base aislada tras pruebas de venta y Kardex (hist_ventas=250/250, kardex=470->481)\r\n[PASS] F4-ISO-01: Aislamiento verificado: Base principal amazon_market no sufrió modificaciones (tablas=32, productos=108, ventas=250, compras=80, kardex=470)\r\n\r\n=== RESUMEN FASE 4: 14 PASS / 0 FAIL ===\r\n"
+    },
+    {
+      "file": "tests/sprint2/fase8_pdf_test.php",
+      "exitCode": 0,
+      "result": "rga Kardex entrega PDF binario\r\n[PASS] Kardex incluye encabezado, período y resumen ejecutivo antes del detalle\r\n[PASS] La fecha de generación PDF usa el reloj de la base de datos\r\n[PASS] Kardex detalla Compra, Venta, Bajas, Ajustes y auditoría de lote/responsable\r\n[PASS] Kardex PDF conserva la instantánea frente a un movimiento posterior\r\n[PASS] PDF incorpora nombre de archivo sin descarga pública en caché\r\n[PASS] La descarga PDF de inventario rechaza al rol Vendedor\r\n[PASS] La descarga PDF rechaza la referencia de otro Administrador\r\n[PASS] Variaciones entrega PDF y respeta la instantánea\r\n[PASS] Resumen de Variaciones precede detalle e incluye los cuatro tipos y sentido aplicado\r\n[PASS] Detalle de Variaciones conserva responsable, lote y justificación\r\n[PASS] Variaciones PDF conserva la instantánea frente a un movimiento posterior\r\n[PASS] Exportación sin referencia se rechaza con 422\r\n[PASS] Alterar un filtro con referencia produce 409 JSON\r\n[PASS] Referencia vencida produce 410 JSON\r\n[PASS] Kardex individual sin movimientos sí se exporta con saldo inicial y cierre iguales\r\n[PASS] Kardex general sin resultados devuelve 422 EMPTY_EXPORT_NOT_ALLOWED\r\n[PASS] Variaciones sin resultados devuelve 422 EMPTY_EXPORT_NOT_ALLOWED\r\n[PASS] Tipo de reporte no permitido devuelve error JSON\r\n[PASS] Los reportes PDF existentes conservan la descarga A4 vertical\r\nFase 8 PDF: 21 PASS / 0 FAIL\r\n"
+    },
+    {
+      "file": "tests/sprint2/regresion_http_test.php",
+      "exitCode": 0,
+      "result": "[PASS] API exige sesión (401 JSON)\r\n[PASS] Productos responde JSON real en la base de pruebas\r\n[PASS] Vendedor no puede consultar Variaciones\r\n[PASS] Router no expone .env\r\n[PASS] Router no ejecuta las suites por HTTP\r\n[PASS] Compra sin referencia rechazada con 422\r\n[PASS] Compra confirmada (201)\r\n[PASS] Reintento compra responde 200 sin duplicar entrada\r\n[PASS] Venta sin referencia rechazada con 422\r\n[PASS] Venta real descuenta 2 unidades\r\n[PASS] Reintento venta no duplica salida ni comprobante\r\n[PASS] Corrección posterior a venta deja saldo 8\r\n[PASS] Reintento corrección no altera saldo ni versiones\r\n[PASS] Detalles anteriores siguen conservados\r\n[PASS] Kardex HTTP cuadra con las operaciones reales\r\n[PASS] Variaciones devuelve 422 JSON con fechas vacías\r\n[PASS] Selector de Variaciones TODOS conectado al backend\r\n[PASS] Selector de Variaciones INCREMENTO conectado al backend\r\n[PASS] Selector de Variaciones DISMINUCION conectado al backend\r\n[PASS] Anulación no permite saldo negativo\r\n[PASS] Anulación con existencias suficientes se guarda\r\n[PASS] Reintento anulación no vuelve a retirar unidades\r\nRegresión HTTP: 22 PASS / 0 FAIL\r\n"
+    },
+    {
+      "file": "tests/sprint3/paso6_turnos_programacion_test.php",
+      "exitCode": 0,
+      "result": "K correctamente\n  [PASS] [F] F-02: Regresión GET /api/productos responde 200 OK correctamente\n  [PASS] [F] F-03: Regresión GET /api/reportes/kardex responde 200 OK correctamente\n  [PASS] [F] F-03b: Regresión GET /api/ventas responde 200 OK correctamente\n  [PASS] [F] F-03c: Regresión GET /api/compras responde 200 OK correctamente\n  [PASS] [F] F-04: Los datos comerciales históricos en la base de pruebas (productos=108, stock=2497, ventas=250, compras=80, kardex=470, op_inv=75) permanecen intactos\n  [PASS] [F] F-05: La base principal amazon_market permanece 100% intacta (32 tablas, 5 triggers, 6 usuarios, 250 ventas, stock 2497, 405 idempotencia)\n\n================================================================================\n RESUMEN DE RESULTADOS POR CATEGORÍA\n================================================================================\n  Categoría PRE  :   4 superadas |   0 fallidas\n  Categoría A    :  39 superadas |   0 fallidas\n  Categoría B    :  24 superadas |   0 fallidas\n  Categoría C    :  20 superadas |   0 fallidas\n  Categoría D    :  13 superadas |   0 fallidas\n  Categoría E    :   9 superadas |   0 fallidas\n  Categoría F    :   7 superadas |   0 fallidas\n--------------------------------------------------------------------------------\n  TOTAL          : 116 / 116 aserciones superadas\n================================================================================\n"
+    },
+    {
+      "file": "tests/sprint3/paso11_cierre_autorizacion_test.php",
+      "exitCode": 0,
+      "result": " arqueo -> 409 CASH_SESSION_CLOSED\n[PASS] [Concurrencia] 5J Orden 2 esperó contención real en MariaDB\n[PASS] [Concurrencia] 5J Orden 2 (Arqueo->Cierre): nuevo arqueo -> 201\n[PASS] [Concurrencia] 5J Orden 2 (Arqueo->Cierre): cierre con arqueo reemplazado -> 409 ARQUEO_STALE\n[PASS] [Concurrencia] 5K Orden 1 (Cierre->Venta): cierre -> 200\n[PASS] [Concurrencia] 5K Orden 1 (Cierre->Venta): venta -> 409 CASH_SESSION_CLOSED\n[PASS] [Concurrencia] 5K Orden 2 (Venta->Cierre): venta -> 201\n[PASS] [Concurrencia] 5K Orden 2 (Venta->Cierre): cierre -> 409 ARQUEO_STALE\n[PASS] [Concurrencia] 5L Orden 1 (Cierre->Corrección): cierre -> 200\n[PASS] [Concurrencia] 5L Orden 1 (Cierre->Corrección): corrección -> 409 CASH_SESSION_CLOSED\n[PASS] [Concurrencia] 5L Orden 2 (Corrección->Cierre): corrección -> 201\n[PASS] [Concurrencia] 5L Orden 2 (Corrección->Cierre): cierre -> 409 ARQUEO_STALE\n[PASS] [Concurrencia] 5L Orden 2: cierre posterior con arqueo vigente -> 200\n[PASS] [Concurrencia] 5L Orden 2: guardia liberada tras cierre\n[PASS] [Concurrencia] 5L Orden 2: guardia apunta al último cierre\n[PASS] [Concurrencia] SHOW ENGINE INNODB STATUS sin nuevo deadlock tras barreras 5I-5L\n\n=== RESUMEN PASO 11 ===\n  PRE: 7/7\n  Seguridad: 25/25\n  Recuperación: 21/21\n  Arqueo: 9/9\n  Horario: 14/14\n  Persistencia: 27/27\n  Rendimiento: 1/1\n  Inmutabilidad: 3/3\n  Concurrencia: 53/53\nTOTAL: 160/160 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso13_cliente_test.js",
+      "exitCode": 0,
+      "result": "PASS: headers DELETE, CSRF, escrituras independientes, persistencia tras recarga, separación por usuario y carreras GET.\n"
+    },
+    {
+      "file": "tests/sprint3/paso13_adaptadores_test.js",
+      "exitCode": 0,
+      "result": "PASS: 14 comprobaciones de adaptadores (null/cero, errores, reintentos, vigencia, permisos).\n"
+    },
+    {
+      "file": "tests/sprint3/paso14_descarga_test.js",
+      "exitCode": 0,
+      "result": "PASS descarga PDF válida y rechazo de archivo inválido\n"
+    },
+    {
+      "file": "tests/sprint3/paso14_generadores_test.php",
+      "exitCode": 0,
+      "result": "PASS: XLSX abre como contenedor OpenXML\nPASS: XLSX contiene tres hojas\nPASS: XLSX conserva nombres y orden de hojas\nPASS: Resumen se genera sin controles de inmovilización\nPASS: Cierres congela B2 y habilita filtros\nPASS: Movimientos congela A2 y habilita filtros\nPASS: XLSX incluye todos los movimientos, superando 1000 filas\nPASS: XLSX no convierte texto de usuarios en fórmulas\nPASS: XLSX mantiene el impacto cero del retiro omitido\nPASS: Resumen incluye total de ventas\nPASS: Retiro omitido identifica quién recibió\nPASS: PDF empieza con la firma esperada\nPASS: PDF crea páginas dinámicas para el conjunto completo\nPASS: PDF incluye cierres y movimientos vinculados\nPASS: PDF conserva null en diferencia de apertura\n"
+    },
+    {
+      "file": "tests/sprint3/paso12_consultas_reportes_test.php",
+      "exitCode": 0,
+      "result": "PASS] [EP-24B] Detalle cierre 1 -> 200\n[PASS] [EP-24B] Detalle primer cierre opening_difference=null\n[PASS] [EP-24B] closure.reference_schedule es objeto\n[PASS] [EP-24B] Default page_size=20\n[PASS] [EP-24B] total_movements=0\n[PASS] [EP-24B] Detalle cierre 2 -> 200\n[PASS] [EP-24B] mov.session_id consistente\n[PASS] [EP-24B] mov.reason consistente\n[PASS] [EP-24B] mov.status=Corregido consistente\n[PASS] [EP-24B] mov.current_amount=35.0 consistente\n[PASS] [EP-24B] egreso a cero status=Corregido consistente\n[PASS] [EP-24B] egreso a cero current_amount=0.0 consistente\n[PASS] [EP-24B] inyección status=Confirmado\n[PASS] [EP-24B] inyección administrator_id consistente\n[PASS] [EP-24B] retiro omitido declared=true consistente\n[PASS] [EP-24B] retiro omitido confirmed=true consistente\n[PASS] [CONSERVACION] Monto original inmutable en BD\n[PASS] [SETUP] Apertura sesión 3 HTTP 201\n[PASS] [EP-24B] Sesión abierta en EP-24B -> 409\n[PASS] [EP-24B] code=CASH_SESSION_NOT_CLOSED\n\n=== RESUMEN PASO 12 ===\n - AUTH      : 4 PASS, 0 FAIL\n - RBAC      : 12 PASS, 0 FAIL\n - EP-22     : 43 PASS, 0 FAIL\n - SETUP     : 17 PASS, 0 FAIL\n - VERSION   : 9 PASS, 0 FAIL\n - MOV       : 9 PASS, 0 FAIL\n - EP-23A    : 6 PASS, 0 FAIL\n - EP-23B    : 9 PASS, 0 FAIL\n - EP-23C    : 37 PASS, 0 FAIL\n - EP-24A    : 25 PASS, 0 FAIL\n - EP-24B    : 18 PASS, 0 FAIL\n - CONSERVACION: 1 PASS, 0 FAIL\nTOTAL: 190/190 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso12_consultas_reportes_test.php",
+      "exitCode": 0,
+      "result": "PASS] [EP-24B] Detalle cierre 1 -> 200\n[PASS] [EP-24B] Detalle primer cierre opening_difference=null\n[PASS] [EP-24B] closure.reference_schedule es objeto\n[PASS] [EP-24B] Default page_size=20\n[PASS] [EP-24B] total_movements=0\n[PASS] [EP-24B] Detalle cierre 2 -> 200\n[PASS] [EP-24B] mov.session_id consistente\n[PASS] [EP-24B] mov.reason consistente\n[PASS] [EP-24B] mov.status=Corregido consistente\n[PASS] [EP-24B] mov.current_amount=35.0 consistente\n[PASS] [EP-24B] egreso a cero status=Corregido consistente\n[PASS] [EP-24B] egreso a cero current_amount=0.0 consistente\n[PASS] [EP-24B] inyección status=Confirmado\n[PASS] [EP-24B] inyección administrator_id consistente\n[PASS] [EP-24B] retiro omitido declared=true consistente\n[PASS] [EP-24B] retiro omitido confirmed=true consistente\n[PASS] [CONSERVACION] Monto original inmutable en BD\n[PASS] [SETUP] Apertura sesión 3 HTTP 201\n[PASS] [EP-24B] Sesión abierta en EP-24B -> 409\n[PASS] [EP-24B] code=CASH_SESSION_NOT_CLOSED\n\n=== RESUMEN PASO 12 ===\n - AUTH      : 4 PASS, 0 FAIL\n - RBAC      : 12 PASS, 0 FAIL\n - EP-22     : 43 PASS, 0 FAIL\n - SETUP     : 17 PASS, 0 FAIL\n - VERSION   : 9 PASS, 0 FAIL\n - MOV       : 9 PASS, 0 FAIL\n - EP-23A    : 6 PASS, 0 FAIL\n - EP-23B    : 9 PASS, 0 FAIL\n - EP-23C    : 37 PASS, 0 FAIL\n - EP-24A    : 25 PASS, 0 FAIL\n - EP-24B    : 18 PASS, 0 FAIL\n - CONSERVACION: 1 PASS, 0 FAIL\nTOTAL: 190/190 aserciones correctas.\n"
+    },
+    {
+      "file": "tests/sprint3/paso14_exportaciones_test.php",
+      "exitCode": 0,
+      "result": "etirado reportes.cierres_caja excel\r\nPASS botón acorde a permisos reportes.cierres_caja\r\nPASS permiso existente reportes.ver\r\nPASS permiso retirado reportes.ver pdf\r\nPASS permiso retirado reportes.ver excel\r\nPASS botón acorde a permisos reportes.ver\r\nPASS admin inactivo pdf\r\nPASS admin inactivo excel\r\nPASS restaurar login\r\nPASS rechazar sesión abierta pdf\r\nPASS rechazar sesión abierta excel\r\nPASS snapshot inmutable tras retiro declarado posteriormente\r\nPASS nueva captura incorpora vínculo posterior sin alterar cierre\r\nPASS fallo controlado JSON pdf\r\nPASS sin trazas pdf\r\nPASS fallo controlado JSON excel\r\nPASS sin trazas excel\r\nPASS reintento tras fallo pdf\r\nPASS reintento tras fallo excel\r\nPASS rango invertido pdf\r\nPASS fecha imposible pdf\r\nPASS snapshot no entero pdf\r\nPASS alias contradictorios pdf\r\nPASS rango invertido excel\r\nPASS fecha imposible excel\r\nPASS snapshot no entero excel\r\nPASS alias contradictorios excel\r\nPASS snapshot antiguo sin movements pdf\r\nPASS snapshot antiguo sin movements excel\r\nPASS snapshot antiguo sin linked_omitted_withdrawals pdf\r\nPASS snapshot antiguo sin linked_omitted_withdrawals excel\r\nPASS Excel vacío solo encabezado y totales\r\nPASS snapshot vencido pdf\r\nPASS snapshot vencido excel\r\nPASS snapshot vencido conserva registro\r\nARTIFACTS C:/Users/LOQ/AppData/Local/Temp/am14final_1794620538378/p14_acceptance_9399ee8f7a10\r\nTOTAL PASO14 88 PASS, 0 FAIL\r\n"
+    },
+    {
+      "file": "tests/sprint3/paso14_generadores_test.php",
+      "exitCode": 0,
+      "result": "PASS: XLSX abre como contenedor OpenXML\nPASS: XLSX contiene tres hojas\nPASS: XLSX conserva nombres y orden de hojas\nPASS: Resumen se genera sin controles de inmovilización\nPASS: Cierres congela B2 y habilita filtros\nPASS: Movimientos congela A2 y habilita filtros\nPASS: XLSX incluye todos los movimientos, superando 1000 filas\nPASS: XLSX no convierte texto de usuarios en fórmulas\nPASS: XLSX mantiene el impacto cero del retiro omitido\nPASS: Resumen incluye total de ventas\nPASS: Retiro omitido identifica quién recibió\nPASS: PDF empieza con la firma esperada\nPASS: PDF crea páginas dinámicas para el conjunto completo\nPASS: PDF incluye cierres y movimientos vinculados\nPASS: PDF conserva null en diferencia de apertura\n"
+    }
+  ],
+  "lint": [
+    {
+      "file": "Controllers/API/ReporteApiController.php",
+      "code": 0
+    },
+    {
+      "file": "Libraries/Middleware/RBACMiddleware.php",
+      "code": 0
+    },
+    {
+      "file": "Libraries/PDF/ReporteCierresCajaPDF.php",
+      "code": 0
+    },
+    {
+      "file": "Models/CajaModel.php",
+      "code": 0
+    },
+    {
+      "file": "Services/CajaService.php",
+      "code": 0
+    },
+    {
+      "file": "Services/ExcelService.php",
+      "code": 0
+    },
+    {
+      "file": "Views/Reporte/cierresCaja.php",
+      "code": 0
+    },
+    {
+      "file": "Views/Reporte/detalleCierreCaja.php",
+      "code": 0
+    },
+    {
+      "file": "tests/sprint3/paso11_cierre_autorizacion_test.php",
+      "code": 0
+    },
+    {
+      "file": "tests/sprint3/paso12_consultas_reportes_test.php",
+      "code": 0
+    },
+    {
+      "file": "tests/sprint3/paso14_generadores_test.php",
+      "code": 0
+    },
+    {
+      "file": "tests/sprint3/paso6_turnos_programacion_test.php",
+      "code": 0
+    },
+    {
+      "file": "tests/sprint3/paso7_apertura_caja_test.php",
+      "code": 0
+    },
+    {
+      "file": "tests/sprint3/paso14_exportaciones_test.php",
+      "code": 0
+    }
+  ],
+  "conservation": {
+    "tablas_comparadas": 32,
+    "tablas_originales_identicas": 32,
+    "fallos": [],
+    "original": {
+      "ventas": 250,
+      "compras": 80,
+      "productos": 108,
+      "stock": "2497",
+      "kardex": 470
+    }
+  },
+  "envUnchanged": true,
+  "evidenceDirectory": "C:/Users/LOQ/AppData/Local/Temp/am14final_1794620538378"
+}

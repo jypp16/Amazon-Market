@@ -136,6 +136,15 @@ class RBACMiddleware extends Middleware {
         ], true);
     }
 
+    /** Consulta asignación efectiva, sin bypass; usada por las exportaciones de caja. */
+    public static function tienePermisoAsignado(int $rol, string $slug): bool {
+        if ($rol <= 0 || (self::esSlugExclusivoAdminSprint2($slug) && $rol !== 1)) return false;
+        $model = new PermisoModel();
+        $permiso = $model->where(['slug'=>$slug, 'estado = 1'])->first();
+        return $permiso !== null && $permiso !== false
+            && $model->countPermisoByRol($rol, (int)$permiso['id_permiso']) > 0;
+    }
+
     public static function tienePermiso(int $rol, string $slug): bool {
         if ($rol <= 0) {
             return false;

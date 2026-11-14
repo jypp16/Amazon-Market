@@ -42,64 +42,30 @@ class ReporteCierresCajaPDF extends ReportPDF
         }
         $this->Ln(3);
 
-        $this->seccion('Resumen general');
-        $this->writeReportTable(
-            ['Cierres', 'Con diferencia', 'Esperado', 'Contado', 'Dif. cierre neta', 'Dif. apertura neta'],
-            [[
-                (string)($totales['total_closures'] ?? 0),
-                (string)($totales['closures_with_difference'] ?? 0),
-                $this->dinero($totales['expected_cash_total'] ?? 0),
-                $this->dinero($totales['counted_cash_total'] ?? 0),
-                $this->dineroFirmado($totales['closing_difference_net'] ?? 0),
-                $this->dineroFirmado($totales['opening_difference_net'] ?? 0),
-            ]],
-            [24, 27, 31, 31, 35, 32],
-            ['C', 'C', 'R', 'R', 'R', 'R']
-        );
-        $this->Ln(2);
-        $this->writeReportTable(
-            ['Faltantes', 'Sobrantes', 'Efectivo', 'Tarjeta', 'Yape / Plin', 'Ventas totales'],
-            [[
-                $this->dinero($totales['shortages_total'] ?? 0),
-                $this->dinero($totales['surpluses_total'] ?? 0),
-                $this->dinero($totales['cash_sales_total'] ?? 0),
-                $this->dinero($totales['card_sales_total'] ?? 0),
-                $this->dinero($totales['yape_plin_sales_total'] ?? 0),
-                $this->dinero(
-                    (float)($totales['cash_sales_total'] ?? 0)
-                    + (float)($totales['card_sales_total'] ?? 0)
-                    + (float)($totales['yape_plin_sales_total'] ?? 0)
-                ),
-            ]],
-            [30, 30, 30, 30, 30, 30],
-            ['R', 'R', 'R', 'R', 'R', 'R']
-        );
-        $this->Ln(2);
-        $this->writeReportTable(
-            ['Fondo inicial', 'Ingresos netos', 'Egresos netos', 'Aperturas con diferencia', '', ''],
-            [[
-                $this->dinero($totales['opening_fund_total'] ?? 0),
-                $this->dinero($totales['income_total'] ?? 0),
-                $this->dinero($totales['expenses_total'] ?? 0),
-                (string)($totales['opening_difference_applicable_count'] ?? 0),
-                '',
-                '',
-            ]],
-            [36, 36, 36, 36, 18, 18],
-            ['R', 'R', 'R', 'C', 'C', 'C']
-        );
-        $this->writeWrappedBlock(
-            'Interpretación: la diferencia de cierre es contado menos esperado. La diferencia de apertura se presenta aparte; cuando no existe cierre anterior, no aplica. Las correcciones se muestran con su vínculo y los retiros omitidos con impacto cero cuando ya quedaron reflejados en la apertura.',
-            9
-        );
-
+        $this->seccion('RESUMEN');
+        $this->tarjetas([
+            ['Cierres de caja', (string)($totales['total_closures'] ?? 0)],
+            ['Cierres con diferencia', (string)($totales['closures_with_difference'] ?? 0)],
+            ['Diferencia neta de cierre', $this->dineroFirmado($totales['closing_difference_net'] ?? 0)],
+            ['Diferencia de apertura', $this->dineroFirmado($totales['opening_difference_net'] ?? 0)],
+        ]);
+        $this->writeWrappedBlock('Faltantes: ' . $this->dinero($totales['shortages_total'] ?? 0)
+            . ' | Sobrantes: ' . $this->dinero($totales['surpluses_total'] ?? 0), 8);
+        $this->seccion('VENTAS POR MEDIO DE PAGO');
+        $this->tarjetas([
+            ['Efectivo', $this->dinero($totales['cash_sales_total'] ?? 0)],
+            ['Tarjeta', $this->dinero($totales['card_sales_total'] ?? 0)],
+            ['Yape / Plin', $this->dinero($totales['yape_plin_sales_total'] ?? 0)],
+            ['Total ventas', $this->dinero((float)($totales['cash_sales_total'] ?? 0) + (float)($totales['card_sales_total'] ?? 0) + (float)($totales['yape_plin_sales_total'] ?? 0))],
+        ]);
+        $this->seccion('LISTADO DE CIERRES CON DETALLE');
         if ($cierres === []) {
             $this->seccion('Detalle de cierres');
             $this->writeWrappedBlock('No hay cierres para el período y los filtros seleccionados.', 10);
         }
 
         foreach ($cierres as $cierre) {
-            $this->AddPage('P', 'A4');
+            if ($this->GetY() > 190) $this->AddPage('P', 'A4');
             $this->seccion('Cierre ' . (string)($cierre['code'] ?? ('#' . ($cierre['session_id'] ?? ''))));
             $this->writeReportTable(
                 ['Fecha / hora', 'Caja', 'Turno', 'Vendedor', 'Esperado', 'Contado', 'Diferencia', 'Estado'],
@@ -138,12 +104,17 @@ class ReporteCierresCajaPDF extends ReportPDF
                     $this->dinero($cierre['income'] ?? 0), $this->dinero($cierre['expenses'] ?? 0),
                     $this->dinero($cierre['expected'] ?? 0), $this->dinero($cierre['counted'] ?? 0),
                     $this->dineroFirmado($cierre['closing_difference'] ?? 0),
-                    $this->acortar($cierre['observation'] ?? '', 44),
+                    (string)($cierre['observation'] ?? ''),
                 ]],
                 [28, 28, 28, 28, 28, 40],
                 ['R', 'R', 'R', 'R', 'R', 'L']
             );
 
+            foreach ($cierre['linked_omitted_withdrawals'] ?? [] as $linked) {
+                $this->writeWrappedBlock('Registro vinculado: retiro omitido de ' . $this->dinero($linked['amount'])
+                    . ' registrado en el turno ' . $linked['registered_turn'] . ' (' . $this->fechaHora($linked['recorded_at'])
+                    . '), sesión #' . $linked['registered_session_id'] . '. El cierre original no se modifica.', 8);
+            }
             $movimientos = $cierre['movements'] ?? [];
             $this->seccion('Movimientos manuales y correcciones (' . count($movimientos) . ')');
             if ($movimientos === []) {
@@ -156,6 +127,15 @@ class ReporteCierresCajaPDF extends ReportPDF
             }
         }
 
+        // Mantener totales y su interpretación juntos; evitar una última página con una sola línea.
+        if ($this->GetY() + 65 > $this->GetPageHeight() - 23) $this->AddPage('P', 'A4');
+        $this->seccion('TOTALES GENERALES');
+        foreach (['opening_fund_total'=>'Fondo inicial', 'expected_cash_total'=>'Efectivo esperado',
+            'counted_cash_total'=>'Efectivo contado', 'closing_difference_net'=>'Diferencia de cierre',
+            'opening_difference_net'=>'Diferencia de apertura'] as $key=>$label) {
+            $this->meta($label, $this->dineroFirmado($totales[$key] ?? 0));
+        }
+        $this->writeWrappedBlock('Diferencia de cierre = contado menos esperado. Efectivo esperado = fondo inicial + ventas en efectivo + ingresos - egresos. La diferencia de apertura se muestra aparte. Los retiros omitidos vinculados no modifican el cierre original.', 8);
         return $this->Output('S');
     }
 
@@ -207,34 +187,44 @@ class ReporteCierresCajaPDF extends ReportPDF
         $this->Cell(0, 7, $titulo, 0, 1, 'L');
     }
 
+    private function tarjetas(array $cards): void
+    {
+        $y=$this->GetY();
+        foreach ($cards as $i=>$card) {
+            $x=15+$i*46;
+            $this->SetFillColor(237,244,247); $this->Rect($x,$y,43,20,'F');
+            $this->SetXY($x+2,$y+2);$this->SetFont('Helvetica','',7);$this->SetTextColor(...$this->gris);
+            $this->Cell(39,5,$card[0]);
+            $this->SetXY($x+2,$y+9);$this->SetFont('Helvetica','B',11);$this->SetTextColor(...$this->oscuro);
+            $this->Cell(39,7,$card[1]);
+        }
+        $this->SetXY(15,$y+23);
+    }
+
     private function writeReportTable(array $headers, array $rows, array $widths, array $aligns): void
     {
-        $this->SetFont('Helvetica', 'B', 7);
-        $this->SetFillColor(...$this->oscuro);
-        $this->SetTextColor(255, 255, 255);
-        foreach ($headers as $index => $header) {
-            $this->Cell($widths[$index], 7, $header, 1, 0, 'C', true);
-        }
-        $this->Ln();
-        foreach ($rows as $row) {
-            if ($this->GetY() > $this->GetPageHeight() - 30) {
-                $this->AddPage('P', 'A4');
-                $this->SetFont('Helvetica', 'B', 7);
-                $this->SetFillColor(...$this->oscuro);
-                $this->SetTextColor(255, 255, 255);
-                foreach ($headers as $index => $header) {
-                    $this->Cell($widths[$index], 7, $header, 1, 0, 'C', true);
-                }
-                $this->Ln();
+        $header=function() use ($headers,$widths) {
+            $this->SetFont('Helvetica','B',7);$this->SetFillColor(...$this->claro);$this->SetTextColor(...$this->oscuro);
+            foreach($headers as $i=>$h) $this->Cell($widths[$i],7,$h,0,0,'C',true);
+            if ($headers !== []) $this->Ln();
+        };
+        $header();
+        foreach($rows as $row) {
+            $this->SetFont('Helvetica','',7);
+            $wrapped=[];$height=0;
+            foreach($row as $i=>$v) {
+                $wrapped[$i]=$this->wrap((string)$v,$widths[$i]-3);
+                $height=max($height,count($wrapped[$i])*4+2);
             }
-            $this->SetFont('Helvetica', '', 7);
-            $this->SetTextColor(...$this->oscuro);
-            $this->SetFillColor(255, 255, 255);
-            foreach ($row as $index => $value) {
-                $txt = $this->acortar((string)$value, max(12, (int)($widths[$index] * 1.6)));
-                $this->Cell($widths[$index], 7, $txt, 1, 0, $aligns[$index] ?? 'L', true);
+            if($this->GetY()+$height>$this->GetPageHeight()-23) {$this->AddPage();$header();}
+            $y=$this->GetY();$x=15;
+            $this->SetFont('Helvetica','',7);$this->SetTextColor(...$this->oscuro);
+            foreach($wrapped as $i=>$lines) {
+                $this->SetXY($x,$y+1);
+                foreach($lines as $line){$this->SetX($x);$this->Cell($widths[$i],4,$line,0,1,$aligns[$i]??'L');}
+                $x+=$widths[$i];
             }
-            $this->Ln();
+            $this->SetXY(15,$y+$height);
         }
     }
 
@@ -261,21 +251,8 @@ class ReporteCierresCajaPDF extends ReportPDF
             $tipo .= ' #' . (string)$m['original_movement_id'];
         }
         $impacto = (float)($m['impact'] ?? 0);
-        $values = [
-            $hora,
-            $tipo,
-            $this->dinero($m['amount'] ?? 0),
-            $this->dineroFirmado($impacto),
-            (string)($m['responsible'] ?? ''),
-            (string)($m['administrator_name'] ?? '—'),
-        ];
-        $widths = [20, 32, 25, 25, 39, 39];
-        $this->SetFont('Helvetica', '', 7);
-        $this->SetTextColor(...$this->oscuro);
-        foreach ($values as $i => $value) {
-            $this->Cell($widths[$i], 7, $this->acortar($value, 30), 1, 0, $i < 2 || $i > 3 ? 'L' : 'R');
-        }
-        $this->Ln();
+        $values = [$hora, $tipo, $this->dinero($m['amount'] ?? 0), $this->dineroFirmado($impacto), (string)($m['responsible'] ?? ''), (string)($m['administrator_name'] ?? '—')];
+        $this->writeReportTable([], [$values], [20,32,25,25,39,39], ['L','L','R','R','L','L']);
 
         $detail = (string)($m['reason'] ?? '');
         if (!empty($m['reference']) && $m['reference'] !== $detail) {
@@ -303,15 +280,12 @@ class ReporteCierresCajaPDF extends ReportPDF
         $this->SetTextColor(...$this->oscuro);
         $lineHeight = $compact ? 4 : 5;
         $lines = $this->wrap($text, $this->GetPageWidth() - 30);
-        $needed = count($lines) * $lineHeight + 2;
-        if ($this->GetY() + $needed > $this->GetPageHeight() - 20) {
-            $this->AddPage('P', 'A4');
-            if ($compact) {
-                $this->encabezadoMovimientos();
-            }
-        }
         foreach ($lines as $line) {
-            $this->Cell(0, $lineHeight, $line, 0, 1, 'L');
+            if ($this->GetY()+$lineHeight>$this->GetPageHeight()-23) {
+                $this->AddPage();if($compact)$this->encabezadoMovimientos();
+                $this->SetFont('Helvetica','',$fontSize);$this->SetTextColor(...$this->oscuro);
+            }
+            $this->Cell(0,$lineHeight,$line,0,1,'L');
         }
         if (!$compact) {
             $this->Ln(1);
@@ -323,7 +297,16 @@ class ReporteCierresCajaPDF extends ReportPDF
         $words = preg_split('/\s+/u', trim($text)) ?: [];
         $lines = [];
         $line = '';
-        foreach ($words as $word) {
+        $tokens=[];
+        foreach($words as $word) {
+            $part='';
+            foreach(preg_split('//u',$word,-1,PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+                if($part!=='' && $this->getUtf8StringWidth($part.$char)>$width) {$tokens[]=$part;$part='';}
+                $part.=$char;
+            }
+            if($part!=='')$tokens[]=$part;
+        }
+        foreach ($tokens as $word) {
             $candidate = $line === '' ? $word : $line . ' ' . $word;
             if ($line !== '' && $this->getUtf8StringWidth($candidate) > $width) {
                 $lines[] = $line;
@@ -379,7 +362,7 @@ class ReporteCierresCajaPDF extends ReportPDF
     private function dineroFirmado($value): string
     {
         $number = (float)$value;
-        return ($number > 0 ? '+' : ($number < 0 ? '−' : '')) . $this->dinero(abs($number));
+        return ($number > 0 ? '+' : ($number < 0 ? '-' : '')) . $this->dinero(abs($number));
     }
 
     private function estadoCierre($value): string

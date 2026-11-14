@@ -10,7 +10,7 @@ if (PHP_SAPI !== 'cli') {
 }
 $options = getopt('', ['test-db:']);
 $db = (string)($options['test-db'] ?? '');
-if (!preg_match('/^amazon_market_sprint3_migration_test_[A-Za-z0-9_]+$/D', $db)) {
+if (!preg_match('/^amazon_market_sprint3_(?:migration_test_|deploy_rehearsal_)[A-Za-z0-9_]+$/D', $db)) {
     fwrite(STDERR, "Indique una copia desechable mediante --test-db=amazon_market_sprint3_migration_test_<nombre>.\n");
     exit(2);
 }

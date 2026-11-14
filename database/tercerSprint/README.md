@@ -198,3 +198,8 @@ Para habilitar el registro de movimientos `VENTA_EFECTIVO` vinculados a ventas c
   C:\xampp\php\php.exe database/tercerSprint/tools/ejecutar_ajuste_venta_paso9_sprint3.php <base_ensayo>
   ```
 - **Efecto:** Reemplaza `trg_movimiento_caja_before_insert_integridad` alineando la comprobación de `venta.estado` a `1` (`tinyint`), conservando todas las demás validaciones de `movimiento_caja`. No aplica sobre `amazon_market`.
+
+
+## 9. Despliegue autorizado en XAMPP — Paso 15
+
+El despliegue local ya se realizó sobre `amazon_market`. Véase [DESPLIEGUE_LOCAL.md](DESPLIEGUE_LOCAL.md). El ejecutor autorizado usa **11 (contexto) antes de 10 (paquete 01..09)**; los ejecutores históricos continúan siendo exclusivos de ensayo. No repetir la migración sobre la base completada.

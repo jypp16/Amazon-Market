@@ -6,6 +6,11 @@ Options -MultiViews
 </FilesMatch>
 
 RewriteEngine On
+
+# Solo index.php y los recursos publicos deben ser accesibles por HTTP.
+RewriteRule ^(?:\.git|\.codex|\.agents|\.docs|Config|Libraries|Helpers|Models|Services|Controllers|Views|database|tests|vendor)(?:/|$) - [F,L,NC]
+RewriteRule (?:^|/)[^/]*\.(?:bak|backup|dump|old|orig|jsonl)(?:$|/) - [F,L,NC]
+
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]

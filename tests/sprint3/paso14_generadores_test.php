@@ -44,7 +44,7 @@ for ($i = 1; $i <= 12; $i++) {
             'amount' => $isOmitted ? 35.0 : 10.0,
             'impact' => $isOmitted ? 0.0 : ($type === 'correction' ? -2.0 : 10.0),
             'responsible' => '=Vendedor +@equipo',
-            'administrator_name' => $j % 2 === 0 ? 'Admin de prueba' : null,
+            'administrator_name' => $j === 1 || $j % 2 === 0 ? 'Admin de prueba' : null,
             'origin_session_id' => $isOmitted ? 99 : null,
             'declared_occurred_in_open_origin_session' => $isOmitted,
             'confirmed_reflected_in_opening' => $isOmitted,
@@ -125,13 +125,16 @@ try {
     $summary = $zip->getFromName('xl/worksheets/sheet1.xml');
     $closes = $zip->getFromName('xl/worksheets/sheet2.xml');
     $movementSheet = $zip->getFromName('xl/worksheets/sheet3.xml');
+    $zip->close();
     verificarPaso14(is_string($summary) && str_contains($summary, 'pane') === false, 'Resumen se genera sin controles de inmovilización');
     verificarPaso14(is_string($closes) && str_contains($closes, 'topLeftCell="B2"') && str_contains($closes, '<autoFilter'), 'Cierres congela B2 y habilita filtros');
     verificarPaso14(is_string($movementSheet) && str_contains($movementSheet, 'topLeftCell="A2"') && str_contains($movementSheet, '<autoFilter'), 'Movimientos congela A2 y habilita filtros');
     verificarPaso14(is_string($movementSheet) && substr_count($movementSheet, '<row ') === $movementTotal + 1, 'XLSX incluye todos los movimientos, superando 1000 filas');
     verificarPaso14(is_string($movementSheet) && !str_contains($movementSheet, '<f>'), 'XLSX no convierte texto de usuarios en fórmulas');
     verificarPaso14(is_string($movementSheet) && str_contains($movementSheet, '0.00'), 'XLSX mantiene el impacto cero del retiro omitido');
-    $zip->close();
+    verificarPaso14(str_contains($summary, 'Total ventas'), 'Resumen incluye total de ventas');
+    verificarPaso14(str_contains($movementSheet, 'Recibió'), 'Retiro omitido identifica quién recibió');
+
 
     $pdf = (new ReporteCierresCajaPDF())->generar($report, 'Administrador de prueba');
     file_put_contents($temp . '/reporte.pdf', $pdf);

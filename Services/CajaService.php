@@ -3260,6 +3260,7 @@ class CajaService
                     [$this, 'proyectarMovimientoConsulta'],
                     $this->cajaModel->listarMovimientosSesionCompletos($idSesion)
                 );
+                $snapshotItem['linked_omitted_withdrawals'] = $this->cajaModel->listarRetirosOmitidosVinculados($idSesion);
                 $snapshotItems[] = $snapshotItem;
             }
 
@@ -3358,7 +3359,7 @@ class CajaService
         $closures = [];
         foreach ($itemsRaw as $itemRaw) {
             $projection = json_decode((string)$itemRaw['proyeccion_json'], true);
-            if (!is_array($projection) || !isset($projection['movements']) || !is_array($projection['movements'])) {
+            if (!is_array($projection) || !isset($projection['movements']) || !is_array($projection['movements']) || !isset($projection['linked_omitted_withdrawals'])) {
                 throw new InventarioException(
                     'El snapshot no contiene el detalle de movimientos necesario. Actualice la consulta antes de exportar.',
                     'SNAPSHOT_NOT_FOUND',
@@ -3397,6 +3398,7 @@ class CajaService
                 [$this, 'proyectarMovimientoConsulta'],
                 $this->cajaModel->listarMovimientosSesionCompletos($sessionId)
             );
+            $linked = $this->cajaModel->listarRetirosOmitidosVinculados($sessionId);
             $pdo->commit();
         } catch (\Throwable $error) {
             if ($pdo->inTransaction()) {
@@ -3431,6 +3433,7 @@ class CajaService
             'observation' => $row['observacion_cierre'] !== null ? (string)$row['observacion_cierre'] : null,
             'has_omitted_withdrawals' => count(array_filter($movements, static fn(array $m): bool => ($m['type'] ?? '') === 'omitted_withdrawal')) > 0,
             'movements' => $movements,
+            'linked_omitted_withdrawals' => $linked,
         ];
         $totals = $this->completarTotalesExportacion([$closure], [
             'total_closures' => 1,

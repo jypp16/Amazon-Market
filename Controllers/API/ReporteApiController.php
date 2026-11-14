@@ -22,6 +22,14 @@ class ReporteApiController extends ApiController {
         $tipo = trim((string)($params ?? ''), '/');
         $input = $_GET;
 
+        if (in_array($tipo, ['exportar-pdf', 'exportar-excel'], true) && ($input['tipo'] ?? null) === 'cierres-caja') {
+            if ($tipo === 'exportar-pdf') {
+                try { $this->exportarPdf($input); }
+                catch (InventarioException $error) { $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus()); }
+            } else { $this->exportarExcel($input); }
+            return;
+        }
+
         if ($tipo === 'cierres-caja' || preg_match('#^cierres-caja/([^/]+)$#', $tipo, $matches)) {
             $admin = $this->requireAdminActivo('reportes.cierres_caja');
             try {
@@ -180,8 +188,7 @@ class ReporteApiController extends ApiController {
     private function exportarPdf(array $input): void {
         $tipo = $input['tipo'] ?? '';
         if ($tipo === 'cierres-caja') {
-            $admin = $this->requireAdminActivo('reportes.cierres_caja');
-            $this->requireAdminActivo('reportes.exportar');
+            $admin = $this->requireExportacionCierresCaja();
             try {
                 $datos = (new \Services\CajaService())->reporteCierresCajaParaExportacion($input, (int)$admin['id_usuario']);
                 $datos['administrator'] = (string)$admin['nombre'];
@@ -377,8 +384,7 @@ class ReporteApiController extends ApiController {
     private function exportarExcel(array $input): void {
         $tipo = $input['tipo'] ?? '';
         if ($tipo === 'cierres-caja') {
-            $admin = $this->requireAdminActivo('reportes.cierres_caja');
-            $this->requireAdminActivo('reportes.exportar');
+            $admin = $this->requireExportacionCierresCaja();
             try {
                 $datos = (new \Services\CajaService())->reporteCierresCajaParaExportacion($input, (int)$admin['id_usuario']);
                 $datos['administrator'] = (string)$admin['nombre'];
@@ -511,6 +517,18 @@ class ReporteApiController extends ApiController {
         header('Content-Length: '.strlen($contenido));
         echo $contenido;
         exit;
+    }
+
+    private function requireExportacionCierresCaja(): array {
+        $admin = $this->requireAdminActivo();
+        foreach (['reportes.cierres_caja', 'reportes.exportar'] as $slug) {
+            if (!\Libraries\Middleware\RBACMiddleware::tienePermisoAsignado(1, $slug)) {
+                $this->sendJsonResponse(['status'=>false,'code'=>'FORBIDDEN_ADMIN_ONLY',
+                    'message'=>'No tiene los permisos requeridos para exportar cierres.',
+                    'errors'=>new \stdClass(),'data'=>null],403);
+            }
+        }
+        return $admin;
     }
 
     private function responderArchivoCierres(string $contenido, string $nombre, string $mime): void

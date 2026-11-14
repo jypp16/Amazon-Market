@@ -123,7 +123,7 @@ const Api = (() => {
         const filenameMatch = disposition.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
         const rawFilename = filenameMatch ? (filenameMatch[1] || filenameMatch[2]).trim() : fallbackFilename;
         const filename = rawFilename.replace(/[\\/\r\n]/g, '_');
-        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: expectedType }));
+        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
         const link = document.createElement('a');
         link.href = objectUrl;
         link.download = filename;

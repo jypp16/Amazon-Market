@@ -16,3 +16,7 @@
 # Sistema
 Thumbs.db
 .DS_Store
+
+# Estado temporal del despliegue local Sprint 3
+/.codex/sprint3-maintenance.lock
+/.codex/sprint3-deploy-runner.lock
