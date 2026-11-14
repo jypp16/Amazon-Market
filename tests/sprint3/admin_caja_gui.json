@@ -1,0 +1,13 @@
+{
+  "before": {
+    "mode": "Administrador · Sin horario",
+    "selectorHidden": true
+  },
+  "schedule": "Administrador · Sin horario",
+  "ready": {
+    "button": "Confirmar cierre",
+    "authorizationHidden": true,
+    "feedback": "Arqueo guardado. El nuevo arqueo está vigente."
+  },
+  "errors": []
+}

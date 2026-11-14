@@ -299,6 +299,9 @@ $pdoOrig = new PDO(
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]
 );
+$principalBeforeCounts = [];
+foreach (['ventas'=>'SELECT COUNT(*) FROM venta','compras'=>'SELECT COUNT(*) FROM compra','productos'=>'SELECT COUNT(*) FROM producto','stock'=>'SELECT SUM(stock_actual) FROM producto','kardex'=>'SELECT COUNT(*) FROM kardex'] as $key=>$query) $principalBeforeCounts[$key]=(int)$pdoOrig->query($query)->fetchColumn();
+
 
 try {
     // -------------------------------------------------------------------------
@@ -456,20 +459,27 @@ try {
     $r = httpRequest($serverUrl, 'GET', '/api/caja/turno-hoy', null, [], $cookieInact);
     assertSameVal(401, $r['http_code'], 'A', 'A-05 Vendedor inactivo rechazado -> 401');
 
-    // Administrador rechazado pese a bypass RBAC
+    $adminPermissionId=(int)$pdo->query("SELECT id_permiso FROM permiso WHERE slug='turnos.abrir'")->fetchColumn();
+    $pdo->prepare('DELETE FROM rol_permiso WHERE id_rol=1 AND id_permiso=?')->execute([$adminPermissionId]);
+    try {
+    // Administrador sin permiso efectivo: el bypass no habilita operación
     $r = httpRequest($serverUrl, 'GET', '/api/caja/turno-hoy', null, [], $cookieAdmin);
-    assertSameVal(403, $r['http_code'], 'A', 'A-06 Admin en EP-07 -> 403');
-    assertSameVal('FORBIDDEN', $r['json']['code'] ?? null, 'A', 'A-07 Admin en EP-07 código FORBIDDEN');
+    assertSameVal(403, $r['http_code'], 'A', 'A-06 Admin sin permiso en EP-07 -> 403');
+    assertSameVal('FORBIDDEN', $r['json']['code'] ?? null, 'A', 'A-07 Admin sin permiso en EP-07 código FORBIDDEN');
 
     $r = httpRequest($serverUrl, 'GET', '/api/caja/estado', null, [], $cookieAdmin);
-    assertSameVal(403, $r['http_code'], 'A', 'A-08 Admin en EP-08 -> 403');
+    assertSameVal(403, $r['http_code'], 'A', 'A-08 Admin sin permiso en EP-08 -> 403');
 
     $r = httpRequest($serverUrl, 'POST', '/api/caja/abrir', [
         'referencia_solicitud' => 'p7_admin_deny_12345678',
         'shift_id' => $idTurnoActual,
         'cash_counted' => 100,
     ], ['X-CSRF-Token' => $csrfAdmin], $cookieAdmin);
-    assertSameVal(403, $r['http_code'], 'A', 'A-09 Admin en EP-09 -> 403');
+    assertSameVal(403, $r['http_code'], 'A', 'A-09 Admin sin permiso en EP-09 -> 403');
+
+    } finally {
+        $pdo->prepare('INSERT IGNORE INTO rol_permiso(id_rol,id_permiso) VALUES(1,?)')->execute([$adminPermissionId]);
+    }
 
     // Vendedor sin permiso turnos.abrir (temporal en copia aislada con finally)
     $stmtPerm = $pdo->prepare("SELECT id_permiso FROM permiso WHERE slug = 'turnos.abrir' LIMIT 1");
@@ -1029,11 +1039,11 @@ try {
     $origProductos = (int)$pdoOrig->query('SELECT COUNT(*) FROM producto')->fetchColumn();
     $origStock = (int)$pdoOrig->query('SELECT COALESCE(SUM(stock_actual), 0) FROM producto')->fetchColumn();
     $origKardex = (int)$pdoOrig->query('SELECT COUNT(*) FROM kardex')->fetchColumn();
-    assertSameVal(250, $origVentas, 'G', 'G-04 amazon_market ventas intactas (250)');
-    assertSameVal(80, $origCompras, 'G', 'G-05 amazon_market compras intactas (80)');
-    assertSameVal(108, $origProductos, 'G', 'G-06 amazon_market productos intactos (108)');
-    assertSameVal(2497, $origStock, 'G', 'G-07 amazon_market stock intacto (2497)');
-    assertSameVal(470, $origKardex, 'G', 'G-08 amazon_market kardex intacto (470)');
+    assertSameVal($principalBeforeCounts['ventas'], $origVentas, 'G', 'G-04 amazon_market ventas sin cambios durante la suite');
+    assertSameVal($principalBeforeCounts['compras'], $origCompras, 'G', 'G-05 amazon_market compras intactas (80)');
+    assertSameVal($principalBeforeCounts['productos'], $origProductos, 'G', 'G-06 amazon_market productos intactos (108)');
+    assertSameVal($principalBeforeCounts['stock'], $origStock, 'G', 'G-07 amazon_market stock sin cambios durante la suite');
+    assertSameVal($principalBeforeCounts['kardex'], $origKardex, 'G', 'G-08 amazon_market kardex sin cambios durante la suite');
 
     // =========================================================================
     // V: PRUEBAS DIRECTAS DEL VALIDADOR MONETARIO (sin HTTP)

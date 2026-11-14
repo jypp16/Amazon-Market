@@ -82,14 +82,14 @@ class VentaApiController extends ApiController
     private function store(): void
     {
         try {
-            $this->requirePermission('ventas.procesar');
+            $this->requireOperadorCajaActivo('ventas.procesar');
 
             $idRol = (int)($this->authenticatedUser['id_rol'] ?? $_SESSION['rol'] ?? 0);
-            if ($idRol !== 2) {
+            if (!in_array($idRol, [1, 2], true)) {
                 $this->sendJsonResponse([
                     'status' => false,
                     'code' => 'FORBIDDEN',
-                    'message' => 'Solo un usuario con rol Vendedor puede registrar ventas en POS.',
+                    'message' => 'Solo un administrador o vendedor activo puede registrar ventas en POS.',
                     'errors' => new \stdClass(),
                     'data' => null,
                 ], 403);

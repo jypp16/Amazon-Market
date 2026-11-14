@@ -26,7 +26,7 @@ class CajaController extends Controller {
 
     public function consultar() {
         $role = (int)($_SESSION['rol'] ?? 0);
-        $isAdministrator = $role === 1;
+        $isAdministrator = $role === 1 && (string)($_GET['propia'] ?? '') !== '1';
         $today = (new \DateTimeImmutable('today', new \DateTimeZone('America/Lima')))->format('Y-m-d');
 
         $this->views->render($this, 'consultar', [

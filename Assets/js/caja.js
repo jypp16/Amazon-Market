@@ -105,6 +105,13 @@
     }
 
     function updateShiftContext() {
+        if (todayInfo && todayInfo.mode === 'SIN_HORARIO') {
+            summaryTurn.textContent = 'Sin horario';
+            scheduleStatus.textContent = 'Administrador · Sin horario';
+            scheduleNotice.hidden = true;
+            shiftSelect.closest('.cash-opening-field').hidden = true;
+            return;
+        }
         var shiftId = getSelectedShiftId();
         var available = todayInfo && Array.isArray(todayInfo.available_shifts) ? todayInfo.available_shifts : [];
         var scheduled = todayInfo && Array.isArray(todayInfo.scheduled_shifts) ? todayInfo.scheduled_shifts : [];
@@ -150,7 +157,7 @@
     function updatePreview() {
         var counted = parseAmount();
         var shiftId = getSelectedShiftId();
-        var valid = counted !== null && shiftId > 0;
+        var valid = counted !== null && (shiftId > 0 || (todayInfo && todayInfo.mode === 'SIN_HORARIO'));
         openingButton.disabled = !valid || isLoading || isSubmitting || openingUnavailable;
         openingFeedback.hidden = true;
 
@@ -189,6 +196,7 @@
     }
 
     function showAlreadyOpen(state) {
+        if (state.shift && state.shift.label) summaryTurn.textContent = state.shift.label;
         openingUnavailable = true;
         openingButton.disabled = true;
         openingButton.textContent = 'Caja no disponible';
@@ -273,7 +281,7 @@
         shiftSelect.textContent = '';
         var available = Array.isArray(today.available_shifts) ? today.available_shifts : [];
         var scheduledIds = new Set((today.scheduled_shifts || []).map(function (s) { return Number(s.id); }));
-        if (!available.length) {
+        if (!available.length && today.mode !== 'SIN_HORARIO') {
             var emptyOpt = document.createElement('option');
             emptyOpt.value = '';
             emptyOpt.textContent = 'No hay turnos activos disponibles';
@@ -326,7 +334,7 @@
 
         var counted = parseAmount();
         var shiftId = getSelectedShiftId();
-        if (shiftId <= 0) {
+        if (shiftId <= 0 && (!todayInfo || todayInfo.mode !== 'SIN_HORARIO')) {
             showOpeningFeedback('Selecciona un turno válido para abrir la caja.', true);
             shiftSelect.focus();
             return;
@@ -345,7 +353,7 @@
 
         try {
             var response = await CajaService.requestOpening({
-                shift_id: shiftId,
+                shift_id: todayInfo && todayInfo.mode === 'SIN_HORARIO' ? null : shiftId,
                 cash_counted: counted
             });
             if (response.type === 'opened') {

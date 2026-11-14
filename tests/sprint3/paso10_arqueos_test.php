@@ -373,11 +373,18 @@ try {
     assertSameVal(401, $resDis['status'], 'Seguridad', 'Usuario desactivado en BD -> 401 AUTH_REQUIRED');
     assertSameVal('AUTH_REQUIRED', $resDis['json']['code'] ?? null, 'Seguridad', 'Code AUTH_REQUIRED para inactivo');
 
-    // Admin rechazado en EP-17, EP-18, EP-19
-    assertSameVal(403, httpRequest($url1, 'GET', '/api/caja/arqueo/estado', null, [], $cookieAdmin)['status'], 'Seguridad', 'Admin rechazado en EP-17 -> 403');
-    assertSameVal(403, httpRequest($url1, 'GET', '/api/caja/arqueos', null, [], $cookieAdmin)['status'], 'Seguridad', 'Admin rechazado en EP-18 -> 403');
+    $adminPermissionId=(int)$pdo->query("SELECT id_permiso FROM permiso WHERE slug='turnos.arqueo'")->fetchColumn();
+    $pdo->prepare('DELETE FROM rol_permiso WHERE id_rol=1 AND id_permiso=?')->execute([$adminPermissionId]);
+    try {
+    // Administrador sin permiso efectivo en EP-17, EP-18, EP-19
+    assertSameVal(403, httpRequest($url1, 'GET', '/api/caja/arqueo/estado', null, [], $cookieAdmin)['status'], 'Seguridad', 'Admin sin permiso en EP-17 -> 403');
+    assertSameVal(403, httpRequest($url1, 'GET', '/api/caja/arqueos', null, [], $cookieAdmin)['status'], 'Seguridad', 'Admin sin permiso en EP-18 -> 403');
     $resAdmPost = httpRequest($url1, 'POST', '/api/caja/arqueo', ['counted' => 0, 'version' => 1, 'referencia_solicitud' => 'p10_adm_post_00001'], ['X-CSRF-TOKEN' => $authAdmin['csrf']], $cookieAdmin);
-    assertSameVal(403, $resAdmPost['status'], 'Seguridad', 'Admin rechazado en EP-19 -> 403');
+    assertSameVal(403, $resAdmPost['status'], 'Seguridad', 'Admin sin permiso en EP-19 -> 403');
+
+    } finally {
+        $pdo->prepare('INSERT IGNORE INTO rol_permiso(id_rol,id_permiso) VALUES(1,?)')->execute([$adminPermissionId]);
+    }
 
     // Vendedor sin permiso turnos.arqueo rechazado, pero conserva turnos.abrir (EP-08)
     $idPermArqueo = (int)$pdo->query("SELECT id_permiso FROM permiso WHERE slug = 'turnos.arqueo' LIMIT 1")->fetchColumn();

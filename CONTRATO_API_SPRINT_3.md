@@ -1,5 +1,14 @@
 # Contrato Definitivo de las APIs — Sprint 3
 
+> **Ampliación aprobada y aplicada el 14/11/2026: administrador operador de caja.** En EP-07 a EP-22 (operación/consulta propia) y EP-25, las referencias anteriores a operación exclusiva de Vendedor se amplían a Administrador o Vendedor activo, con permiso operativo realmente asignado. Las consultas administrativas EP-23/EP-24 siguen siendo exclusivas del Administrador. La programación EP-01 a EP-06 continúa dirigida solo a vendedores.
+>
+> El Administrador abre con `cash_counted` y referencia, sin `shift_id` ni `turno_id` (NULL admitido; un turno informado se rechaza). EP-07 devuelve `mode: "SIN_HORARIO"`, sin turnos programados ni recomendados. El servidor determina la modalidad; no acepta que el cliente la inyecte. La sesión persiste modalidad inmutable `SIN_HORARIO`, `id_turno = NULL` y referencias horarias NULL. El Vendedor mantiene `CON_TURNO` y turno obligatorio. No existe turno ficticio.
+>
+> Ambas modalidades requieren caja propia, caja física única, movimientos/correcciones propios, arqueo vigente, idempotencia y precisión monetaria. En modalidad SIN_HORARIO, `schedule.requires_authorization = false`, `scheduled_end`, `early_threshold`, `minutes_remaining_to_end` y `tolerance_minutes` son NULL. Puede cerrar en cualquier momento con arqueo vigente, sin credenciales adicionales. En modalidad CON_TURNO sigue vigente la regla de salida menos 15 minutos. El cierre conserva HTTP 200 y su replay 200.
+>
+> `reference_schedule` usa etiqueta **Sin horario**, identificador y horas NULL para sesiones administrativas. Los aliases `seller`, `seller_id`, `vendedor_id` y `/consulta/vendedores` se conservan por compatibilidad y representan al responsable. Los selectores históricos incluyen administradores y vendedores, activos e inactivos. EP-24 admite `turno_id=sin_horario` (alias `turno`), además de identificadores de turno positivos; conserva el filtro en el snapshot y en PDF/Excel. La interfaz distingue consulta propia de historial administrativo. No se permite operar o cerrar la sesión ajena.
+
+
 **Proyecto:** Amazon Market (`C:\xampp\htdocs\Amazon-Market`)  
 **Rama:** `feature/caja` (commit `c29be5a39799379e1af12d2d49ed7128bab25e1c`)  
 **Fecha:** 12 de noviembre de 2026  

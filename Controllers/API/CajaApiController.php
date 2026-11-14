@@ -26,7 +26,7 @@ class CajaApiController extends ApiController
             return;
         }
         $permiso = $this->resolverPermisoPorSegmento($segmento);
-        $this->requireVendedorActivo($permiso);
+        $this->requireOperadorCajaActivo($permiso);
     }
 
     private function extraerSegmentoCaja(): string
@@ -119,7 +119,7 @@ class CajaApiController extends ApiController
         }
 
         $permiso = $this->resolverPermisoPorSegmento($segmento);
-        $vendedor = $this->requireVendedorActivo($permiso);
+        $vendedor = $this->requireOperadorCajaActivo($permiso);
 
         try {
             if ($segmento === 'turno-hoy') {
@@ -203,7 +203,7 @@ class CajaApiController extends ApiController
     {
         $segmento = trim((string)$params, '/');
         $permiso = $this->resolverPermisoPorSegmento($segmento);
-        $vendedor = $this->requireVendedorActivo($permiso);
+        $vendedor = $this->requireOperadorCajaActivo($permiso);
 
         try {
             if ($segmento === 'abrir') {

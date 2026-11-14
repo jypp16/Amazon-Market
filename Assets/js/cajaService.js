@@ -16,6 +16,7 @@
         var available = Array.isArray(data.available_shifts) ? data.available_shifts : [];
         var scheduled = Array.isArray(data.scheduled_shifts) ? data.scheduled_shifts : [];
         return {
+            mode: data.mode || 'CON_TURNO',
             status: data.status || (data.has_shift_today ? 'within_hours' : 'no_shift'),
             has_shift_today: Boolean(data.has_shift_today),
             shift: data.shift || null,
@@ -49,7 +50,8 @@
             counted_amount: data.counted_amount !== null && data.counted_amount !== undefined
                 ? Number(data.counted_amount)
                 : null,
-            occupied_by: data.occupied_by || null
+            occupied_by: data.occupied_by || null,
+            shift: data.shift || null
         };
     }
 
@@ -98,7 +100,7 @@
         },
         requestOpening: async function (payload) {
             var base = {
-                shift_id: Number(payload.shift_id),
+                shift_id: payload.shift_id == null ? null : Number(payload.shift_id),
                 cash_counted: Number(payload.cash_counted)
             };
             var ref = await Api.referenciaSolicitud('caja-abrir', base);

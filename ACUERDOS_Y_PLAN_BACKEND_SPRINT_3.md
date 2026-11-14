@@ -1,6 +1,6 @@
 # Acuerdos y plan del backend del Sprint 3
 
-Fecha de los acuerdos consolidados: 12 de noviembre de 2026.
+Fecha de los acuerdos consolidados: 12 de noviembre de 2026. Ampliación administrativa aprobada: 14 de noviembre de 2026.
 
 Este archivo recoge las decisiones tomadas en la conversación y el orden de implementación del backend de Amazon Market. Es la referencia de trabajo para los acuerdos que amplían o cambian las HU 11 a 19. La actualización de los documentos Word queda para después y no es un requisito previo para iniciar la implementación.
 
@@ -33,6 +33,10 @@ La creación de este documento no ejecuta migraciones ni implementa el backend.
 - Consultar su sesión activa. La recuperación del resultado de un cierre propio ante un fallo no habilita una consulta histórica general.
 
 ### Administrador
+
+- Puede operar su propia sesión de caja sin turno ni horario de salida, abrir y cerrar a cualquier hora con arqueo vigente obligatorio.
+- Puede vender solo con caja propia abierta; movimientos y correcciones propios. No opera ni cierra sesiones ajenas.
+- Continúa entrando a Inicio y dispone de consulta propia separada del historial administrativo.
 
 - Gestionar los turnos de atención y la programación semanal de los vendedores.
 - Autorizar exclusivamente los cierres anticipados que requieran excepción según la regla de quince minutos.
@@ -226,3 +230,7 @@ La actualización formal de los Word queda pendiente para una etapa posterior. E
 15. **Validar el recorrido completo y desplegar conservando los datos.** Probar roles, concurrencia, reintentos, suplencias, varios turnos y regresiones de ventas e inventario. Comparar datos antes y después de migrar y seguir un procedimiento de recuperación verificado.
 
 Cada paso se verifica antes de darlo por terminado. Si aparece una duda funcional no resuelta, se consulta antes de implementar esa regla.
+
+## 13. Ampliación aprobada: administrador operador (14/11/2026)
+
+La operación de caja y POS admite vendedores y administradores activos con permisos asignados. La sesión tiene modalidad inmutable CON_TURNO (vendedor) o SIN_HORARIO (administrador); esta última conserva turno y referencias horarias NULL, sin turno ficticio. La única caja física permanece exclusiva. Arqueo vigente, precisión monetaria, referencias al cierre anterior, idempotencia, propiedad e historial se aplican por igual. La autorización anticipada de HU14 se mantiene solo para sesiones CON_TURNO. Consultas y exportaciones incluyen responsables de ambos roles, etiqueta Sin horario y filtro turno_id=sin_horario. Alias seller/vendedor se conservan por compatibilidad, significando responsable. HU11–17 y HU19 se amplían; HU18 mantiene la programación para vendedores. Esta ampliación sustituye las restricciones anteriores de operación exclusiva de vendedor; no habilita cierre ajeno.

@@ -134,7 +134,7 @@
 
     function renderSchedule(turn) {
         schedule = turn && turn.shift ? turn.shift : null;
-        scheduleState = turn && turn.status ? turn.status : 'within_hours';
+        scheduleState = turn && turn.shift && turn.shift.mode === 'SIN_HORARIO' ? 'no_schedule' : (turn && turn.status ? turn.status : 'within_hours');
         var topbarRight = document.querySelector('.cash-opening-topbar .topbar-right');
         if (!scheduleBadge && topbarRight) {
             scheduleBadge = document.createElement('span');
@@ -144,7 +144,7 @@
         }
         if (scheduleBadge) {
             var outside = scheduleState === 'outside_hours';
-            scheduleBadge.textContent = outside ? 'Fuera de horario'
+            scheduleBadge.textContent = scheduleState === 'no_schedule' ? 'Administrador · Sin horario' : outside ? 'Fuera de horario'
                 : (scheduleState === 'no_shift' ? 'Sin turno hoy' : 'Dentro del horario');
             scheduleBadge.classList.toggle('is-outside', outside);
             scheduleBadge.classList.toggle('is-no-turn', scheduleState === 'no_shift');

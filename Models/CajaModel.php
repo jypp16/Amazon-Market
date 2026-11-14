@@ -162,6 +162,7 @@ class CajaModel extends Model
                     s.id_sesion_caja,
                     s.id_caja_fisica,
                     s.id_usuario_vendedor,
+                    s.modalidad,
                     s.id_turno,
                     s.nombre_turno_referencia,
                     TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
@@ -220,6 +221,7 @@ class CajaModel extends Model
                     s.id_sesion_caja,
                     s.id_caja_fisica,
                     s.id_usuario_vendedor,
+                    s.modalidad,
                     s.id_turno,
                     s.nombre_turno_referencia,
                     TIME_FORMAT(s.hora_inicio_referencia, '%H:%i') AS hora_inicio_referencia,
@@ -301,6 +303,7 @@ class CajaModel extends Model
         $sql = "INSERT INTO sesion_caja (
                     id_caja_fisica,
                     id_usuario_vendedor,
+                    modalidad,
                     id_turno,
                     nombre_turno_referencia,
                     hora_inicio_referencia,
@@ -329,6 +332,7 @@ class CajaModel extends Model
                 ) VALUES (
                     1,
                     :id_usuario_vendedor,
+                    :modalidad,
                     :id_turno,
                     :nombre_turno_referencia,
                     :hora_inicio_referencia,
@@ -359,11 +363,12 @@ class CajaModel extends Model
         $stmt = $this->conect->prepare($sql);
         $stmt->execute([
             ':id_usuario_vendedor'              => (int)$datos['id_usuario_vendedor'],
-            ':id_turno'                         => (int)$datos['id_turno'],
+            ':modalidad'                       => $datos['modalidad'] ?? 'CON_TURNO',
+            ':id_turno'                         => $datos['id_turno'] === null ? null : (int)$datos['id_turno'],
             ':nombre_turno_referencia'          => (string)$datos['nombre_turno_referencia'],
-            ':hora_inicio_referencia'           => (string)$datos['hora_inicio_referencia'],
-            ':hora_fin_referencia'              => (string)$datos['hora_fin_referencia'],
-            ':fecha_hora_salida_referencia'     => (string)$datos['fecha_hora_salida_referencia'],
+            ':hora_inicio_referencia'           => $datos['hora_inicio_referencia'],
+            ':hora_fin_referencia'              => $datos['hora_fin_referencia'],
+            ':fecha_hora_salida_referencia'     => $datos['fecha_hora_salida_referencia'],
             ':es_suplencia'                     => (int)$datos['es_suplencia'],
             ':abierta_fuera_horario'            => (int)$datos['abierta_fuera_horario'],
             ':fecha_hora_apertura'              => (string)$datos['fecha_hora_apertura'],
@@ -1059,6 +1064,7 @@ class CajaModel extends Model
                     s.id_sesion_caja,
                     s.id_caja_fisica,
                     s.id_usuario_vendedor,
+                    s.modalidad,
                     u.nombre AS seller_name,
                     u.email AS seller_email,
                     s.id_turno,
@@ -1105,7 +1111,7 @@ class CajaModel extends Model
     }
 
     /**
-     * Lista todos los vendedores (activos e inactivos) para selector de consulta histórica (EP-23A).
+     * Lista responsables administradores y vendedores (activos e inactivos) para selector de consulta histórica (EP-23A).
      */
     public function listarVendedoresParaConsulta(): array
     {
@@ -1115,7 +1121,7 @@ class CajaModel extends Model
                     username,
                     estado
                 FROM usuario
-                WHERE id_rol = 2
+                WHERE id_rol IN (1, 2)
                 ORDER BY nombre ASC, id_usuario ASC";
 
         $stmt = $this->conect->prepare($sql);
@@ -1146,6 +1152,7 @@ class CajaModel extends Model
                     s.id_sesion_caja,
                     s.id_caja_fisica,
                     s.id_usuario_vendedor,
+                    s.modalidad,
                     u.nombre AS seller_name,
                     s.id_turno,
                     s.nombre_turno_referencia,
@@ -1324,7 +1331,7 @@ class CajaModel extends Model
         string $fechaDesde,
         string $fechaHasta,
         ?int $idVendedor = null,
-        ?int $idTurno = null
+        int|string|null $idTurno = null
     ): array {
         $desdeInicio = $fechaDesde . ' 00:00:00';
         $hastaFinExclusivo = (new \DateTimeImmutable($fechaHasta . ' 00:00:00', new \DateTimeZone('America/Lima')))
@@ -1335,6 +1342,7 @@ class CajaModel extends Model
                     s.id_sesion_caja,
                     s.id_caja_fisica,
                     s.id_usuario_vendedor,
+                    s.modalidad,
                     u.nombre AS seller_name,
                     s.id_turno,
                     s.nombre_turno_referencia,
@@ -1381,7 +1389,9 @@ class CajaModel extends Model
             $sql .= " AND s.id_usuario_vendedor = :id_vendedor";
             $params[':id_vendedor'] = $idVendedor;
         }
-        if ($idTurno !== null) {
+        if ($idTurno === 'sin_horario') {
+            $sql .= " AND s.modalidad = 'SIN_HORARIO'";
+        } elseif ($idTurno !== null) {
             $sql .= " AND s.id_turno = :id_turno";
             $params[':id_turno'] = $idTurno;
         }

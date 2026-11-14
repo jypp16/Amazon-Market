@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 // Ejecutar después del Paso 12 sobre una copia NUEVA final14 creada en esta sesión.
-if (!preg_match('/^(?:amazon_market_sprint3_final14_[a-z0-9]+_[0-9]+|amazon_market_sprint3_deploy_rehearsal_[0-9]+)$/', getenv('TEST_DB_NAME') ?: '')) exit(2);
+if (!preg_match('/^(?:amazon_market_sprint3_final14_[a-z0-9]+_[0-9]+|amazon_market_sprint3_deploy_rehearsal_[0-9]+|amazon_market_admin_test_[0-9]+)$/', getenv('TEST_DB_NAME') ?: '')) exit(2);
 define('SPRINT3_PASO12_SOLO_HELPERS', true);
 require __DIR__.'/paso12_consultas_reportes_test.php';
 $checks14=0;

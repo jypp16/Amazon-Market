@@ -6,6 +6,7 @@ use Libraries\Middleware\CSRFMiddleware;
 $rol = $_SESSION['rol'] ?? 0;
 $permisos = RBACMiddleware::getPermisosRol($rol);
 $slugs = array_column($permisos, 'slug');
+$slugsOperativos = array_column(RBACMiddleware::getPermisosAsignadosRol((int)$rol), 'slug');
 $esKardex = strpos($_GET['url'] ?? '', 'Reporte/kardex') === 0;
 $esReporteVariaciones = strpos($_GET['url'] ?? '', 'Reporte/variaciones') === 0;
 $esReporteCierresCaja = strpos($_GET['url'] ?? '', 'Reporte/cierresCaja') === 0;
@@ -136,17 +137,17 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                 <?php endif; ?>
 
                 <?php $esVendedorCaja = ((int)($_SESSION['rol'] ?? 0) === 2); $esAdminCaja = ((int)($_SESSION['rol'] ?? 0) === 1); ?>
-                <?php if ($esVendedorCaja && in_array('ventas.acceder', $slugs)): ?>
+                <?php if (($esVendedorCaja || $esAdminCaja) && in_array('ventas.acceder', $slugsOperativos)): ?>
                 <a href="<?= BASE_URL ?>/Venta" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Venta') !== false) ? 'active' : '' ?>">
                     <i class="fa-solid fa-cash-register"></i> <span>Punto de Venta</span>
                 </a>
                 <?php endif; ?>
 
                 <?php
-                $puedeAbrirCaja = $esVendedorCaja && in_array('turnos.abrir', $slugs);
-                $puedeMovimientosCaja = $esVendedorCaja && in_array('turnos.movimientos', $slugs);
-                $puedeArqueoCierre = $esVendedorCaja && (in_array('turnos.arqueo', $slugs) || in_array('turnos.cerrar', $slugs));
-                $puedeConsultarCaja = ($esVendedorCaja && in_array('turnos.acceder', $slugs)) || ($esAdminCaja && in_array('turnos.consultar_historico', $slugs));
+                $puedeAbrirCaja = ($esVendedorCaja || $esAdminCaja) && in_array('turnos.abrir', $slugsOperativos);
+                $puedeMovimientosCaja = ($esVendedorCaja || $esAdminCaja) && in_array('turnos.movimientos', $slugsOperativos);
+                $puedeArqueoCierre = ($esVendedorCaja || $esAdminCaja) && (in_array('turnos.arqueo', $slugsOperativos) || in_array('turnos.cerrar', $slugsOperativos));
+                $puedeConsultarCaja = ($esVendedorCaja && in_array('turnos.acceder', $slugsOperativos)) || ($esAdminCaja && in_array('turnos.consultar_historico', $slugs));
                 $puedeAccederCaja = $puedeAbrirCaja || $puedeMovimientosCaja || $puedeArqueoCierre || $puedeConsultarCaja;
                 $enSeccionCaja = strpos($_GET['url'] ?? '', 'Caja') === 0;
                 ?>
@@ -173,9 +174,12 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                             <i class="fa-solid fa-check"></i><span>Arqueo y cierre</span>
                         </a>
                         <?php endif; ?>
+                        <?php if ($esAdminCaja && in_array('turnos.acceder', $slugsOperativos)): ?>
+                        <a href="<?= BASE_URL ?>/Caja/consultar?propia=1" class="menu-sublink"><i class="fa-solid fa-wallet"></i><span>Consultar mi caja</span></a>
+                        <?php endif; ?>
                         <?php if ($puedeConsultarCaja): ?>
                         <a href="<?= BASE_URL ?>/Caja/consultar" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/consultar') === 0) ? 'active' : '' ?>">
-                            <i class="fa-solid fa-magnifying-glass"></i><span>Consultar caja</span>
+                            <i class="fa-solid fa-magnifying-glass"></i><span><?= $esAdminCaja ? 'Consultar historial' : 'Consultar caja' ?></span>
                         </a>
                         <?php endif; ?>
                     </div>

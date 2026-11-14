@@ -238,6 +238,44 @@ abstract class ApiController {
         return $usuario;
     }
 
+    /** Operador de caja activo con permiso asignado, sin bypass administrativo. */
+    protected function requireOperadorCajaActivo(?string $slug = null): array {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'AUTH_REQUIRED',
+                'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 401);
+        }
+
+        if (!in_array((int)$usuario['id_rol'], [1, 2], true)) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN',
+                'message' => 'Acceso denegado. Esta operación está reservada a administradores y vendedores activos.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 403);
+        }
+
+        if ($slug !== null && !RBACMiddleware::tienePermisoAsignado((int)$usuario['id_rol'], $slug)) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN',
+                'message' => 'No tienes permisos para ejecutar esta operación.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 403);
+        }
+
+        $this->authenticatedUser = $usuario;
+        $this->authenticatedUserId = (int)$usuario['id_usuario'];
+        return $usuario;
+    }
+
     protected function getAuthenticatedUser(): array {
         return $this->authenticatedUser ?? [];
     }
