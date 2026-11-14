@@ -121,6 +121,17 @@
             ? session.history[session.history.length - 1] : null;
     }
 
+    function hasUnsavedCount() {
+        var current = activeArqueo();
+        if (!current) return false;
+        if (parseCount() === Number(current.counted)
+            && observationInput.value.trim() === String(current.observation || '').trim()) return false;
+        showFeedback(closeFeedback,
+            'Hay cambios en el conteo o la observación sin guardar. Guarda un nuevo arqueo antes de cerrar.', true);
+        countInput.focus();
+        return true;
+    }
+
     function renderSchedule(turn) {
         schedule = turn && turn.shift ? turn.shift : null;
         scheduleState = turn && turn.status ? turn.status : 'within_hours';
@@ -140,9 +151,9 @@
         }
         var notice = document.getElementById('cash_close_schedule_notice');
         if (scheduleState === 'outside_hours' && schedule) {
-            notice.textContent = 'Estás cerrando caja fuera del horario de tu turno ('
-                + (schedule.start || '—') + ' – ' + (schedule.end || '—')
-                + '). Un administrador debe autorizar este cierre.';
+            notice.textContent = 'El cierre es anticipado: la salida de referencia es a las '
+                + (schedule.scheduled_end || schedule.end || '—')
+                + '. Antes de los quince minutos previos se requiere autorización del administrador.';
             notice.hidden = false;
             closeButton.textContent = 'Solicitar autorización';
         } else {
@@ -291,6 +302,7 @@
         workspace.hidden = false;
         if (!countInput.value && session.history && session.history.length) {
             countInput.value = String(session.history[session.history.length - 1].counted).replace('.', ',');
+            observationInput.value = session.history[session.history.length - 1].observation || '';
         }
         renderChecklist();
         updateDifference();
@@ -477,19 +489,15 @@
         setLoading(true, 'count');
         service.saveArqueo(payload).then(function (result) {
             if (result.type === 'saved') {
-                var saved = result.arqueo || {
-                    id: 'arqueo-local-' + Date.now(),
-                    time: new Intl.DateTimeFormat('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()),
-                    counted: values.counted,
-                    difference: values.difference,
-                    observation: values.observation,
-                    status: 'Vigente',
-                    version: session.version
-                };
+                var saved = result.arqueo;
+                if (!saved || !Number.isInteger(Number(saved.id)) || Number(saved.id) <= 0) {
+                    showFeedback(countFeedback, 'El servidor no devolvió un arqueo persistido. Reintenta con la misma referencia.', true);
+                    return;
+                }
                 appendSavedArqueo(saved);
                 clearCountRequest();
                 showFeedback(countFeedback, 'Arqueo guardado. El nuevo arqueo está vigente.', false);
-            } else if (result.type === 'caja_changed') {
+            } else if (result.type === 'cash_changed') {
                 handleChanged(result);
             } else if (result.type === 'session_closed' || result.type === 'session_not_owned') {
                 showFeedback(countFeedback, 'La sesión ya no está disponible para este vendedor.', true);
@@ -525,10 +533,9 @@
     }
 
     function openAuthorization(sched) {
-        var start = sched && (sched.start || sched.shift_start || sched.scheduled_start);
         var end = sched && (sched.end || sched.shift_end || sched.scheduled_end);
-        authWarning.textContent = 'Estás cerrando caja antes del margen permitido de tu turno ('
-            + (start || '—') + ' – ' + (end || '—') + '). Un administrador debe autorizar este cierre.';
+        authWarning.textContent = 'La salida de referencia es a las ' + (end || '—')
+            + '. Estás cerrando antes del margen de quince minutos; un administrador debe autorizarlo.';
         authFeedback.hidden = true;
         clearAuthErrors();
         emailInput.value = '';
@@ -603,6 +610,12 @@
 
     function reconcileCloseFailure() {
         var sid = session && session.session_id;
+        // closeCash conserva la referencia antes de enviar; si fetch falla no
+        // llega el resultado envuelto que normalmente actualiza esta variable.
+        var pending = service.getLastCloseRef();
+        if (pending && Number(pending.session_id) === Number(sid)) {
+            lastCloseReference = pending.reference;
+        }
         return service.getCierre(sid, lastCloseReference).then(function (rec) {
             if (rec && !rec.pending && rec.data && rec.data.summary) {
                 if (!overlay.hidden) closeAuthorization(false);
@@ -676,6 +689,7 @@
 
     function submitClose(credentials) {
         if (isLoading || !session || !session.is_open) return Promise.resolve();
+        if (hasUnsavedCount()) return Promise.resolve();
         if (!activeArqueo()) {
             var message = latestArqueo() && latestArqueo().status === 'Desactualizado'
                 ? 'Arqueo desactualizado: realiza uno nuevo antes de cerrar.'
@@ -774,6 +788,7 @@
         updateDifference();
     });
     closeButton.addEventListener('click', function () {
+        if (hasUnsavedCount()) return;
         if (scheduleState === 'outside_hours' && activeArqueo()) {
             openAuthorization(schedule);
             return;

@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return String(iso);
         }
         return d.toLocaleString('es-PE', {
+            timeZone: 'America/Lima',
             year: 'numeric',
             month: '2-digit',
             day: '2-digit',

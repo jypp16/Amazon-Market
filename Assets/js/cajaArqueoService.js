@@ -1,7 +1,8 @@
 (function (global) {
     'use strict';
 
-    var LAST_CLOSE_STORAGE_KEY = 'am-ultimo-cierre-ref';
+    var LAST_CLOSE_STORAGE_KEY = 'am-ultimo-cierre-ref:' + (typeof API_URL !== 'undefined' ? API_URL : '') + ':' + (typeof AUTH_USER_ID !== 'undefined' ? AUTH_USER_ID : 'anonymous');
+    var activeSessionId = null;
 
     function apiRequest(endpoint, options) {
         return Api.request(endpoint, options).then(function (response) {
@@ -60,20 +61,21 @@
             throw new Error(body.message || 'No se pudo cargar el estado de arqueo.');
         }
         var data = body.data || {};
+        activeSessionId = data.session_id;
         return {
             is_open: Boolean(data.is_open),
             is_owner: data.is_owner !== false,
             session_id: data.session_id !== null && data.session_id !== undefined ? Number(data.session_id) : null,
             seller: data.seller || '',
             turn: data.turn || '',
-            expected: Number(data.expected || 0),
+            expected: data.expected === null ? null : Number(data.expected),
             opening_fund: Number(data.opening_fund || 0),
             cash_sales: Number(data.cash_sales || 0),
             income: Number(data.income || 0),
             expenses: Number(data.expenses || 0),
             card: Number(data.card || 0),
             yape_plin: Number(data.yape_plin || 0),
-            version: Number(data.version || 1),
+            version: data.version === null ? null : Number(data.version),
             history: Array.isArray(data.history) ? data.history : [],
             schedule: data.schedule || null,
             closed_summary: data.closed_summary || null
@@ -86,7 +88,7 @@
         var codes = {
             ARQUEO_SAVED: 'saved',
             OPERATION_ALREADY_CONFIRMED: endpoint === 'caja/arqueo' ? 'saved' : 'closed',
-            CASH_CHANGED: 'caja_changed',
+            CASH_CHANGED: 'cash_changed',
             CASH_SESSION_CLOSED: 'session_closed',
             NO_OPEN_SESSION: 'session_closed',
             SESSION_NOT_OWNED: 'session_not_owned',
@@ -145,7 +147,7 @@
                 version: Number(payload.version),
                 observation: payload.observation ? String(payload.observation).trim() : null
             };
-            var ref = await Api.referenciaSolicitud('caja-arqueo', base);
+            var ref = await Api.referenciaSolicitud('caja-arqueo:' + activeSessionId, base);
             var response = await apiRequest('caja/arqueo', {
                 method: 'POST',
                 headers: { 'X-Request-Reference': ref },
@@ -158,7 +160,7 @@
             });
             var result = normalizeResult(response, 'caja/arqueo');
             if (result.type === 'saved') {
-                Api.confirmarSolicitud('caja-arqueo');
+                Api.confirmarSolicitud('caja-arqueo:' + activeSessionId);
             }
             return result;
         },

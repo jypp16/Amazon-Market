@@ -35,7 +35,7 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
     <?php if ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/cierresCaja.css?v=<?= filemtime(__DIR__ . '/../Assets/css/cierresCaja.css') ?>">
     <?php endif; ?>
-    <script>const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
+    <script>const AUTH_USER_ID = <?= (int)($_SESSION['idUser'] ?? 0) ?>; const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
     <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
 </head>
 <body>

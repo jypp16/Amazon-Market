@@ -50,6 +50,7 @@
         originTurn: document.getElementById('cash_origin_turn'),
         confirmGroup: document.getElementById('cash_confirm_omitted_group'),
         confirmOmitted: document.getElementById('cash_confirm_omitted'),
+        confirmReflected: document.getElementById('cash_confirm_reflected'),
         submit: document.getElementById('cash_expense_submit'),
         feedback: document.getElementById('cash_expense_feedback')
     };
@@ -476,13 +477,13 @@
         }
         if (isOmittedWithdrawal()) {
             originTurnId = expense.originTurn.value;
-            confirmed = expense.confirmOmitted.checked;
+            confirmed = expense.confirmOmitted.checked && expense.confirmReflected.checked;
             if (!originTurnId) {
                 setFieldError(expense.originTurn, 'cash_origin_turn_error', 'Selecciona el turno de origen.');
             }
             if (!confirmed) {
                 setFieldError(expense.confirmOmitted, 'cash_confirm_omitted_error',
-                    'Confirma que el retiro ocurrió con la caja anterior abierta.');
+                    'Confirma que ocurrió con la caja anterior abierta y que ya estaba reflejado en esta apertura.');
             }
         } else if (amount !== null && amount > Number(session.balance)) {
             setFieldError(expense.amount, 'cash_expense_amount_error', 'El monto supera el saldo disponible.');
@@ -498,7 +499,8 @@
             reason: reason,
             administrator_id: administratorId || null,
             origin_turn_id: originTurnId || null,
-            confirm_previous_open: confirmed
+            declared_occurred_in_open_origin_session: expense.confirmOmitted.checked,
+            confirmed_reflected_in_opening: expense.confirmReflected.checked
         };
     }
 
@@ -567,7 +569,7 @@
         correction.cancel.disabled = loadingState;
         income.submit.textContent = loadingState ? 'Registrando…' : 'Confirmar ingreso';
         expense.submit.textContent = loadingState ? 'Registrando…' : (isOmittedWithdrawal() ? 'Registrar retiro omitido' : 'Confirmar egreso');
-        correction.submit.textContent = loadingState ? 'Validando con el administrador…' : 'Solicitar corrección';
+        correction.submit.textContent = loadingState ? 'Registrando corrección…' : 'Registrar corrección';
     }
 
     function showFeedback(message, isError, formType) {

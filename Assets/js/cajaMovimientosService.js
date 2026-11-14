@@ -38,21 +38,36 @@
         };
     }
 
+    var activeSessionId = null;
+
+    async function sendMovement(endpoint, body) {
+        var clean = Object.assign({}, body);
+        delete clean.request_id; delete clean.referencia_solicitud;
+        var scope = endpoint + ':' + (activeSessionId || clean.session_id || 'none');
+        var ref = await Api.referenciaSolicitud(scope, clean);
+        var response = await apiRequest(endpoint, { method: 'POST', headers: { 'X-Request-Reference': ref }, body: Object.assign({}, clean, {referencia_solicitud: ref}) });
+        var result = normalizeResult(response);
+        if (result.type === 'success') Api.confirmarSolicitud(scope);
+        return result;
+    }
+
     function normalizeSession(response) {
         var parts = responseData(response);
         var data = parts.data;
         if (parts.body.code === 'NO_OPEN_SESSION' || (!response.ok && response.status === 409)) {
-            return { is_open: false, seller: '', turn: '', session_id: null, balance: 0 };
+            activeSessionId = null;
+            return { is_open: false, seller: '', turn: '', session_id: null, balance: null };
         }
         if (!response.ok || !parts.body.status) {
             throw new Error(parts.body.message || 'No se pudo consultar la sesión actual de caja.');
         }
+        activeSessionId = data.session_id;
         return {
             is_open: Boolean(data.is_open),
             seller: data.seller || '',
             turn: data.turn || '',
             session_id: data.session_id !== null && data.session_id !== undefined ? Number(data.session_id) : null,
-            balance: Number(data.current_balance !== undefined ? data.current_balance : (data.balance || 0))
+            balance: data.current_balance === null || data.balance === null ? null : Number(data.current_balance !== undefined ? data.current_balance : data.balance)
         };
     }
 
@@ -136,20 +151,12 @@
                 referencia_solicitud: payload.request_id
             };
             if (payload.session_id) body.session_id = Number(payload.session_id);
-            return apiRequest('caja/movimientos/correcciones', {
-                method: 'POST',
-                headers: { 'X-Request-Reference': payload.request_id },
-                body: body
-            }).then(normalizeResult);
+            return sendMovement('caja/movimientos/correcciones', body);
         },
         registerIncome: function (payload) {
             var body = Object.assign({}, payload, { referencia_solicitud: payload.request_id });
             delete body.request_id;
-            return apiRequest('caja/ingresos', {
-                method: 'POST',
-                headers: { 'X-Request-Reference': payload.request_id },
-                body: body
-            }).then(normalizeResult);
+            return sendMovement('caja/ingresos', body);
         },
         registerExpense: function (payload) {
             var body = Object.assign({}, payload, { referencia_solicitud: payload.request_id });
@@ -160,12 +167,10 @@
                 delete body.confirm_previous_open;
                 delete body.confirm_no_previous_record;
                 delete body.confirm_different_seller;
+                delete body.declared_occurred_in_open_origin_session;
+                delete body.confirmed_reflected_in_opening;
             }
-            return apiRequest('caja/egresos', {
-                method: 'POST',
-                headers: { 'X-Request-Reference': payload.request_id },
-                body: body
-            }).then(normalizeResult);
+            return sendMovement('caja/egresos', body);
         }
     };
 }(window));

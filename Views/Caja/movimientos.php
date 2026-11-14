@@ -165,6 +165,7 @@ $tiposEgreso = [
                             <input type="checkbox" id="cash_confirm_omitted" name="confirm_previous_open">
                             <span>Confirmo que el retiro ocurrió con la caja anterior abierta.</span>
                         </label>
+                        <label class="cash-confirm-omitted-label" for="cash_confirm_reflected"><input type="checkbox" id="cash_confirm_reflected" name="confirmed_reflected_in_opening"> El retiro ya estaba reflejado en el efectivo contado al abrir esta sesión.</label>
                         <span class="cash-movement-error" id="cash_confirm_omitted_error" aria-live="polite"></span>
                     </div>
 

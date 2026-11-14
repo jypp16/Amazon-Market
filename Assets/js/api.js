@@ -12,7 +12,7 @@ const Api = (() => {
         const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
         // Cada contenido conserva su referencia: A → B → A debe recuperar A,
         // aunque la respuesta de A se haya perdido y B haya sido rechazado.
-        const scopeKey = 'am-solicitud:' + BASE + ':' + scope;
+        const scopeKey = 'am-solicitud:' + BASE + ':' + (typeof AUTH_USER_ID !== 'undefined' ? AUTH_USER_ID : 'anonymous') + ':' + scope;
         const key = scopeKey + ':' + hash;
         let intent = intents.get(key);
         try { intent = JSON.parse(sessionStorage.getItem(key)) || intent; } catch (_) {}
@@ -26,7 +26,7 @@ const Api = (() => {
     }
 
     function confirmarSolicitud(scope) {
-        const scopeKey = 'am-solicitud:' + BASE + ':' + scope;
+        const scopeKey = 'am-solicitud:' + BASE + ':' + (typeof AUTH_USER_ID !== 'undefined' ? AUTH_USER_ID : 'anonymous') + ':' + scope;
         const key = activeIntents.get(scopeKey);
         if (key) {
             intents.delete(key);
@@ -41,11 +41,13 @@ const Api = (() => {
     }
 
     async function request(endpoint, options = {}) {
-        const key = endpoint + '_' + (options.method || 'GET');
+        const method = (options.method || 'GET').toUpperCase();
+        const cancellable = method === 'GET';
+        const key = endpoint + '_' + method;
 
-        if (controllers[key]) controllers[key].abort();
-        controllers[key] = new AbortController();
-        const ctrl = controllers[key];
+        if (cancellable && controllers[key]) controllers[key].abort();
+        const ctrl = new AbortController();
+        if (cancellable) controllers[key] = ctrl;
 
         const headers = {
             'Accept': 'application/json',
@@ -53,7 +55,6 @@ const Api = (() => {
         };
 
         // Adjuntar token CSRF a peticiones que modifican estado
-        const method = (options.method || 'GET').toUpperCase();
         if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
             const token = getCsrfToken();
             if (token) headers['X-CSRF-Token'] = token;
@@ -74,7 +75,7 @@ const Api = (() => {
 
         try {
             const response = await fetch(BASE + '/' + endpoint, config);
-            delete controllers[key];
+            if (controllers[key] === ctrl) delete controllers[key];
 
             const contentType = response.headers.get('content-type');
 
@@ -85,7 +86,7 @@ const Api = (() => {
 
             throw new Error('El servidor respondió con un formato inesperado.');
         } catch (error) {
-            delete controllers[key];
+            if (controllers[key] === ctrl) delete controllers[key];
             if (error.name === 'AbortError') return null;
             throw error;
         }
@@ -189,9 +190,9 @@ const Api = (() => {
         confirmarSolicitud: confirmarSolicitud,
         request: request,
         get: function(endpoint) { return request(endpoint, { method: 'GET' }); },
-        post: function(endpoint, body) { return request(endpoint, { method: 'POST', body: body }); },
-        put: function(endpoint, body) { return request(endpoint, { method: 'PUT', body: body }); },
-        delete: function(endpoint) { return request(endpoint, { method: 'DELETE' }); },
+        post: function(endpoint, body, options = {}) { return request(endpoint, { ...options, method: 'POST', body: body }); },
+        put: function(endpoint, body, options = {}) { return request(endpoint, { ...options, method: 'PUT', body: body }); },
+        delete: function(endpoint, options = {}) { return request(endpoint, { ...options, method: 'DELETE' }); },
         download: download,
         downloadExcel: downloadExcel,
         cancelar: function() { Object.values(controllers).forEach(function(c) { c.abort(); }); }
