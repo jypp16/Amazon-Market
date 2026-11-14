@@ -179,6 +179,27 @@ class ReporteApiController extends ApiController {
 
     private function exportarPdf(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'cierres-caja') {
+            $admin = $this->requireAdminActivo('reportes.cierres_caja');
+            $this->requireAdminActivo('reportes.exportar');
+            try {
+                $datos = (new \Services\CajaService())->reporteCierresCajaParaExportacion($input, (int)$admin['id_usuario']);
+                $datos['administrator'] = (string)$admin['nombre'];
+                require_once __DIR__ . '/../../Libraries/PDF/ReporteCierresCajaPDF.php';
+                $contenido = (new \ReporteCierresCajaPDF())->generar($datos, (string)$admin['nombre']);
+                if (!str_starts_with($contenido, '%PDF-')) {
+                    throw new \RuntimeException('El generador no devolvió un PDF completo.');
+                }
+                $nombre = 'Reporte_Cierres_Caja_' . (new \DateTimeImmutable('now', new \DateTimeZone('America/Lima')))->format('Y-m-d_His') . '.pdf';
+                $this->responderArchivoCierres($contenido, $nombre, 'application/pdf');
+            } catch (InventarioException $error) {
+                throw $error;
+            } catch (\Throwable $error) {
+                error_log('PDF de cierres de caja: ' . $error->getMessage());
+                $this->sendJsonResponse(['status'=>false,'code'=>'PDF_GENERATION_FAILED','message'=>'No se pudo generar el reporte PDF. Intente nuevamente.','errors'=>new \stdClass(),'data'=>null],500);
+            }
+            return;
+        }
         if ($tipo === 'kardex') {
             $this->requireAdminActivo('reportes.kardex');
             $this->requireAdminActivo('reportes.exportar');
@@ -355,6 +376,27 @@ class ReporteApiController extends ApiController {
 
     private function exportarExcel(array $input): void {
         $tipo = $input['tipo'] ?? '';
+        if ($tipo === 'cierres-caja') {
+            $admin = $this->requireAdminActivo('reportes.cierres_caja');
+            $this->requireAdminActivo('reportes.exportar');
+            try {
+                $datos = (new \Services\CajaService())->reporteCierresCajaParaExportacion($input, (int)$admin['id_usuario']);
+                $datos['administrator'] = (string)$admin['nombre'];
+                $contenido = (new \Services\ExcelService())->generarReporteCierresCaja($datos);
+                $expectedType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                if (strlen($contenido) < 4 || substr($contenido, 0, 2) !== 'PK') {
+                    throw new \RuntimeException('El generador no devolvió un libro OpenXML completo.');
+                }
+                $nombre = 'Reporte_Cierres_Caja_' . (new \DateTimeImmutable('now', new \DateTimeZone('America/Lima')))->format('Y-m-d_His') . '.xlsx';
+                $this->responderArchivoCierres($contenido, $nombre, $expectedType);
+            } catch (InventarioException $error) {
+                $this->sendJsonResponse($error->toApiResponse(), $error->getHttpStatus());
+            } catch (\Throwable $error) {
+                error_log('Excel de cierres de caja: ' . $error->getMessage());
+                $this->sendJsonResponse(['status'=>false,'code'=>'EXCEL_GENERATION_FAILED','message'=>'No se pudo generar el reporte Excel. Intente nuevamente.','errors'=>new \stdClass(),'data'=>null],500);
+            }
+            return;
+        }
         if ($tipo === 'kardex') {
             $this->requireAdminActivo('reportes.kardex');
             $this->requireAdminActivo('reportes.exportar');
@@ -467,6 +509,21 @@ class ReporteApiController extends ApiController {
         header('Cache-Control: private, no-store, max-age=0');
         header('X-Content-Type-Options: nosniff');
         header('Content-Length: '.strlen($contenido));
+        echo $contenido;
+        exit;
+    }
+
+    private function responderArchivoCierres(string $contenido, string $nombre, string $mime): void
+    {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: ' . $mime);
+        header('Content-Disposition: attachment; filename="' . $nombre . '"');
+        header('Cache-Control: private, no-store, max-age=0');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: ' . strlen($contenido));
+        http_response_code(200);
         echo $contenido;
         exit;
     }

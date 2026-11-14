@@ -3187,6 +3187,7 @@ class CajaService
             $expectedCashCents = 0;
             $countedCashCents = 0;
             $closingDiffCents = 0;
+            $snapshotItems = [];
 
             foreach ($sesionesRaw as $s) {
                 $idSesion = (int)$s['id_sesion_caja'];
@@ -3221,9 +3222,10 @@ class CajaService
                 $hasOmitted = ((int)($s['omitted_withdrawals_count'] ?? 0) > 0)
                     || self::parseDecimalACentimos((string)$s['total_retiros_omitidos_declarados']) > 0;
 
-                $allClosures[] = [
+                $closureProjection = [
                     'id'                            => $idSesion,
                     'session_id'                    => $idSesion,
+                    'cashbox_id'                    => (int)$s['id_caja_fisica'],
                     'code'                          => sprintf('CIE-%04d', $idSesion),
                     'opened_at'                     => $this->formatearIsoLima((string)$s['fecha_hora_apertura']),
                     'closed_at'                     => $this->formatearIsoLima((string)$s['fecha_hora_cierre']),
@@ -3252,6 +3254,13 @@ class CajaService
                     'authorized_by_admin'           => $authorizedByAdmin,
                     'has_omitted_withdrawals'       => $hasOmitted,
                 ];
+                $allClosures[] = $closureProjection;
+                $snapshotItem = $closureProjection;
+                $snapshotItem['movements'] = array_map(
+                    [$this, 'proyectarMovimientoConsulta'],
+                    $this->cajaModel->listarMovimientosSesionCompletos($idSesion)
+                );
+                $snapshotItems[] = $snapshotItem;
             }
 
             $totalRegistros = count($allClosures);
@@ -3280,7 +3289,7 @@ class CajaService
                 'exportable'          => $totalRegistros > 0 ? 1 : 0,
                 'creado_en'           => $ahoraDb,
                 'expira_en'           => $nuevaExpiracion,
-            ], $allClosures);
+            ], $snapshotItems);
 
             $pdo->commit();
         } catch (\Throwable $e) {
@@ -3306,6 +3315,166 @@ class CajaService
                 'pagination'   => $this->construirPaginacion($totalRegistros, $page, $pageSize, 'total_closures'),
             ],
         ];
+    }
+
+    /** EP-24C/D: conjunto completo y coherente de datos para los dos generadores. */
+    public function reporteCierresCajaParaExportacion(array $queryParams, int $idAdminAutenticado): array
+    {
+        $this->validarQueryParamsPermitidos($queryParams, [
+            'tipo', 'snapshot_id', 'desde', 'hasta', 'turno_id', 'turno',
+            'vendedor_id', 'vendedor', 'session_id', 'sesion_id',
+        ]);
+        if (($queryParams['tipo'] ?? null) !== 'cierres-caja') {
+            throw new InventarioException('El tipo de reporte solicitado no es válido.', 'VALIDATION_ERROR', 422);
+        }
+
+        $rawSessionId = $this->resolverAliasQuery($queryParams, 'session_id', 'sesion_id');
+        if ($rawSessionId !== null) {
+            if (array_key_exists('snapshot_id', $queryParams)) {
+                throw new InventarioException(
+                    'La exportación por sesión no puede combinarse con un snapshot de listado.',
+                    'SNAPSHOT_FILTER_MISMATCH',
+                    409
+                );
+            }
+            return $this->reporteSesionCerradaParaExportacion(
+                $this->validarEnteroPositivoEstricto($rawSessionId, 'session_id'),
+                $queryParams
+            );
+        }
+
+        $consultaParams = $queryParams;
+        unset($consultaParams['tipo'], $consultaParams['session_id'], $consultaParams['sesion_id']);
+        $consultaParams['page'] = 1;
+        $consultaParams['page_size'] = 1;
+        $consulta = $this->reporteCierresCaja($consultaParams, $idAdminAutenticado);
+        $data = $consulta['data'] ?? null;
+        $snapshotId = (int)($data['snapshot_id'] ?? 0);
+        if ($snapshotId < 1) {
+            throw new \RuntimeException('No se pudo obtener el snapshot para la exportación.');
+        }
+
+        $itemsRaw = $this->cajaModel->listarTodosItemsSnapshotCierresCaja($snapshotId);
+        $closures = [];
+        foreach ($itemsRaw as $itemRaw) {
+            $projection = json_decode((string)$itemRaw['proyeccion_json'], true);
+            if (!is_array($projection) || !isset($projection['movements']) || !is_array($projection['movements'])) {
+                throw new InventarioException(
+                    'El snapshot no contiene el detalle de movimientos necesario. Actualice la consulta antes de exportar.',
+                    'SNAPSHOT_NOT_FOUND',
+                    404
+                );
+            }
+            $closures[] = $projection;
+        }
+        if (count($closures) !== (int)($data['pagination']['total_closures'] ?? 0)) {
+            throw new \RuntimeException('El conjunto congelado del reporte está incompleto.');
+        }
+
+        $totals = is_array($data['totals'] ?? null) ? $data['totals'] : [];
+        $totals = $this->completarTotalesExportacion($closures, $totals);
+        return [
+            'filters' => $data['filters'] ?? [],
+            'generated_at' => $data['generated_at'] ?? $this->formatearIsoLima($this->ahoraLima()->format('Y-m-d H:i:s')),
+            'closures' => $closures,
+            'totals' => $totals,
+        ];
+    }
+
+    private function reporteSesionCerradaParaExportacion(int $sessionId, array $queryParams): array
+    {
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+        try {
+            $row = $this->cajaModel->obtenerSesionDetallePorId($sessionId);
+            if ($row === null) {
+                throw new InventarioException('El cierre solicitado no existe.', 'CASH_SESSION_NOT_FOUND', 404);
+            }
+            if ((string)$row['estado'] !== 'CERRADA') {
+                throw new InventarioException('La sesión solicitada aún no ha sido cerrada.', 'CASH_SESSION_NOT_CLOSED', 409);
+            }
+            $movements = array_map(
+                [$this, 'proyectarMovimientoConsulta'],
+                $this->cajaModel->listarMovimientosSesionCompletos($sessionId)
+            );
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $error;
+        }
+
+        $closure = [
+            'id' => $sessionId,
+            'session_id' => $sessionId,
+            'cashbox_id' => (int)$row['id_caja_fisica'],
+            'code' => sprintf('CIE-%04d', $sessionId),
+            'seller_id' => (int)$row['id_usuario_vendedor'],
+            'seller' => (string)$row['seller_name'],
+            'shift_id' => (int)$row['id_turno'],
+            'turn' => (string)$row['nombre_turno_referencia'],
+            'opened_at' => $this->formatearIsoLima((string)$row['fecha_hora_apertura']),
+            'closed_at' => $this->formatearIsoLima((string)$row['fecha_hora_cierre']),
+            'closing_date' => (new DateTimeImmutable((string)$row['fecha_hora_cierre'], new DateTimeZone(self::LIMA_TZ)))->format('Y-m-d'),
+            'closing_time' => (new DateTimeImmutable((string)$row['fecha_hora_cierre'], new DateTimeZone(self::LIMA_TZ)))->format('H:i'),
+            'opening_fund' => $this->decimalDbANumero((string)$row['saldo_inicial']),
+            'opening_difference' => $row['diferencia_apertura'] !== null ? $this->decimalDbANumero((string)$row['diferencia_apertura']) : null,
+            'cash_sales' => $this->decimalDbANumero((string)$row['total_ventas_efectivo']),
+            'card_sales' => $this->decimalDbANumero((string)$row['total_ventas_tarjeta']),
+            'yape_plin_sales' => $this->decimalDbANumero((string)$row['total_ventas_yape_plin']),
+            'income' => $this->decimalDbANumero((string)$row['total_ingresos']),
+            'expenses' => $this->decimalDbANumero((string)$row['total_egresos']),
+            'expected' => $this->decimalDbANumero((string)$row['efectivo_esperado_cierre']),
+            'counted' => $this->decimalDbANumero((string)$row['efectivo_contado_cierre']),
+            'closing_difference' => $this->decimalDbANumero((string)$row['diferencia_cierre']),
+            'observation' => $row['observacion_cierre'] !== null ? (string)$row['observacion_cierre'] : null,
+            'has_omitted_withdrawals' => count(array_filter($movements, static fn(array $m): bool => ($m['type'] ?? '') === 'omitted_withdrawal')) > 0,
+            'movements' => $movements,
+        ];
+        $totals = $this->completarTotalesExportacion([$closure], [
+            'total_closures' => 1,
+            'opening_fund_total' => $closure['opening_fund'],
+            'opening_difference_net' => $closure['opening_difference'] ?? 0,
+            'cash_sales_total' => $closure['cash_sales'],
+            'card_sales_total' => $closure['card_sales'],
+            'yape_plin_sales_total' => $closure['yape_plin_sales'],
+            'income_total' => $closure['income'],
+            'expenses_total' => $closure['expenses'],
+            'expected_cash_total' => $closure['expected'],
+            'counted_cash_total' => $closure['counted'],
+            'closing_difference_net' => $closure['closing_difference'],
+        ]);
+        return [
+            'filters' => ['session_id' => $sessionId],
+            'generated_at' => $this->formatearIsoLima($this->ahoraLima()->format('Y-m-d H:i:s')),
+            'closures' => [$closure],
+            'totals' => $totals,
+        ];
+    }
+
+    private function completarTotalesExportacion(array $closures, array $totals): array
+    {
+        $totals['total_closures'] = count($closures);
+        $totals['closures_with_difference'] = 0;
+        $totals['shortages_total'] = 0.0;
+        $totals['surpluses_total'] = 0.0;
+        $totals['opening_difference_applicable_count'] = 0;
+        foreach ($closures as $closure) {
+            $difference = round((float)($closure['closing_difference'] ?? 0), 2);
+            if ($difference !== 0.0) {
+                $totals['closures_with_difference']++;
+            }
+            if ($difference < 0) {
+                $totals['shortages_total'] = round($totals['shortages_total'] + abs($difference), 2);
+            } elseif ($difference > 0) {
+                $totals['surpluses_total'] = round($totals['surpluses_total'] + $difference, 2);
+            }
+            if (array_key_exists('opening_difference', $closure) && $closure['opening_difference'] !== null) {
+                $totals['opening_difference_applicable_count']++;
+            }
+        }
+        return $totals;
     }
 
     /**

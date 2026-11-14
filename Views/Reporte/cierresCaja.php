@@ -14,6 +14,10 @@ $defaultTo = htmlspecialchars((string)($data['default_to'] ?? date('Y-m-d')), EN
         </div>
         <div class="close-header-actions">
             <a class="close-button close-button-secondary" href="<?= BASE_URL ?>/Reporte">Volver a reportes</a>
+            <?php if ((int)($_SESSION['rol'] ?? 0) === 1 && can('reportes.cierres_caja') && can('reportes.exportar')): ?>
+                <button id="closures_export_pdf" type="button" class="close-button close-button-secondary" disabled>Descargar PDF</button>
+                <button id="closures_export_excel" type="button" class="close-button close-button-secondary" disabled>Descargar Excel</button>
+            <?php endif; ?>
         </div>
     </section>
 

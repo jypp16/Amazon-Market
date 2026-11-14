@@ -8,6 +8,8 @@ use OpenSpout\Common\Entity\Cell\StringCell;
 use OpenSpout\Common\Entity\Style\Style;
 use OpenSpout\Writer\XLSX\Writer as XLSXWriter;
 use OpenSpout\Writer\XLSX\Options as XLSXOptions;
+use OpenSpout\Writer\AutoFilter;
+use OpenSpout\Writer\XLSX\Entity\SheetView;
 
 class ExcelService {
 
@@ -183,6 +185,234 @@ class ExcelService {
             if ($contenido === false) throw new \RuntimeException('No se pudo leer el reporte Excel de proveedores.');
             return $contenido;
         } finally { $limpiar(); }
+    }
+
+    /** Libro administrativo de cierres; los totales usan cifras confirmadas y congeladas por el servicio de caja. */
+    public function generarReporteCierresCaja(array $reporte): string
+    {
+        $folder = sys_get_temp_dir() . '/cierres_caja_excel_' . bin2hex(random_bytes(12));
+        if (!mkdir($folder, 0700)) {
+            throw new \RuntimeException('No se pudo preparar el archivo temporal de cierres.');
+        }
+        $path = $folder . '/reporte.xlsx';
+        $writer = null;
+        try {
+            $options = new XLSXOptions();
+            $options->setTempFolder($folder);
+            $writer = new XLSXWriter($options);
+            $writer->openToFile($path);
+
+            $closures = $reporte['closures'] ?? [];
+            $movements = [];
+            foreach ($closures as $closure) {
+                foreach (($closure['movements'] ?? []) as $movement) {
+                    $movements[] = [$closure, $movement];
+                }
+            }
+            $filters = $reporte['filters'] ?? [];
+            $totals = $reporte['totals'] ?? [];
+            $generatedAt = (string)($reporte['generated_at'] ?? '');
+
+            $titleStyle = (new Style())->setFontBold()->setFontSize(14)->setFontColor('1E293B');
+            $labelStyle = (new Style())->setFontBold()->setFontColor('475569');
+            $headerStyle = (new Style())->setFontBold()->setBackgroundColor('1E293B')->setFontColor('D4AF37')->setShouldWrapText();
+            $moneyStyle = (new Style())->setFormat('"S/" #,##0.00;[Red]("S/" #,##0.00)');
+            $textStyle = (new Style())->setShouldWrapText();
+            $totalStyle = (new Style())->setFontBold()->setBackgroundColor('F3F4F6');
+            $statusOk = (new Style())->setFontBold()->setBackgroundColor('DCFCE7')->setFontColor('166534');
+            $statusShort = (new Style())->setFontBold()->setBackgroundColor('FEE2E2')->setFontColor('991B1B');
+            $statusSurplus = (new Style())->setFontBold()->setBackgroundColor('FEF3C7')->setFontColor('92400E');
+
+            $sheet = $writer->getCurrentSheet();
+            $sheet->setName('Resumen');
+            $sheet->setColumnWidth(28, 1);
+            $sheet->setColumnWidth(24, 2);
+            $sheet->setColumnWidth(24, 3);
+            $sheet->setColumnWidth(24, 4);
+            $sheet->setColumnWidth(24, 5);
+            $sheet->setColumnWidth(48, 6);
+            $this->addTypedRow($writer, ['AMAZON MARKET'], ['text'], [$titleStyle]);
+            $this->addTypedRow($writer, ['REPORTE ADMINISTRATIVO · CIERRES DE CAJA'], ['text'], [$titleStyle]);
+            $this->addTypedRow($writer, ['Generado por', (string)($reporte['administrator'] ?? '')], ['text', 'text'], [$labelStyle, $textStyle]);
+            $this->addTypedRow($writer, ['Fecha de emisión', $this->fechaHoraExcel($generatedAt)], ['text', 'text'], [$labelStyle, $textStyle]);
+            $this->addTypedRow($writer, ['Período', isset($filters['session_id']) ? 'Sesión individual' : (($filters['desde'] ?? '—') . ' al ' . ($filters['hasta'] ?? '—'))], ['text', 'text'], [$labelStyle, $textStyle]);
+            $this->addTypedRow($writer, ['Turno', $this->filtroExcel($filters, $closures, 'turno_id', 'shift_id', 'turn')], ['text', 'text'], [$labelStyle, $textStyle]);
+            $this->addTypedRow($writer, ['Vendedor', $this->filtroExcel($filters, $closures, 'vendedor_id', 'seller_id', 'seller')], ['text', 'text'], [$labelStyle, $textStyle]);
+            $this->addTypedRow($writer, ['Cantidad de cierres', (int)($totals['total_closures'] ?? count($closures))], ['text', 'number'], [$labelStyle, $this->numberStyle]);
+            $this->addTypedRow($writer, ['Cierres con diferencia', (int)($totals['closures_with_difference'] ?? 0)], ['text', 'number'], [$labelStyle, $this->numberStyle]);
+            $this->addTypedRow($writer, ['Efectivo esperado', (float)($totals['expected_cash_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Efectivo contado', (float)($totals['counted_cash_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Faltantes', (float)($totals['shortages_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Sobrantes', (float)($totals['surpluses_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Diferencia neta de cierre', (float)($totals['closing_difference_net'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Diferencia neta de apertura', (float)($totals['opening_difference_net'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Ventas en efectivo', (float)($totals['cash_sales_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Ventas con tarjeta', (float)($totals['card_sales_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Ventas Yape / Plin', (float)($totals['yape_plin_sales_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Fondo inicial total', (float)($totals['opening_fund_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Ingresos netos', (float)($totals['income_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Egresos netos', (float)($totals['expenses_total'] ?? 0)], ['text', 'money'], [$labelStyle, $moneyStyle]);
+            $this->addTypedRow($writer, ['Notas'], ['text'], [$labelStyle]);
+            $this->addTypedRow($writer, ['Diferencia de cierre = contado - esperado. La diferencia de apertura se muestra separada y conserva null cuando no aplica. Tarjeta y Yape / Plin no aumentan el efectivo. Ingresos y egresos reflejan los ajustes netos; correcciones y retiros omitidos mantienen sus vínculos y no se suman dos veces.'], ['text'], [$textStyle]);
+
+            $writer->addNewSheetAndMakeItCurrent();
+            $sheet = $writer->getCurrentSheet();
+            $sheet->setName('Cierres');
+            $sheet->setSheetView((new SheetView())->setFreezeRow(2)->setFreezeColumn('B'));
+            $widths = [16, 14, 12, 12, 20, 27, 16, 17, 17, 17, 17, 15, 15, 17, 17, 18, 18, 16];
+            foreach ($widths as $i => $width) {
+                $sheet->setColumnWidth($width, $i + 1);
+            }
+            $headers = ['ID cierre', 'Fecha de cierre', 'Hora de cierre', 'Caja', 'Turno', 'Vendedor', 'Fondo inicial', 'Ventas en efectivo', 'Ventas con tarjeta', 'Ventas Yape/Plin', 'Total ventas', 'Ingresos', 'Egresos', 'Efectivo esperado', 'Efectivo contado', 'Diferencia de cierre', 'Diferencia de apertura', 'Estado'];
+            $this->addTypedRow($writer, $headers, array_fill(0, 18, 'text'), array_fill(0, 18, $headerStyle));
+            foreach ($closures as $c) {
+                $diff = (float)($c['closing_difference'] ?? 0);
+                $status = $diff === 0.0 ? 'Cuadrado' : ($diff < 0 ? 'Faltante' : 'Sobrante');
+                $this->addTypedRow($writer, [
+                    (string)($c['session_id'] ?? $c['id'] ?? ''),
+                    $this->fechaExcel($c['closed_at'] ?? ''),
+                    $this->horaExcel($c['closed_at'] ?? ''),
+                    'Caja física #' . (string)($c['cashbox_id'] ?? 1),
+                    (string)($c['turn'] ?? ''),
+                    (string)($c['seller'] ?? ''),
+                    (float)($c['opening_fund'] ?? 0),
+                    (float)($c['cash_sales'] ?? 0),
+                    (float)($c['card_sales'] ?? 0),
+                    (float)($c['yape_plin_sales'] ?? 0),
+                    (float)($c['cash_sales'] ?? 0) + (float)($c['card_sales'] ?? 0) + (float)($c['yape_plin_sales'] ?? 0),
+                    (float)($c['income'] ?? 0),
+                    (float)($c['expenses'] ?? 0),
+                    (float)($c['expected'] ?? 0),
+                    (float)($c['counted'] ?? 0),
+                    $diff,
+                    array_key_exists('opening_difference', $c) && $c['opening_difference'] !== null ? (float)$c['opening_difference'] : null,
+                    $status,
+                ], ['text','text','text','text','text','text','money','money','money','money','money','money','money','money','money','money','money','text'], [
+                    $textStyle,$textStyle,$textStyle,$textStyle,$textStyle,$textStyle,
+                    $moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,$moneyStyle,
+                    $diff === 0.0 ? $statusOk : ($diff < 0 ? $statusShort : $statusSurplus),
+                ]);
+            }
+            $sumFields = ['opening_fund','cash_sales','card_sales','yape_plin_sales','income','expenses','expected','counted','closing_difference','opening_difference'];
+            $sumValues = array_fill(0, 18, null);
+            $sumValues[0] = 'TOTALES';
+            foreach ($sumFields as $field) {
+                $column = match ($field) {
+                    'opening_fund' => 6, 'cash_sales' => 7, 'card_sales' => 8, 'yape_plin_sales' => 9,
+                    'income' => 11, 'expenses' => 12, 'expected' => 13, 'counted' => 14,
+                    'closing_difference' => 15, 'opening_difference' => 16,
+                };
+                $sum = 0.0;
+                foreach ($closures as $c) {
+                    if ($field === 'opening_difference' && ($c['opening_difference'] ?? null) === null) continue;
+                    $sum += (float)($c[$field] ?? 0);
+                }
+                $sumValues[$column] = round($sum, 2);
+            }
+            $sumValues[10] = round((float)($totals['cash_sales_total'] ?? 0) + (float)($totals['card_sales_total'] ?? 0) + (float)($totals['yape_plin_sales_total'] ?? 0), 2);
+            $this->addTypedRow($writer, $sumValues, array_map(static fn($v, $i) => $i === 0 ? 'text' : ($i >= 6 && $i <= 16 ? 'money' : 'text'), $sumValues, array_keys($sumValues)), array_fill(0, 18, $totalStyle));
+            $sheet->setAutoFilter(new AutoFilter(0, 1, 17, count($closures) + 1));
+
+            $writer->addNewSheetAndMakeItCurrent();
+            $sheet = $writer->getCurrentSheet();
+            $sheet->setName('Movimientos');
+            $sheet->setSheetView((new SheetView())->setFreezeRow(2));
+            foreach ([16,14,12,22,56,28,28,22,16,18,22] as $i => $width) {
+                $sheet->setColumnWidth($width, $i + 1);
+            }
+            $movementHeaders = ['ID cierre','Fecha','Hora','Tipo','Detalle','Registrado por','Administrador','Rol del administrador','Importe','Cierre de origen','Afecta el saldo'];
+            $this->addTypedRow($writer, $movementHeaders, array_fill(0, 11, 'text'), array_fill(0, 11, $headerStyle));
+            foreach ($movements as [$c, $m]) {
+                $detail = (string)($m['reason'] ?? '');
+                if (!empty($m['reference']) && $m['reference'] !== $detail) $detail .= ' · Referencia: ' . (string)$m['reference'];
+                if (!empty($m['original_movement_id'])) $detail .= ' · Movimiento original #' . (string)$m['original_movement_id'];
+                if (!empty($m['correction_id'])) $detail .= ' · Corrección #' . (string)$m['correction_id'];
+                if (($m['type'] ?? '') === 'omitted_withdrawal') {
+                    $detail .= ' · Ocurrió con la sesión de origen abierta: ' . (!empty($m['declared_occurred_in_open_origin_session']) ? 'Sí' : 'No');
+                    $detail .= ' · Reflejado en apertura: ' . (!empty($m['confirmed_reflected_in_opening']) ? 'Sí' : 'No');
+                    $detail .= ' · Impacto en saldo: S/ 0.00';
+                } else {
+                    $detail .= ' · Impacto en saldo: S/ ' . number_format((float)($m['impact'] ?? 0), 2, '.', ',');
+                }
+                $this->addTypedRow($writer, [
+                    (string)($c['session_id'] ?? $c['id'] ?? ''),
+                    (string)($m['date'] ?? ''),
+                    (string)($m['time'] ?? ''),
+                    (string)($m['label'] ?? $m['type'] ?? ''),
+                    $detail,
+                    (string)($m['responsible'] ?? ''),
+                    (string)($m['administrator_name'] ?? ''),
+                    !empty($m['administrator_name']) ? 'Administrador' : '',
+                    (float)($m['amount'] ?? 0),
+                    isset($m['origin_session_id']) ? (string)$m['origin_session_id'] : '',
+                    (float)($m['impact'] ?? 0) !== 0.0 ? 'Sí' : 'No',
+                ], ['text','text','text','text','text','text','text','text','money','text','text'], [
+                    $textStyle,$textStyle,$textStyle,$textStyle,$textStyle,$textStyle,$textStyle,$textStyle,$moneyStyle,$textStyle,$textStyle,
+                ]);
+            }
+            $lastMovementRow = count($movements) + 1;
+            $sheet->setAutoFilter(new AutoFilter(0, 1, 10, $lastMovementRow));
+
+            $writer->close();
+            $writer = null;
+            $contents = file_get_contents($path);
+            if (!is_string($contents) || strlen($contents) < 4 || substr($contents, 0, 2) !== 'PK') {
+                throw new \RuntimeException('El libro Excel temporal no es un archivo OpenXML completo.');
+            }
+            return $contents;
+        } finally {
+            if ($writer !== null) {
+                try { $writer->close(); } catch (\Throwable $error) { error_log('Cierre Excel de cierres: ' . $error->getMessage()); }
+            }
+            if (is_dir($folder)) {
+                (new \OpenSpout\Common\Helper\FileSystemHelper(sys_get_temp_dir()))->deleteFolderRecursively($folder);
+            }
+        }
+    }
+
+    private function addTypedRow(XLSXWriter $writer, array $values, array $types, array $styles): void
+    {
+        $cells = [];
+        foreach (array_values($values) as $index => $value) {
+            $style = $styles[$index] ?? null;
+            $type = $types[$index] ?? 'text';
+            if ($type === 'money' && $value !== null) {
+                $cells[] = Cell::fromValue((float)$value, $style);
+            } elseif ($type === 'number' && $value !== null) {
+                $cells[] = Cell::fromValue((int)$value, $style);
+            } else {
+                // StringCell keeps untrusted values beginning with =, +, - or @ as literal text.
+                $cells[] = new StringCell($value === null ? '' : (string)$value, $style);
+            }
+        }
+        $writer->addRow(new Row($cells));
+    }
+
+    private function fechaHoraExcel(string $value): string
+    {
+        try { return (new \DateTimeImmutable($value))->setTimezone(new \DateTimeZone('America/Lima'))->format('d/m/Y H:i:s'); }
+        catch (\Throwable $error) { return $value; }
+    }
+
+    private function fechaExcel(string $value): string
+    {
+        try { return (new \DateTimeImmutable($value))->setTimezone(new \DateTimeZone('America/Lima'))->format('Y-m-d'); }
+        catch (\Throwable $error) { return $value; }
+    }
+
+    private function horaExcel(string $value): string
+    {
+        try { return (new \DateTimeImmutable($value))->setTimezone(new \DateTimeZone('America/Lima'))->format('H:i:s'); }
+        catch (\Throwable $error) { return ''; }
+    }
+
+    private function filtroExcel(array $filters, array $closures, string $filterKey, string $idKey, string $labelKey): string
+    {
+        if (empty($filters[$filterKey])) return 'Todos';
+        foreach ($closures as $closure) {
+            if ((int)($closure[$idKey] ?? 0) === (int)$filters[$filterKey]) return (string)($closure[$labelKey] ?? ('#' . $filters[$filterKey]));
+        }
+        return '#' . (string)$filters[$filterKey];
     }
 
     /** Devuelve el XLSX en memoria y elimina su carpeta temporal, también ante errores. */

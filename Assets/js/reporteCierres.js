@@ -113,15 +113,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const paginationInfoEl = document.getElementById('closures_pagination_info');
         const prevBtn = document.getElementById('closures_prev_btn');
         const nextBtn = document.getElementById('closures_next_btn');
+        const exportPdfBtn = document.getElementById('closures_export_pdf');
+        const exportExcelBtn = document.getElementById('closures_export_excel');
 
         const state = {
             page: 1,
             pageSize: 20,
             snapshotId: null,
             totalPages: 1,
+            appliedFilters: null,
+            ready: false,
+            downloading: false,
         };
 
         await loadFilterOptions();
+        state.appliedFilters = captureFilters();
         await loadClosures(true);
 
         if (formEl) {
@@ -129,6 +135,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 state.page = 1;
                 state.snapshotId = null;
+                state.appliedFilters = captureFilters();
+                state.ready = false;
+                updateExportButtons();
                 await loadClosures(false);
             });
         }
@@ -141,6 +150,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (sellerEl) sellerEl.value = '';
                 state.page = 1;
                 state.snapshotId = null;
+                state.appliedFilters = captureFilters();
+                state.ready = false;
+                updateExportButtons();
                 await loadClosures(false);
             });
         }
@@ -161,6 +173,54 @@ document.addEventListener('DOMContentLoaded', () => {
                     await loadClosures(false);
                 }
             });
+        }
+
+        if (exportPdfBtn) exportPdfBtn.addEventListener('click', () => runExport('pdf'));
+        if (exportExcelBtn) exportExcelBtn.addEventListener('click', () => runExport('excel'));
+
+        function captureFilters() {
+            return {
+                desde: fromEl ? fromEl.value : '',
+                hasta: toEl ? toEl.value : '',
+                turno_id: turnEl ? turnEl.value : '',
+                vendedor_id: sellerEl ? sellerEl.value : '',
+            };
+        }
+
+        function updateExportButtons() {
+            const disabled = !state.ready || !state.snapshotId || state.downloading;
+            if (exportPdfBtn) exportPdfBtn.disabled = disabled;
+            if (exportExcelBtn) exportExcelBtn.disabled = disabled;
+        }
+
+        async function runExport(format) {
+            if (state.downloading || !state.ready || !state.snapshotId) return;
+            state.downloading = true;
+            updateExportButtons();
+            showFeedback(feedbackEl, 'info', `Generando archivo ${format.toUpperCase()}…`);
+            const query = buildQueryString({ ...state.appliedFilters, snapshot_id: state.snapshotId });
+            try {
+                const result = format === 'pdf'
+                    ? await ApiClient.download(`reportes/exportar-pdf?tipo=cierres-caja&${query}`, 'Reporte_Cierres_Caja.pdf')
+                    : await ApiClient.downloadExcel(`reportes/exportar-excel?tipo=cierres-caja&${query}`, 'Reporte_Cierres_Caja.xlsx');
+                if (!result || !result.ok) {
+                    const body = result && result.data ? result.data : {};
+                    if (body.code === 'SNAPSHOT_NOT_FOUND') {
+                        state.snapshotId = null;
+                        state.ready = false;
+                        showFeedback(feedbackEl, 'info', 'El snapshot venció o no incluye el detalle requerido. Conservé los filtros; consulta de nuevo para generar un archivo actualizado.');
+                    } else {
+                        showFeedback(feedbackEl, 'error', body.message || `No se pudo generar el archivo ${format.toUpperCase()}. Puedes reintentar.`);
+                    }
+                    return;
+                }
+                showFeedback(feedbackEl, 'success', `${format.toUpperCase()} recibido y validado: ${result.filename}`);
+            } catch (error) {
+                showFeedback(feedbackEl, 'error', (error && error.message) || `No se pudo descargar el archivo ${format.toUpperCase()}. Puedes reintentar.`);
+            } finally {
+                state.downloading = false;
+                updateExportButtons();
+            }
         }
 
         async function loadFilterOptions() {
@@ -208,8 +268,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        async function loadClosures(isInitial, retriedAfterExpiry = false) {
-            if (!isInitial && !retriedAfterExpiry) {
+        async function loadClosures(isInitial) {
+            if (!isInitial) {
                 showFeedback(feedbackEl, '', '');
             }
             if (tbodyEl) {
@@ -217,10 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const params = {
-                desde: fromEl ? fromEl.value : '',
-                hasta: toEl ? toEl.value : '',
-                turno_id: turnEl ? turnEl.value : '',
-                vendedor_id: sellerEl ? sellerEl.value : '',
+                ...(state.appliedFilters || captureFilters()),
                 page: state.page,
                 page_size: state.pageSize,
             };
@@ -236,20 +293,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 state.snapshotId = data.snapshot_id || state.snapshotId;
+                state.ready = Boolean(state.snapshotId);
+                updateExportButtons();
 
                 renderTotals(data.totals || {});
                 renderRows(Array.isArray(data.closures) ? data.closures : []);
                 renderPagination(data.pagination || {});
             } catch (error) {
-                if (error && error.code === 'SNAPSHOT_NOT_FOUND' && !retriedAfterExpiry) {
+                if (error && error.code === 'SNAPSHOT_NOT_FOUND') {
                     state.snapshotId = null;
-                    state.page = 1;
+                    state.ready = false;
+                    updateExportButtons();
                     showFeedback(
                         feedbackEl,
                         'info',
-                        'La instantánea del reporte expiró. Se regeneró el resultado con tus filtros actuales.'
+                        'La instantánea del reporte expiró. Conservé los filtros; consulta de nuevo para obtener una captura actualizada.'
                     );
-                    await loadClosures(false, true);
                     return;
                 }
 
@@ -346,16 +405,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const subtitleEl = document.getElementById('closure_detail_subtitle');
         const prevBtn = document.getElementById('detail_movs_prev_btn');
         const nextBtn = document.getElementById('detail_movs_next_btn');
+        const exportPdfBtn = document.getElementById('closure_export_pdf');
+        const exportExcelBtn = document.getElementById('closure_export_excel');
 
         const state = {
             page: 1,
             pageSize: 20,
             totalPages: 1,
+            ready: false,
+            downloading: false,
         };
 
         if (!cierreId || cierreId <= 0) {
             showFeedback(feedbackEl, 'error', 'Identificador de cierre inválido.');
             return;
+        }
+
+        if (exportPdfBtn) exportPdfBtn.addEventListener('click', () => runDetailExport('pdf'));
+        if (exportExcelBtn) exportExcelBtn.addEventListener('click', () => runDetailExport('excel'));
+
+        function updateDetailExportButtons() {
+            const disabled = !state.ready || state.downloading;
+            if (exportPdfBtn) exportPdfBtn.disabled = disabled;
+            if (exportExcelBtn) exportExcelBtn.disabled = disabled;
+        }
+
+        async function runDetailExport(format) {
+            if (state.downloading || !state.ready) return;
+            state.downloading = true;
+            updateDetailExportButtons();
+            showFeedback(feedbackEl, 'info', `Generando archivo ${format.toUpperCase()}…`);
+            const query = buildQueryString({ session_id: cierreId });
+            try {
+                const result = format === 'pdf'
+                    ? await ApiClient.download(`reportes/exportar-pdf?tipo=cierres-caja&${query}`, 'Reporte_Cierre_Caja.pdf')
+                    : await ApiClient.downloadExcel(`reportes/exportar-excel?tipo=cierres-caja&${query}`, 'Reporte_Cierre_Caja.xlsx');
+                if (!result || !result.ok) {
+                    const body = result && result.data ? result.data : {};
+                    showFeedback(feedbackEl, 'error', body.message || `No se pudo generar el archivo ${format.toUpperCase()}. Puedes reintentar.`);
+                    return;
+                }
+                showFeedback(feedbackEl, 'success', `${format.toUpperCase()} recibido y validado: ${result.filename}`);
+            } catch (error) {
+                showFeedback(feedbackEl, 'error', (error && error.message) || `No se pudo descargar el archivo ${format.toUpperCase()}. Puedes reintentar.`);
+            } finally {
+                state.downloading = false;
+                updateDetailExportButtons();
+            }
         }
 
         if (prevBtn) {
@@ -388,9 +484,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await ApiClient.get(`reportes/cierres-caja/${encodeURIComponent(String(cierreId))}?${qs}`);
                 const data = unwrapApi(response, 'No se pudo cargar el detalle del cierre de caja.');
                 if (!data || !data.closure) {
+                    state.ready = false;
+                    updateDetailExportButtons();
                     showFeedback(feedbackEl, 'error', 'No se encontró información para este cierre.');
                     return;
                 }
+                state.ready = true;
+                updateDetailExportButtons();
 
                 const c = data.closure;
 
@@ -452,6 +552,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderMovements(Array.isArray(data.movements) ? data.movements : []);
                 renderMovementPagination(data.pagination || {});
             } catch (error) {
+                state.ready = false;
+                updateDetailExportButtons();
                 showFeedback(
                     feedbackEl,
                     'error',

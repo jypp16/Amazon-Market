@@ -112,10 +112,18 @@ const Api = (() => {
             };
         }
 
+        const blob = await response.blob();
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const pdfSignature = [0x25, 0x50, 0x44, 0x46, 0x2d];
+        if (bytes.length < pdfSignature.length || !pdfSignature.every((byte, index) => bytes[index] === byte)) {
+            return { ok: false, status: response.status, data: { code: 'INVALID_PDF', message: 'El archivo recibido no es un PDF válido.' } };
+        }
+
         const disposition = response.headers.get('content-disposition') || '';
         const filenameMatch = disposition.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i);
-        const filename = filenameMatch ? (filenameMatch[1] || filenameMatch[2]).trim() : fallbackFilename;
-        const objectUrl = URL.createObjectURL(await response.blob());
+        const rawFilename = filenameMatch ? (filenameMatch[1] || filenameMatch[2]).trim() : fallbackFilename;
+        const filename = rawFilename.replace(/[\\/\r\n]/g, '_');
+        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: expectedType }));
         const link = document.createElement('a');
         link.href = objectUrl;
         link.download = filename;

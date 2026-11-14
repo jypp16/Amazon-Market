@@ -1144,6 +1144,7 @@ class CajaModel extends Model
 
         $sql = "SELECT
                     s.id_sesion_caja,
+                    s.id_caja_fisica,
                     s.id_usuario_vendedor,
                     u.nombre AS seller_name,
                     s.id_turno,
@@ -1193,6 +1194,17 @@ class CajaModel extends Model
      */
     public function listarMovimientosSesionPaginados(int $idSesion, int $limit, int $offset): array
     {
+        return $this->consultarMovimientosSesion($idSesion, $limit, $offset);
+    }
+
+    /** Lista todos los movimientos de una sesión sin truncamiento para snapshots y exportaciones. */
+    public function listarMovimientosSesionCompletos(int $idSesion): array
+    {
+        return $this->consultarMovimientosSesion($idSesion, null, null);
+    }
+
+    private function consultarMovimientosSesion(int $idSesion, ?int $limit, ?int $offset): array
+    {
         $sql = "SELECT
                     m.id_movimiento_caja,
                     m.id_sesion_caja,
@@ -1228,13 +1240,18 @@ class CajaModel extends Model
                 LEFT JOIN usuario ua ON ua.id_usuario = m.id_usuario_admin
                 LEFT JOIN correccion_movimiento_caja corr ON corr.id_movimiento_correccion = m.id_movimiento_caja
                 WHERE m.id_sesion_caja = :id_sesion
-                ORDER BY m.fecha_hora_registro ASC, m.id_movimiento_caja ASC
-                LIMIT :limit OFFSET :offset";
+                ORDER BY m.fecha_hora_registro ASC, m.id_movimiento_caja ASC";
+
+        if ($limit !== null && $offset !== null) {
+            $sql .= ' LIMIT :limit OFFSET :offset';
+        }
 
         $stmt = $this->conect->prepare($sql);
         $stmt->bindValue(':id_sesion', $idSesion, PDO::PARAM_INT);
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        if ($limit !== null && $offset !== null) {
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        }
         $stmt->execute();
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1316,6 +1333,7 @@ class CajaModel extends Model
 
         $sql = "SELECT
                     s.id_sesion_caja,
+                    s.id_caja_fisica,
                     s.id_usuario_vendedor,
                     u.nombre AS seller_name,
                     s.id_turno,
@@ -1512,6 +1530,19 @@ class CajaModel extends Model
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
 
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Obtiene el conjunto completo del snapshot para exportar sin depender de page_size. */
+    public function listarTodosItemsSnapshotCierresCaja(int $idSnapshot): array
+    {
+        $stmt = $this->conect->prepare(
+            'SELECT orden_posicion, id_sesion_caja, proyeccion_json
+               FROM reporte_caja_snapshot_item
+              WHERE id_snapshot = :id_snapshot
+              ORDER BY orden_posicion ASC'
+        );
+        $stmt->execute([':id_snapshot' => $idSnapshot]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }
