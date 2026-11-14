@@ -1,0 +1,56 @@
+{
+  "lint": [
+    {
+      "file": "Helpers/maintenance.php",
+      "code": 0,
+      "output": "No syntax errors detected in Helpers/maintenance.php\n"
+    },
+    {
+      "file": "index.php",
+      "code": 0,
+      "output": "No syntax errors detected in index.php\n"
+    },
+    {
+      "file": "database/tercerSprint/tools/DespliegueSprint3.php",
+      "code": 0,
+      "output": "No syntax errors detected in database/tercerSprint/tools/DespliegueSprint3.php\n"
+    },
+    {
+      "file": "database/tercerSprint/tools/crear_checkpoint_despliegue_sprint3.php",
+      "code": 0,
+      "output": "No syntax errors detected in database/tercerSprint/tools/crear_checkpoint_despliegue_sprint3.php\n"
+    },
+    {
+      "file": "database/tercerSprint/tools/ejecutar_despliegue_local_sprint3.php",
+      "code": 0,
+      "output": "No syntax errors detected in database/tercerSprint/tools/ejecutar_despliegue_local_sprint3.php\n"
+    },
+    {
+      "file": "database/tercerSprint/tools/preparar_respaldo_despliegue_sprint3.php",
+      "code": 0,
+      "output": "No syntax errors detected in database/tercerSprint/tools/preparar_respaldo_despliegue_sprint3.php\n"
+    },
+    {
+      "file": "database/tercerSprint/tools/recuperar_preflight_despliegue_sprint3.php",
+      "code": 0,
+      "output": "No syntax errors detected in database/tercerSprint/tools/recuperar_preflight_despliegue_sprint3.php\n"
+    },
+    {
+      "file": "database/tercerSprint/tools/verificar_baja_turnos_programacion_sprint3.php",
+      "code": 0,
+      "output": "No syntax errors detected in database/tercerSprint/tools/verificar_baja_turnos_programacion_sprint3.php\n"
+    },
+    {
+      "file": "tests/sprint3/paso15_validacion_local.php",
+      "code": 0,
+      "output": "No syntax errors detected in tests/sprint3/paso15_validacion_local.php\n"
+    },
+    {
+      "file": "tests/sprint3/paso6_turnos_programacion_test.php",
+      "code": 0,
+      "output": "No syntax errors detected in tests/sprint3/paso6_turnos_programacion_test.php\n"
+    }
+  ],
+  "sourceScriptsUnchanged": true,
+  "envUnchanged": true
+}

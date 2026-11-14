@@ -41,7 +41,8 @@ class AuthController extends Controller {
 
             if ($resultado['status']) {
                 unset($_SESSION[$rateKey], $_SESSION[$rateKey . '_time']);
-                header("Location: " . BASE_URL . "/Home");
+                $destination = (int)($_SESSION['rol'] ?? 0) === 2 ? "/Caja/abrir" : "/Home";
+                header("Location: " . BASE_URL . $destination);
             } else {
                 $_SESSION[$rateKey] = $attempts + 1;
                 $_SESSION[$rateKey . '_time'] = time();

@@ -40,6 +40,55 @@ class ControlSolicitudService {
     }
 
     /**
+     * Resuelve la referencia de idempotencia desde `referencia_solicitud`, `request_id`
+     * y/o la cabecera `X-Request-Reference`, rechazando contradicciones entre alias.
+     */
+    public static function resolverReferenciaCuerpoOCabecera(array $input, ?string $headerReferencia = null): string {
+        $tieneRefBody = array_key_exists('referencia_solicitud', $input) && $input['referencia_solicitud'] !== null && $input['referencia_solicitud'] !== '';
+        $tieneReqIdBody = array_key_exists('request_id', $input) && $input['request_id'] !== null && $input['request_id'] !== '';
+        $tieneHeader = is_string($headerReferencia) && trim($headerReferencia) !== '';
+
+        $candidatos = [];
+        if ($tieneRefBody) {
+            if (!is_string($input['referencia_solicitud'])) {
+                throw InventarioException::validacion([
+                    'referencia_solicitud' => 'La referencia de solicitud es obligatoria.',
+                ]);
+            }
+            $candidatos['referencia_solicitud'] = trim($input['referencia_solicitud']);
+        }
+        if ($tieneReqIdBody) {
+            if (!is_string($input['request_id'])) {
+                throw InventarioException::validacion([
+                    'referencia_solicitud' => 'La referencia de solicitud es obligatoria.',
+                ]);
+            }
+            $candidatos['request_id'] = trim($input['request_id']);
+        }
+        if ($tieneHeader) {
+            $candidatos['X-Request-Reference'] = trim($headerReferencia);
+        }
+
+        if (empty($candidatos)) {
+            throw InventarioException::validacion([
+                'referencia_solicitud' => 'La referencia de solicitud es obligatoria para evitar operaciones duplicadas.',
+            ]);
+        }
+
+        $valoresUnicos = array_values(array_unique(array_values($candidatos)));
+        if (count($valoresUnicos) > 1) {
+            throw new InventarioException(
+                'Los alias de referencia de solicitud contienen valores contradictorios.',
+                'AMBIGUOUS_ALIAS_VALUES',
+                422,
+                ['referencia_solicitud' => 'Los valores enviados en referencia_solicitud, request_id y/o X-Request-Reference deben coincidir.']
+            );
+        }
+
+        return self::validarReferenciaSolicitud($valoresUnicos[0]);
+    }
+
+    /**
      * Calcula el hash SHA-256 canónico de los datos funcionales de la solicitud,
      * excluyendo claves de transporte como `referencia_solicitud` o `csrf_token`.
      */
@@ -119,20 +168,14 @@ class ControlSolicitudService {
         $esTransaccionPropia = !$this->pdo->inTransaction();
 
         try {
-            if ($esTransaccionPropia) {
-                $this->pdo->beginTransaction();
-            }
-
             // 2. Consultar si existe registro previo para (id_usuario, tipo_operacion, referencia_solicitud)
+            // Se consulta antes de beginTransaction() (bajo GET_LOCK) para no fijar la instantánea MVCC
+            // de REPEATABLE READ antes de que la operación adquiera sus bloqueos FOR UPDATE.
             $sqlSelect = 'SELECT id_solicitud, hash_payload, estado_solicitud, codigo_http, respuesta_json
                             FROM control_solicitud_idempotencia
                            WHERE id_usuario = :id_usuario
                              AND tipo_operacion = :tipo_operacion
                              AND referencia_solicitud = :referencia_solicitud';
-            // GET_LOCK above serializes the exact (user, operation, reference) key.
-            // A locking read for a missing key takes a gap lock under InnoDB
-            // REPEATABLE READ; concurrent requests with different new references
-            // can then deadlock while inserting into the same unique-index gap.
             $stmtSelect = $this->pdo->prepare($sqlSelect);
             $stmtSelect->execute([
                 ':id_usuario' => $idUsuario,
@@ -144,25 +187,16 @@ class ControlSolicitudService {
             if ($existente) {
                 // Caso A: Misma referencia pero datos diferentes -> rechazar conflicto 409
                 if (!hash_equals((string)$existente['hash_payload'], $hashPayload)) {
-                    if ($esTransaccionPropia && $this->pdo->inTransaction()) {
-                        $this->pdo->rollBack();
-                    }
                     throw InventarioException::conflictoIdempotencia($referenciaValida);
                 }
 
                 // Caso B: Solicitud aún marcada en procesamiento -> informar estado 409 sin duplicar
                 if ($existente['estado_solicitud'] === 'EN_PROCESO') {
-                    if ($esTransaccionPropia && $this->pdo->inTransaction()) {
-                        $this->pdo->rollBack();
-                    }
                     throw InventarioException::solicitudEnProceso($referenciaValida);
                 }
 
                 // Caso C: Solicitud ya confirmada con los mismos datos -> recuperar resultado original (200 OK)
                 if ($existente['estado_solicitud'] === 'CONFIRMADA') {
-                    if ($esTransaccionPropia && $this->pdo->inTransaction()) {
-                        $this->pdo->commit();
-                    }
                     $guardado = json_decode((string)$existente['respuesta_json'], true) ?: [];
                     $respuestaReplay = [
                         'status' => true,
@@ -177,7 +211,13 @@ class ControlSolicitudService {
                         'response' => $respuestaReplay,
                     ];
                 }
+            }
 
+            if ($esTransaccionPropia) {
+                $this->pdo->beginTransaction();
+            }
+
+            if ($existente) {
                 // Si un intento anterior había quedado en FALLIDA, reactivarlo a EN_PROCESO dentro de esta transacción
                 $stmtReactivar = $this->pdo->prepare(
                     'UPDATE control_solicitud_idempotencia
@@ -215,7 +255,7 @@ class ControlSolicitudService {
             }
 
             // 3. Ejecutar la operación de negocio en la misma transacción
-            $resultadoOperacion = $operacionNegocio($this->pdo);
+            $resultadoOperacion = $operacionNegocio($this->pdo, $idSolicitud);
 
             $idRegistroRecurso = isset($resultadoOperacion['id_registro'])
                 ? (int)$resultadoOperacion['id_registro']
@@ -254,6 +294,20 @@ class ControlSolicitudService {
             if ($esTransaccionPropia && $this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
+            if ($error instanceof \PDOException) {
+                $sqlState = (string)$error->getCode();
+                $driverCode = (int)($error->errorInfo[1] ?? 0);
+                if ($sqlState === '40001' || in_array($driverCode, [1205, 1213], true)) {
+                    throw new InventarioException(
+                        'Se detectó un conflicto de concurrencia o tiempo de espera en la base de datos. Reintente la operación con la misma referencia.',
+                        'CONCURRENT_OPERATION_CONFLICT',
+                        409,
+                        [],
+                        [],
+                        $error
+                    );
+                }
+            }
             throw $error;
         } finally {
             try {
@@ -263,6 +317,44 @@ class ControlSolicitudService {
                 // Ignorar error de liberación de lock al cerrar
             }
         }
+    }
+
+    /**
+     * Consulta de solo lectura de una confirmación idempotente existente (EP-21).
+     */
+    public function buscarConfirmacionPorReferencia(
+        int $idUsuario,
+        string $tipoOperacion,
+        string $referenciaSolicitud
+    ): ?array {
+        $referenciaValida = self::validarReferenciaSolicitud($referenciaSolicitud);
+        $stmt = $this->pdo->prepare(
+            "SELECT id_solicitud, codigo_http, respuesta_json
+               FROM control_solicitud_idempotencia
+              WHERE id_usuario = :id_usuario
+                AND tipo_operacion = :tipo_operacion
+                AND referencia_solicitud = :referencia_solicitud
+                AND estado_solicitud = 'CONFIRMADA'
+              LIMIT 1"
+        );
+        $stmt->execute([
+            ':id_usuario'           => $idUsuario,
+            ':tipo_operacion'       => $tipoOperacion,
+            ':referencia_solicitud' => $referenciaValida,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+        $decoded = json_decode((string)$row['respuesta_json'], true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        return [
+            'id_solicitud' => (int)$row['id_solicitud'],
+            'codigo_http'  => (int)$row['codigo_http'],
+            'response'     => $decoded,
+        ];
     }
 }
 

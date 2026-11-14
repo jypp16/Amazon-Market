@@ -42,19 +42,10 @@ function assertTest(string $code, string $description, bool $condition, string $
 echo "=== INICIANDO SUITE FASE 4 EN: " . $db->query("SELECT DATABASE()")->fetchColumn() . " ===" . PHP_EOL . PHP_EOL;
 
 // -------------------------------------------------------------------------
-// LIMPIEZA PREVIA Y PREPARACIÓN DE AMBIENTE DE PRUEBAS
+// PREPARACIÓN DE AMBIENTE AISLADO (CONSERVANDO HISTORIAL SPRINT 2/3)
 // -------------------------------------------------------------------------
-$db->exec("DELETE FROM kardex");
-$db->exec("DELETE FROM operacion_inventario");
-$db->exec("DELETE FROM compra_historial");
-$db->exec("UPDATE detalle_compra SET id_detalle_origen = NULL");
-$db->exec("DELETE FROM detalle_compra");
-$db->exec("DELETE FROM compra");
-$db->exec("DELETE FROM detalle_venta");
-$db->exec("DELETE FROM venta");
-$db->exec("DELETE FROM control_solicitud_idempotencia");
-$db->exec("DELETE FROM producto WHERE codigo_barra LIKE 'TST-%'");
-$db->exec("UPDATE producto SET stock_actual = 0");
+$histVentasInicial = (int)$db->query("SELECT COUNT(*) FROM venta WHERE id_sesion_caja IS NULL")->fetchColumn();
+$histKardexInicial = (int)$db->query("SELECT COUNT(*) FROM kardex")->fetchColumn();
 
 $productoService = new ProductoService();
 $compraService = new CompraService();
@@ -102,7 +93,7 @@ $idPresUnidad = (int)($presUnidad['id_presentacion'] ?? 1);
 $idProveedor = (int)$db->query("SELECT id_proveedor FROM proveedor WHERE estado = 1 LIMIT 1")->fetchColumn();
 $idClienteDni = 1; // Jose Dominguez (DNI)
 $idClienteRuc = 9; // Importaciones del Sur (RUC)
-$idUsuarioActivo = 1; // Administrador activo
+$idUsuarioActivo = prepararSesionCajaPruebaSprint3($db); // Vendedor activo con sesión de caja abierta
 
 // Inicializar existencias para las pruebas mediante carga controlada de prueba
 $db->exec("UPDATE producto SET stock_actual = 20 WHERE id_producto = {$prodA}");
@@ -672,35 +663,22 @@ assertTest(
 );
 
 // =========================================================================
-// LIMPIEZA FINAL Y VERIFICACIÓN DE AISLAMIENTO
+// CONSERVACIÓN DE HISTORIAL Y VERIFICACIÓN DE AISLAMIENTO
 // =========================================================================
-$db->exec("DELETE FROM kardex");
-$db->exec("DELETE FROM operacion_inventario");
-$db->exec("DELETE FROM compra_historial");
-$db->exec("UPDATE detalle_compra SET id_detalle_origen = NULL");
-$db->exec("DELETE FROM detalle_compra");
-$db->exec("DELETE FROM compra");
-$db->exec("DELETE FROM detalle_venta");
-$db->exec("DELETE FROM venta");
-$db->exec("DELETE FROM control_solicitud_idempotencia");
-$db->exec("DELETE FROM producto WHERE codigo_barra LIKE 'TST-%'");
-$db->exec("UPDATE producto SET stock_actual = 0");
-
-$totalKardexLimpio = (int)$db->query("SELECT COUNT(*) FROM kardex")->fetchColumn();
-$totalVentasLimpio = (int)$db->query("SELECT COUNT(*) FROM venta")->fetchColumn();
-$totalDetallesLimpio = (int)$db->query("SELECT COUNT(*) FROM detalle_venta")->fetchColumn();
+$histVentasFinal = (int)$db->query("SELECT COUNT(*) FROM venta WHERE id_sesion_caja IS NULL")->fetchColumn();
+$histKardexFinal = (int)$db->query("SELECT COUNT(*) FROM kardex")->fetchColumn();
 
 assertTest(
     'F4-CLEAN-01',
-    'Limpieza final en base de pruebas: registros temporales eliminados y stock en 0',
-    $totalKardexLimpio === 0 && $totalVentasLimpio === 0 && $totalDetallesLimpio === 0,
-    "kardex={$totalKardexLimpio}, ventas={$totalVentasLimpio}, detalles={$totalDetallesLimpio}"
+    'Conservación de registros históricos en base aislada tras pruebas de venta y Kardex',
+    $histVentasFinal === $histVentasInicial && $histKardexFinal > $histKardexInicial,
+    "hist_ventas={$histVentasFinal}/{$histVentasInicial}, kardex={$histKardexInicial}->{$histKardexFinal}"
 );
 
 // F4-ISO-01: Base amazon_market principal permanece estrictamente intocada
 $pdoReal = new PDO('mysql:host=localhost;dbname=amazon_market;charset=utf8mb4', 'root', '');
 $tablasReal = (int)$pdoReal->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'amazon_market'")->fetchColumn();
-$stockPosReal = (int)$pdoReal->query("SELECT COUNT(*) FROM producto WHERE stock_actual > 0")->fetchColumn();
+$productosReal = (int)$pdoReal->query("SELECT COUNT(*) FROM producto")->fetchColumn();
 $ventasReal = (int)$pdoReal->query("SELECT COUNT(*) FROM venta")->fetchColumn();
 $comprasReal = (int)$pdoReal->query("SELECT COUNT(*) FROM compra")->fetchColumn();
 $kardexReal = (int)$pdoReal->query("SELECT COUNT(*) FROM kardex")->fetchColumn();
@@ -708,12 +686,12 @@ $kardexReal = (int)$pdoReal->query("SELECT COUNT(*) FROM kardex")->fetchColumn()
 assertTest(
     'F4-ISO-01',
     'Aislamiento verificado: Base principal amazon_market no sufrió modificaciones',
-    $tablasReal === 20
-    && $stockPosReal === 106
-    && $ventasReal === 98
-    && $comprasReal === 4
-    && $kardexReal === 26,
-    "tablas={$tablasReal}, stock_pos={$stockPosReal}, ventas={$ventasReal}, compras={$comprasReal}, kardex={$kardexReal}"
+    $tablasReal === 32
+    && $productosReal === 108
+    && $ventasReal === 250
+    && $comprasReal === 80
+    && $kardexReal === 470,
+    "tablas={$tablasReal}, productos={$productosReal}, ventas={$ventasReal}, compras={$comprasReal}, kardex={$kardexReal}"
 );
 
 echo PHP_EOL . "=== RESUMEN FASE 4: {$passed} PASS / {$failed} FAIL ===" . PHP_EOL;

@@ -54,7 +54,13 @@ if (class_exists($controllerClass)) {
         if ($isApiRoute ?? false) {
             header('Content-Type: application/json; charset=utf-8');
             http_response_code(405);
-            echo json_encode(['status' => false, 'message' => 'Método no permitido.'], JSON_UNESCAPED_UNICODE);
+            echo json_encode([
+                'status' => false,
+                'code' => 'METHOD_NOT_ALLOWED',
+                'message' => 'Método no permitido.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
         $errorObject = new Controllers\ErrorController();
@@ -64,7 +70,13 @@ if (class_exists($controllerClass)) {
     if ($isApiRoute ?? false) {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(404);
-        echo json_encode(['status' => false, 'message' => 'Endpoint no encontrado.'], JSON_UNESCAPED_UNICODE);
+        echo json_encode([
+            'status' => false,
+            'code' => 'ENDPOINT_NOT_FOUND',
+            'message' => 'Endpoint no encontrado.',
+            'errors' => new \stdClass(),
+            'data' => null,
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
     $errorObject = new Controllers\ErrorController();

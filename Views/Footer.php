@@ -23,10 +23,6 @@
     <script src="<?= BASE_URL ?>/Assets/js/kardex.js?v=<?= filemtime(__DIR__ . "/../Assets/js/kardex.js") ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/variaciones.js?v=<?= filemtime(__DIR__ . "/../Assets/js/variaciones.js") ?>"></script>
 
-    <?php if (strpos($_GET['url'] ?? '', 'Caja/abrir') === 0 || strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0): ?>
-    <script src="<?= BASE_URL ?>/Assets/js/cajaDemoService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaDemoService.js") ?>"></script>
-    <?php endif; ?>
-
     <?php if (strpos($_GET['url'] ?? '', 'Caja/abrir') === 0): ?>
     <script src="<?= BASE_URL ?>/Assets/js/cajaService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaService.js") ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/caja.js?v=<?= filemtime(__DIR__ . "/../Assets/js/caja.js") ?>"></script>

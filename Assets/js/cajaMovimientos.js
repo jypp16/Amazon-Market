@@ -50,14 +50,13 @@
         originTurn: document.getElementById('cash_origin_turn'),
         confirmGroup: document.getElementById('cash_confirm_omitted_group'),
         confirmOmitted: document.getElementById('cash_confirm_omitted'),
+        confirmReflected: document.getElementById('cash_confirm_reflected'),
         submit: document.getElementById('cash_expense_submit'),
         feedback: document.getElementById('cash_expense_feedback')
     };
     var correction = {
         original: document.getElementById('cash_correction_original'),
         amount: document.getElementById('cash_correction_amount'),
-        admin: document.getElementById('cash_correction_admin'),
-        password: document.getElementById('cash_correction_password'),
         reason: document.getElementById('cash_correction_reason'),
         submit: document.getElementById('cash_correction_submit'),
         cancel: document.getElementById('cash_correction_cancel'),
@@ -478,13 +477,13 @@
         }
         if (isOmittedWithdrawal()) {
             originTurnId = expense.originTurn.value;
-            confirmed = expense.confirmOmitted.checked;
+            confirmed = expense.confirmOmitted.checked && expense.confirmReflected.checked;
             if (!originTurnId) {
                 setFieldError(expense.originTurn, 'cash_origin_turn_error', 'Selecciona el turno de origen.');
             }
             if (!confirmed) {
                 setFieldError(expense.confirmOmitted, 'cash_confirm_omitted_error',
-                    'Confirma que el retiro ocurrió con la caja anterior abierta.');
+                    'Confirma que ocurrió con la caja anterior abierta y que ya estaba reflejado en esta apertura.');
             }
         } else if (amount !== null && amount > Number(session.balance)) {
             setFieldError(expense.amount, 'cash_expense_amount_error', 'El monto supera el saldo disponible.');
@@ -500,7 +499,8 @@
             reason: reason,
             administrator_id: administratorId || null,
             origin_turn_id: originTurnId || null,
-            confirm_previous_open: confirmed
+            declared_occurred_in_open_origin_session: expense.confirmOmitted.checked,
+            confirmed_reflected_in_opening: expense.confirmReflected.checked
         };
     }
 
@@ -511,14 +511,10 @@
         var amount = /^\d+(?:[,.]\d{1,2})?$/.test(amountText)
             ? Number(amountText.replace(',', '.')) : NaN;
         var reason = correction.reason.value.trim();
-        var username = correction.admin.value.trim();
-        var password = correction.password.value;
 
         [
             [correction.original, 'cash_correction_original_error'],
             [correction.amount, 'cash_correction_amount_error'],
-            [correction.admin, 'cash_correction_admin_error'],
-            [correction.password, 'cash_correction_password_error'],
             [correction.reason, 'cash_correction_reason_error']
         ].forEach(function (field) { clearFieldError(field[0], field[1]); });
 
@@ -532,20 +528,6 @@
                 'Ingresa el importe correcto, desde cero y con hasta dos decimales.');
             firstInvalid = firstInvalid || correction.amount;
         }
-        if (!username) {
-            setFieldError(correction.admin, 'cash_correction_admin_error',
-                'Ingresa el usuario del administrador que autoriza.');
-            firstInvalid = firstInvalid || correction.admin;
-        } else if (sellerUsername && username.toLowerCase() === sellerUsername.toLowerCase()) {
-            setFieldError(correction.admin, 'cash_correction_admin_error',
-                'El vendedor no puede autorizar su propia corrección.');
-            firstInvalid = firstInvalid || correction.admin;
-        }
-        if (!password) {
-            setFieldError(correction.password, 'cash_correction_password_error',
-                'Ingresa la contraseña del administrador.');
-            firstInvalid = firstInvalid || correction.password;
-        }
         if (!reason) {
             setFieldError(correction.reason, 'cash_correction_reason_error',
                 'Describe el error comprobado y el motivo de la corrección.');
@@ -558,9 +540,7 @@
         return {
             original_movement_id: movement.id,
             corrected_amount: Math.round(amount * 100) / 100,
-            reason: reason,
-            admin_username: username,
-            admin_password: password
+            reason: reason
         };
     }
 
@@ -589,7 +569,7 @@
         correction.cancel.disabled = loadingState;
         income.submit.textContent = loadingState ? 'Registrando…' : 'Confirmar ingreso';
         expense.submit.textContent = loadingState ? 'Registrando…' : (isOmittedWithdrawal() ? 'Registrar retiro omitido' : 'Confirmar egreso');
-        correction.submit.textContent = loadingState ? 'Validando con el administrador…' : 'Solicitar corrección';
+        correction.submit.textContent = loadingState ? 'Registrando corrección…' : 'Registrar corrección';
     }
 
     function showFeedback(message, isError, formType) {
@@ -707,8 +687,7 @@
             session_id: payload.session_id,
             original_movement_id: payload.original_movement_id,
             corrected_amount: payload.corrected_amount,
-            reason: payload.reason,
-            admin_username: payload.admin_username
+            reason: payload.reason
         };
         payload.request_id = getRequestId(fingerprint);
         correction.feedback.hidden = true;
@@ -731,18 +710,10 @@
                     setFieldError(correction.reason, 'cash_correction_reason_error',
                         'Describe el error comprobado y el motivo de la corrección.');
                     correction.reason.focus();
-                } else if (result.type === 'administrator_required') {
-                    setFieldError(correction.admin, 'cash_correction_admin_error',
-                        'Ingresa el usuario del administrador que autoriza.');
-                    correction.admin.focus();
-                } else if (result.type === 'authorization_denied') {
-                    setFieldError(correction.password, 'cash_correction_password_error',
-                        'El administrador no pudo autorizar. Verifica sus credenciales y que sea distinto del vendedor.');
-                    correction.password.focus();
                 } else if (result.type === 'correction_not_allowed') {
                     showFeedback('Este tipo de registro no admite corrección desde esta pantalla.', true, 'correction');
                 } else {
-                    showFeedback('No se pudo autorizar ni guardar la corrección. Inténtalo de nuevo.', true, 'correction');
+                    showFeedback(result.message || 'No se pudo guardar la corrección. Inténtalo de nuevo.', true, 'correction');
                 }
                 return;
             }
@@ -764,19 +735,17 @@
             correctionData.corrections.push(data.correction);
             setStatus(true);
             correctionForm.reset();
-            correction.password.value = '';
             correction.feedback.hidden = true;
             clearErrors(correctionForm);
             clearRequestId();
             renderCorrectionOptions();
             renderPreview();
             var effect = data.correction.effect || 'Efecto informado por el servidor';
-            showFeedback('Corrección autorizada y vinculada al registro original. '
+            showFeedback('Corrección registrada y vinculada al original. '
                 + effect + '. Saldo actualizado: ' + formatMoney(balance) + '.', false, 'correction');
         }).catch(function () {
-            showFeedback('No se pudo autorizar ni guardar la corrección. Inténtalo de nuevo.', true, 'correction');
+            showFeedback('No se pudo guardar la corrección. Inténtalo de nuevo.', true, 'correction');
         }).finally(function () {
-            correction.password.value = '';
             setFormLoading(false);
             renderPreview();
         });
@@ -834,7 +803,6 @@
         clearRequestId();
         window.setTimeout(function () {
             if (formType === 'correction') {
-                correction.password.value = '';
                 renderCorrectionOptions();
             }
             renderPreview();
@@ -919,12 +887,6 @@
     });
     correction.amount.addEventListener('input', function () {
         clearFieldError(correction.amount, 'cash_correction_amount_error');
-    });
-    correction.admin.addEventListener('input', function () {
-        clearFieldError(correction.admin, 'cash_correction_admin_error');
-    });
-    correction.password.addEventListener('input', function () {
-        clearFieldError(correction.password, 'cash_correction_password_error');
     });
     correction.reason.addEventListener('input', function () {
         clearFieldError(correction.reason, 'cash_correction_reason_error');

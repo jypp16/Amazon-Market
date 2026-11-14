@@ -623,7 +623,13 @@ async function procesarVenta() {
             calcularVuelto();
             renderCarrito();
         } else {
-            await Modal.error('Error', (res && res.data && res.data.message) || 'Error desconocido.');
+            var errCode = res && res.data ? res.data.code : '';
+            var errMsg = (res && res.data && res.data.message) || 'Error desconocido.';
+            if (errCode === 'CASH_SESSION_CLOSED' || errCode === 'NO_OPEN_SESSION') {
+                await Modal.error('Caja cerrada o sin sesión abierta', errMsg + '\n\nVe a Caja → Abrir caja para iniciar tu turno antes de vender.');
+            } else {
+                await Modal.error('Error', errMsg);
+            }
         }
     } catch(e) {
         document.getElementById('loader_overlay').style.display = 'none';

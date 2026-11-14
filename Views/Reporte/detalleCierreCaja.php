@@ -1,118 +1,172 @@
-<?php require_once 'Views/Header.php'; ?>
+<?php require 'Views/Header.php'; ?>
 
-<section class="close-detail-page">
-    <a class="close-back-link" href="<?= BASE_URL ?>/Reporte/cierresCaja">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Volver al reporte
-    </a>
+<?php
+$cierreId = (int)($data['cierre_id'] ?? 0);
+?>
 
-    <?php if (empty($data['cierre'])): ?>
-    <section class="close-not-found" role="status">
-        <h1>Cierre no encontrado</h1>
-        <p>El detalle solicitado no está disponible en esta vista de diseño.</p>
+<main class="close-page">
+    <section class="close-header">
+        <div>
+            <span class="close-badge">Reporte administrativo · Detalle</span>
+            <h1 id="closure_detail_title">Detalle de cierre de caja</h1>
+            <p id="closure_detail_subtitle" class="close-subtitle">Consultando resumen, arqueos, autorizaciones y movimientos del cierre.</p>
+        </div>
+        <div class="close-header-actions">
+            <a class="close-button close-button-secondary" href="<?= BASE_URL ?>/Reporte/cierresCaja">Volver a cierres</a>
+            <?php if ((int)($_SESSION['rol'] ?? 0) === 1 && \Libraries\Middleware\RBACMiddleware::tienePermisoAsignado(1, 'reportes.cierres_caja') && \Libraries\Middleware\RBACMiddleware::tienePermisoAsignado(1, 'reportes.exportar')): ?>
+                <button id="closure_export_pdf" type="button" class="close-button close-button-secondary" disabled>Descargar PDF</button>
+                <button id="closure_export_excel" type="button" class="close-button close-button-secondary" disabled>Descargar Excel</button>
+            <?php endif; ?>
+        </div>
     </section>
-    <?php else: ?>
-    <?php
-    $cierre = $data['cierre'];
-    $diferencia = (float)$cierre['closing_difference'];
-    ?>
-    <header class="close-detail-heading">
-        <h1>Cierre del <?= e($cierre['closed_at']) ?> · <?= e($cierre['seller']) ?> · Turno <?= e(strtolower($cierre['shift'])) ?></h1>
-        <p>Detalle del cierre. Solo lectura.</p>
-    </header>
 
-    <div class="close-detail-grid">
-        <section class="close-detail-card close-cash-summary" aria-labelledby="close_cash_summary_title">
-            <h2 id="close_cash_summary_title">Resumen de efectivo</h2>
-            <dl>
-                <div><dt>Fondo inicial</dt><dd><?= e('S/ ' . number_format((float)$cierre['opening_fund'], 2, ',', '')) ?></dd></div>
-                <div><dt>+ Ventas en efectivo</dt><dd><?= e('S/ ' . number_format((float)$cierre['cash_sales'], 2, ',', '')) ?></dd></div>
-                <div><dt>+ Ingresos e inyecciones</dt><dd><?= e('S/ ' . number_format((float)$cierre['income'], 2, ',', '')) ?></dd></div>
-                <div><dt>− Egresos</dt><dd><?= e('S/ ' . number_format((float)$cierre['expenses'], 2, ',', '')) ?></dd></div>
-                <div class="is-emphasized"><dt>Efectivo esperado</dt><dd><?= e('S/ ' . number_format((float)$cierre['expected'], 2, ',', '')) ?></dd></div>
-                <div><dt>Efectivo contado</dt><dd><?= e('S/ ' . number_format((float)$cierre['counted'], 2, ',', '')) ?></dd></div>
-                <div class="close-detail-difference">
-                    <dt>Diferencia de cierre</dt>
-                    <dd class="<?= $diferencia < 0 ? 'is-negative' : ($diferencia > 0 ? 'is-positive' : '') ?>">
-                        <?= e(($diferencia < 0 ? '−' : ($diferencia > 0 ? '+' : '')) . 'S/ ' . number_format(abs($diferencia), 2, ',', '')) ?>
-                        · <?= $diferencia < 0 ? 'Faltante' : ($diferencia > 0 ? 'Sobrante' : 'Sin diferencia') ?>
-                    </dd>
-                </div>
-            </dl>
-            <p class="close-observation"><strong>Observación del arqueo:</strong> <?= e($cierre['observation']) ?></p>
-            <h3>Ventas por medio de pago</h3>
-            <dl>
-                <div><dt>Efectivo</dt><dd><?= e('S/ ' . number_format((float)$cierre['cash_sales'], 2, ',', '')) ?></dd></div>
-                <div><dt>Tarjeta</dt><dd><?= e('S/ ' . number_format((float)$cierre['card_sales'], 2, ',', '')) ?></dd></div>
-                <div><dt>Yape/Plin</dt><dd><?= e('S/ ' . number_format((float)$cierre['digital_sales'], 2, ',', '')) ?></dd></div>
-            </dl>
-            <small class="close-payment-note">Tarjeta y Yape/Plin se muestran aparte y no suman al efectivo esperado.</small>
+    <div id="closure_detail_feedback" class="close-alert" style="display: none;"></div>
+
+    <div id="closure_detail_content" style="display: none;">
+        <section class="close-panel">
+            <div class="close-summary-grid">
+                <article class="close-metric">
+                    <span class="close-metric-label">Efectivo esperado</span>
+                    <strong id="detail_expected" class="close-metric-value">S/ 0.00</strong>
+                </article>
+                <article class="close-metric">
+                    <span class="close-metric-label">Efectivo contado</span>
+                    <strong id="detail_counted" class="close-metric-value">S/ 0.00</strong>
+                </article>
+                <article class="close-metric">
+                    <span class="close-metric-label">Diferencia de cierre</span>
+                    <strong id="detail_closing_diff" class="close-metric-value">S/ 0.00</strong>
+                </article>
+                <article class="close-metric">
+                    <span class="close-metric-label">Diferencia de apertura</span>
+                    <strong id="detail_opening_diff" class="close-metric-value">No aplica</strong>
+                </article>
+            </div>
         </section>
 
-        <section class="close-detail-card close-session-data" aria-labelledby="close_session_data_title">
-            <h2 id="close_session_data_title">Datos del cierre</h2>
-            <dl>
-                <div><dt>Vendedor</dt><dd><?= e($cierre['seller']) ?></dd></div>
-                <div><dt>Turno</dt><dd><?= e($cierre['shift_schedule']) ?></dd></div>
-                <div><dt>Apertura real</dt><dd><?= e($cierre['opening_at']) ?></dd></div>
-                <div><dt>Cierre real</dt><dd><?= e($cierre['closing_at']) ?></dd></div>
-                <div><dt>Arqueo usado</dt><dd><?= e($cierre['arqueo_at']) ?> · vigente</dd></div>
-                <div><dt>Autorización de horario</dt><dd><?= e($cierre['authorization']) ?></dd></div>
-            </dl>
-            <div class="close-opening-difference">
-                <span>Diferencia de apertura (se muestra aparte)</span>
-                <strong><?= e(($cierre['opening_difference'] < 0 ? '−' : ($cierre['opening_difference'] > 0 ? '+' : '')) . 'S/ ' . number_format(abs((float)$cierre['opening_difference']), 2, ',', '')) ?></strong>
+        <section class="close-panel">
+            <h2>Resumen del turno y cierre</h2>
+            <div class="close-detail-grid">
+                <div class="close-detail-item">
+                    <span>Código</span>
+                    <strong id="detail_code">—</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Vendedor</span>
+                    <strong id="detail_seller">—</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Turno y horario</span>
+                    <strong id="detail_schedule">—</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Apertura</span>
+                    <strong id="detail_opened_at">—</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Cierre</span>
+                    <strong id="detail_closed_at">—</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Fondo inicial</span>
+                    <strong id="detail_opening_fund">S/ 0.00</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Cierre anterior de referencia</span>
+                    <strong id="detail_reference_amount">Sin cierre anterior</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Autorización</span>
+                    <strong id="detail_authorization">Sin excepción</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Ventas en efectivo</span>
+                    <strong id="detail_cash_sales">S/ 0.00</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Ingresos / Egresos</span>
+                    <strong id="detail_income_expenses">S/ 0.00 / S/ 0.00</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Ventas tarjeta / Yape·Plin</span>
+                    <strong id="detail_digital_sales">S/ 0.00 / S/ 0.00</strong>
+                </div>
+                <div class="close-detail-item">
+                    <span>Observación de cierre</span>
+                    <strong id="detail_observation">Sin observación</strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="close-panel">
+            <div class="close-section-head">
+                <div>
+                    <h2>Arqueos registrados</h2>
+                    <p>Historial de arqueos realizados durante la sesión.</p>
+                </div>
+            </div>
+            <div class="close-table-wrap">
+                <table class="close-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha y hora</th>
+                            <th>Esperado</th>
+                            <th>Contado</th>
+                            <th>Diferencia</th>
+                            <th>Estado</th>
+                            <th>Observación</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail_arqueos_tbody">
+                        <tr><td colspan="6" class="close-empty">Sin arqueos registrados.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="close-panel">
+            <div class="close-section-head">
+                <div>
+                    <h2>Movimientos de la sesión</h2>
+                    <p>Ventas en efectivo, inyecciones, retiros, correcciones y retiros omitidos vinculados.</p>
+                </div>
+            </div>
+            <div class="close-table-wrap">
+                <table class="close-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha y hora</th>
+                            <th>Tipo</th>
+                            <th>Motivo / Referencia</th>
+                            <th>Monto</th>
+                            <th>Vendedor</th>
+                            <th>Administrador</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail_movements_tbody">
+                        <tr><td colspan="6" class="close-empty">Sin movimientos registrados.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="close-pagination">
+                <span id="detail_movs_pagination_info">Mostrando 0 de 0</span>
+                <div class="close-pagination-actions">
+                    <button id="detail_movs_prev_btn" type="button" class="close-button close-button-secondary" disabled>Anterior</button>
+                    <button id="detail_movs_next_btn" type="button" class="close-button close-button-secondary" disabled>Siguiente</button>
+                </div>
             </div>
         </section>
     </div>
+</main>
 
-    <section class="close-detail-card close-session-movements" aria-labelledby="close_movements_title">
-        <h2 id="close_movements_title">Movimientos de la sesión</h2>
-        <div class="close-table-scroll">
-            <table class="close-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Fecha y hora</th>
-                        <th scope="col">Tipo</th>
-                        <th scope="col">Motivo o referencia</th>
-                        <th scope="col">Importe</th>
-                        <th scope="col">Vendedor</th>
-                        <th scope="col">Administrador</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($cierre['movements'] as $movimiento): ?>
-                    <?php
-                    $esRetiroOmitido = $movimiento['type'] === 'Retiro omitido';
-                    $claseTipo = $movimiento['type'] === 'Inyección'
-                        ? 'close-type-income'
-                        : (in_array($movimiento['type'], ['Retiro', 'Salida de caja'], true)
-                            ? 'close-type-expense'
-                            : ($esRetiroOmitido ? 'close-type-omitted' : 'close-type-sale'));
-                    ?>
-                    <tr>
-                        <td><?= e(($movimiento['date'] ?? substr($cierre['closed_at'], 0, 10)) . ' ' . $movimiento['time']) ?></td>
-                        <td><span class="close-movement-type <?= e($claseTipo) ?>"><?= e($movimiento['type']) ?></span></td>
-                        <td>
-                            <?= e($movimiento['reference']) ?>
-                            <?php if ($movimiento['type'] === 'Retiro omitido'): ?>
-                            <small class="close-omitted-help">Cierre original conservado; sin efecto en el saldo, ya reflejado en la apertura.</small>
-                            <?php endif; ?>
-                        </td>
-                        <td class="<?= $esRetiroOmitido ? 'is-neutral' : ($movimiento['amount'] < 0 ? 'is-negative' : '') ?>">
-                            <?= e(($esRetiroOmitido ? '' : ($movimiento['amount'] < 0 ? '−' : '+')) . 'S/ ' . number_format(abs((float)$movimiento['amount']), 2, ',', '')) ?>
-                        </td>
-                        <td><?= e($movimiento['seller']) ?></td>
-                        <td><?= e($movimiento['administrator']) ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <?php if (empty($cierre['movements'])): ?>
-                    <tr><td colspan="6" class="close-empty-movements">No hay movimientos de caja registrados en esta sesión de demostración.</td></tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </section>
-    <?php endif; ?>
-</section>
+<script>
+    window.CAJA_REPORTES_CONFIG = {
+        mode: 'detail',
+        baseUrl: <?= json_encode(BASE_URL, JSON_UNESCAPED_SLASHES) ?>,
+        cierreId: <?= json_encode($cierreId) ?>
+    };
+</script>
+<script src="<?= BASE_URL ?>/Assets/js/reporteCierres.js"></script>
 
-<?php require_once 'Views/Footer.php'; ?>
+<?php require 'Views/Footer.php'; ?>

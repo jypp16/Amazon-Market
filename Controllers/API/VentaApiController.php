@@ -33,15 +33,12 @@ class VentaApiController extends ApiController
         $this->store();
     }
 
-    private function extraerReferenciaSolicitud(array $input): ?string {
-        if (!empty($input['referencia_solicitud']) && is_string($input['referencia_solicitud'])) {
-            return ControlSolicitudService::validarReferenciaSolicitud($input['referencia_solicitud']);
-        }
-        $headerRef = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
-        if (!empty($headerRef) && is_string($headerRef)) {
-            return ControlSolicitudService::validarReferenciaSolicitud($headerRef);
-        }
-        throw InventarioException::validacion(['referencia_solicitud' => 'La referencia de solicitud es obligatoria para evitar operaciones duplicadas.']);
+    private function extraerReferenciaSolicitud(array $input): string {
+        $headerRef = isset($_SERVER['HTTP_X_REQUEST_REFERENCE']) && is_string($_SERVER['HTTP_X_REQUEST_REFERENCE'])
+            ? $_SERVER['HTTP_X_REQUEST_REFERENCE']
+            : null;
+
+        return ControlSolicitudService::resolverReferenciaCuerpoOCabecera($input, $headerRef);
     }
 
     private function getVentas(?string $id): void
@@ -87,13 +84,22 @@ class VentaApiController extends ApiController
         try {
             $this->requirePermission('ventas.procesar');
 
-            $data = $this->getInput();
-            if (empty($data)) {
-                $this->sendJsonResponse(['status' => false, 'message' => 'Cuerpo JSON inválido o vacío.'], 400);
+            $idRol = (int)($this->authenticatedUser['id_rol'] ?? $_SESSION['rol'] ?? 0);
+            if ($idRol !== 2) {
+                $this->sendJsonResponse([
+                    'status' => false,
+                    'code' => 'FORBIDDEN',
+                    'message' => 'Solo un usuario con rol Vendedor puede registrar ventas en POS.',
+                    'errors' => new \stdClass(),
+                    'data' => null,
+                ], 403);
             }
 
-            // Seguridad de inquilino (Task 8): El cliente jamás puede suplantar al responsable
+            $data = $this->getInput();
+
+            // Seguridad de inquilino (Task 8 / Paso 9): El cliente jamás puede suplantar al responsable ni la sesión de caja
             $data['id_usuario'] = (int)$this->authenticatedUserId;
+            unset($data['id_sesion_caja']);
 
             $referenciaSolicitud = $this->extraerReferenciaSolicitud($data);
 
@@ -104,7 +110,14 @@ class VentaApiController extends ApiController
         } catch (InventarioException $e) {
             $this->sendJsonResponse($e->asResponseArray(), $e->getStatusCode());
         } catch (Throwable $e) {
-            $this->sendJsonResponse(['status' => false, 'message' => $e->getMessage()], 400);
+            error_log('VentaApiController::store error: ' . $e->getMessage());
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'INTERNAL_ERROR',
+                'message' => 'Error interno al procesar la venta.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 500);
         }
     }
 }

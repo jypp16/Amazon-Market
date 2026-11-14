@@ -12,16 +12,23 @@ abstract class ApiController {
     protected array $requestHeaders = [];
     public string $requestMethod;
     protected ?array $requestBody = null;
+    protected string $rawRequestBody = '';
     protected ?int $authenticatedUserId = null;
     protected ?array $authenticatedUser = null;
+    protected bool $allowMultipartFormData = true;
 
     public function __construct() {
         $this->requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $this->requestHeaders = function_exists('getallheaders') ? (getallheaders() ?: []) : [];
-        $this->parseIncomingRequest();
-        $this->loadModel();
         $this->enforceAuthentication();
         $this->enforceCsrfOnStateChange();
+        $this->authorizeController();
+        $this->parseIncomingRequest();
+        $this->loadModel();
+    }
+
+    protected function authorizeController(): void {
+        // Hook para autorización a nivel de controlador antes de parsear el cuerpo.
     }
 
     private function loadModel(): void {
@@ -41,23 +48,65 @@ abstract class ApiController {
                 ?? $this->requestHeaders['content-type']
                 ?? ($_SERVER['CONTENT_TYPE'] ?? '');
 
-            if (str_contains($contentType, 'application/json')) {
-                $rawInput = file_get_contents('php://input');
-                $decoded = json_decode($rawInput, true);
-
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    $this->requestBody = is_array($decoded) ? $decoded : [];
-                } else {
-                    $this->sendJsonResponse(['status' => false, 'message' => 'La sintaxis JSON de la petición es inválida'], 400);
+            if ($this->requestMethod === 'DELETE') {
+                if (str_contains(strtolower((string)$contentType), 'application/json')) {
+                    $rawInput = (string)file_get_contents('php://input');
+                    $this->rawRequestBody = $rawInput;
+                    if (trim($rawInput) === '') {
+                        $this->requestBody = [];
+                        return;
+                    }
+                    $decodedObj = json_decode($rawInput, false);
+                    $decodedArr = json_decode($rawInput, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_object($decodedObj) && is_array($decodedArr)) {
+                        $this->requestBody = $decodedArr;
+                        return;
+                    }
+                    $this->sendJsonResponse([
+                        'status' => false,
+                        'code' => 'INVALID_JSON',
+                        'message' => 'La sintaxis JSON de la petición es inválida.',
+                        'errors' => new \stdClass(),
+                        'data' => null,
+                    ], 400);
                 }
-            } elseif (str_contains($contentType, 'multipart/form-data')) {
+                $this->requestBody = [];
+                return;
+            }
+
+            if (str_contains(strtolower((string)$contentType), 'application/json')) {
+                $rawInput = (string)file_get_contents('php://input');
+                $this->rawRequestBody = $rawInput;
+                $decodedObj = json_decode($rawInput, false);
+                $decodedArr = json_decode($rawInput, true);
+
+                if (json_last_error() === JSON_ERROR_NONE && is_object($decodedObj) && is_array($decodedArr)) {
+                    $this->requestBody = $decodedArr;
+                } else {
+                    $this->sendJsonResponse([
+                        'status' => false,
+                        'code' => 'INVALID_JSON',
+                        'message' => 'La sintaxis JSON de la petición es inválida.',
+                        'errors' => new \stdClass(),
+                        'data' => null,
+                    ], 400);
+                }
+            } elseif ($this->allowMultipartFormData && str_contains(strtolower((string)$contentType), 'multipart/form-data')) {
                 $this->requestBody = $_POST;
                 $methodOverride = $_POST['_method'] ?? null;
                 if ($methodOverride && in_array(strtoupper($methodOverride), ['PUT', 'PATCH', 'DELETE'], true)) {
                     $this->requestMethod = strtoupper($methodOverride);
                 }
-            } elseif ($this->requestMethod !== 'DELETE') {
-                $this->sendJsonResponse(['status' => false, 'message' => 'El tipo de contenido debe ser application/json o multipart/form-data'], 415);
+            } else {
+                $this->sendJsonResponse([
+                    'status' => false,
+                    'code' => 'UNSUPPORTED_MEDIA_TYPE',
+                    'message' => $this->allowMultipartFormData
+                        ? 'El tipo de contenido debe ser application/json o multipart/form-data.'
+                        : 'El tipo de contenido debe ser application/json.',
+                    'errors' => new \stdClass(),
+                    'data' => null,
+                ], 415);
             }
         }
     }
@@ -69,6 +118,7 @@ abstract class ApiController {
                 'status' => false,
                 'code' => 'AUTH_REQUIRED',
                 'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'errors' => new \stdClass(),
                 'data' => null,
             ], 401);
         }
@@ -83,6 +133,7 @@ abstract class ApiController {
                     'status' => false,
                     'code' => 'CSRF_INVALID',
                     'message' => 'Token CSRF inválido. Recargue la página e intente de nuevo.',
+                    'errors' => new \stdClass(),
                     'data' => null,
                 ], 403);
             }
@@ -99,6 +150,7 @@ abstract class ApiController {
                 'status' => false,
                 'code' => $code,
                 'message' => 'No tienes permisos para acceder a este recurso.',
+                'errors' => new \stdClass(),
                 'data' => null,
             ], 403);
         }
@@ -115,6 +167,7 @@ abstract class ApiController {
                 'status' => false,
                 'code' => 'AUTH_REQUIRED',
                 'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'errors' => new \stdClass(),
                 'data' => null,
             ], 401);
         }
@@ -124,6 +177,7 @@ abstract class ApiController {
                 'status' => false,
                 'code' => 'FORBIDDEN_ADMIN_ONLY',
                 'message' => 'Acceso denegado. Esta operación está reservada exclusivamente a usuarios con rol Administrador.',
+                'errors' => new \stdClass(),
                 'data' => null,
             ], 403);
         }
@@ -133,6 +187,48 @@ abstract class ApiController {
                 'status' => false,
                 'code' => 'FORBIDDEN_ADMIN_ONLY',
                 'message' => 'No tienes permisos para ejecutar esta operación.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 403);
+        }
+
+        $this->authenticatedUser = $usuario;
+        $this->authenticatedUserId = (int)$usuario['id_usuario'];
+        return $usuario;
+    }
+
+    /**
+     * Exige que el usuario autenticado esté activo en BD, tenga rol Vendedor (id_rol = 2)
+     * y posea el permiso RBAC indicado. Nunca concede bypass administrativo.
+     */
+    protected function requireVendedorActivo(?string $slug = null): array {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'AUTH_REQUIRED',
+                'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 401);
+        }
+
+        if ((int)$usuario['id_rol'] !== 2) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN',
+                'message' => 'Acceso denegado. Esta operación está reservada exclusivamente a usuarios con rol Vendedor.',
+                'errors' => new \stdClass(),
+                'data' => null,
+            ], 403);
+        }
+
+        if ($slug !== null && !RBACMiddleware::tienePermiso(2, $slug)) {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN',
+                'message' => 'No tienes permisos para ejecutar esta operación.',
+                'errors' => new \stdClass(),
                 'data' => null,
             ], 403);
         }
@@ -144,6 +240,20 @@ abstract class ApiController {
 
     protected function getAuthenticatedUser(): array {
         return $this->authenticatedUser ?? [];
+    }
+
+    protected function getHeader(string $name, ?string $default = null): ?string {
+        $target = strtolower($name);
+        foreach ($this->requestHeaders as $k => $v) {
+            if (strtolower((string)$k) === $target) {
+                return is_string($v) ? $v : (string)$v;
+            }
+        }
+        $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
+        if (isset($_SERVER[$serverKey])) {
+            return (string)$_SERVER[$serverKey];
+        }
+        return $default;
     }
 
     protected function sendJsonResponse(array $data, int $statusCode = 200): void {
@@ -158,6 +268,20 @@ abstract class ApiController {
 
     protected function getInput(): array {
         return $this->requestBody ?? [];
+    }
+
+    /**
+     * @return array{count:int,number_literal:?string}
+     */
+    protected function inspectRawJsonField(string $fieldName): array {
+        if ($this->rawRequestBody === '') {
+            return ['count' => 0, 'number_literal' => null];
+        }
+        return JsonDecimalExtractor::inspectTopLevelKey($this->rawRequestBody, $fieldName);
+    }
+
+    protected function getRawJsonNumberField(string $fieldName): ?string {
+        return $this->inspectRawJsonField($fieldName)['number_literal'];
     }
 
     protected function getParam(string $key, $default = null) {
@@ -203,7 +327,13 @@ abstract class ApiController {
         if (!empty($allowed)) {
             header('Allow: ' . implode(', ', $allowed));
         }
-        $this->sendJsonResponse(['status' => false, 'message' => 'Método HTTP no permitido en este recurso'], 405);
+        $this->sendJsonResponse([
+            'status' => false,
+            'code' => 'METHOD_NOT_ALLOWED',
+            'message' => 'Método HTTP no permitido en este recurso',
+            'errors' => new \stdClass(),
+            'data' => null,
+        ], 405);
     }
 
     private static function class_basename(string $class): string {

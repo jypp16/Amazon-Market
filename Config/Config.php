@@ -1,5 +1,7 @@
 <?php
 
+date_default_timezone_set('America/Lima');
+
 require_once __DIR__ . '/../Libraries/Core/Dotenv.php';
 
 Dotenv::load(__DIR__ . '/../.env');

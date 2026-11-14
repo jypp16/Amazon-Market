@@ -14,6 +14,7 @@ class Conexion {
             $this->conect = new PDO('mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS);
             $this->conect->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $this->conect->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+            $this->conect->exec("SET SESSION time_zone = '-05:00'");
         } catch (PDOException $e) {
             // No filtrar detalles de la BD al usuario final
             error_log('Error de conexión BD: ' . $e->getMessage());

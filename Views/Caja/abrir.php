@@ -14,11 +14,19 @@
             <section class="cash-previous-reference" aria-label="Referencia del cierre anterior">
                 <div>
                     <span class="cash-reference-label">Referencia del cierre anterior</span>
-                    <strong id="cash_reference_amount">—</strong>
-                    <small>Contado al cerrar <span id="cash_reference_date">—</span> · turno <span id="cash_reference_turn">—</span></small>
+                    <strong id="cash_reference_amount">Cargando…</strong>
+                    <small id="cash_reference_meta">Contado al cerrar <span id="cash_reference_date">—</span> · turno <span id="cash_reference_turn">—</span></small>
                 </div>
                 <p>Es solo una referencia. Tu saldo inicial es el monto que cuentes y confirmes.</p>
             </section>
+
+            <div class="cash-opening-field">
+                <label for="cash_shift_select">Turno atendido</label>
+                <select id="cash_shift_select" name="shift_id" aria-describedby="cash_shift_help">
+                    <option value="">Cargando turnos…</option>
+                </select>
+                <small id="cash_shift_help">Puedes abrir tu turno programado o elegir otro turno activo en caso de suplencia o apertura sin programación.</small>
+            </div>
 
             <div class="cash-opening-field">
                 <label for="cash_counted">Efectivo contado (S/)</label>
@@ -53,9 +61,9 @@
         </form>
 
         <section class="cash-opening-card cash-opening-already-open" id="cash_opening_already_open" role="status" hidden>
-            <h3>Ya tienes una caja abierta</h3>
-            <p>No puedes abrir otra sesión mientras esta caja siga abierta.</p>
-            <a class="btn btn-cash-primary" href="<?= BASE_URL ?>/Caja/movimientos">Ir a Movimientos</a>
+            <h3 id="cash_opening_occupied_title">Ya tienes una caja abierta</h3>
+            <p id="cash_opening_occupied_message">No puedes abrir otra sesión mientras esta caja siga abierta.</p>
+            <a class="btn btn-cash-primary" id="cash_opening_occupied_link" href="<?= BASE_URL ?>/Caja/movimientos">Ir a Movimientos</a>
         </section>
 
         <aside class="cash-opening-card cash-opening-summary" aria-labelledby="cash_summary_title">
@@ -83,29 +91,9 @@
     </div>
 </section>
 
-<?php
-$auth_warning = '';
-$auth_reason_placeholder = 'Explica por qué se abre fuera de horario';
-$auth_submit_label = 'Autorizar y abrir';
-$auth_help_text = 'Obligatorio. La autorización vale una sola vez, solo para esta apertura y este vendedor.';
-require 'Views/Caja/_autorizacion.php';
-?>
-
 <script>
 window.CAJA_SERVICE_CONFIG = <?= json_encode([
-    'mockEnabled' => true,
-    'mockScenario' => (string)($data['caja_mock_scenario'] ?? 'success'),
-    'sellerId' => $_SESSION['idUser'] ?? $_SESSION['id_usuario'] ?? $_SESSION['id'] ?? 'vendedor-demo',
-    'sellerName' => $_SESSION['nombre'] ?? 'Vendedor',
-    'sellerUsername' => $_SESSION['username'] ?? ''
-], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
-window.CAJA_WORKFLOWS_CONFIG = <?= json_encode([
-    'mockEnabled' => (($workflowMockEnabled = getenv('CAJA_WORKFLOWS_MOCK_ENABLED')) === false)
-        ? true : filter_var($workflowMockEnabled, FILTER_VALIDATE_BOOLEAN),
-    'scenario' => (($workflowScenario = getenv('CAJA_WORKFLOWS_MOCK_SCENARIO')) === false || $workflowScenario === '')
-        ? ((bool)($data['caja_mock_enabled'] ?? false) ? (string)($data['caja_mock_scenario'] ?? 'success') : 'success')
-        : $workflowScenario,
-    'sellerId' => $_SESSION['idUser'] ?? $_SESSION['id_usuario'] ?? $_SESSION['id'] ?? 'vendedor-demo',
+    'sellerId' => (int)($_SESSION['idUser'] ?? 0),
     'sellerName' => $_SESSION['nombre'] ?? 'Vendedor',
     'sellerUsername' => $_SESSION['username'] ?? ''
 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;

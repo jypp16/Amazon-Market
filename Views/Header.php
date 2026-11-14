@@ -35,7 +35,7 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
     <?php if ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/cierresCaja.css?v=<?= filemtime(__DIR__ . '/../Assets/css/cierresCaja.css') ?>">
     <?php endif; ?>
-    <script>const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
+    <script>const AUTH_USER_ID = <?= (int)($_SESSION['idUser'] ?? 0) ?>; const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
     <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
 </head>
 <body>
@@ -135,14 +135,19 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                 </a>
                 <?php endif; ?>
 
-                <?php if (in_array('ventas.acceder', $slugs)): ?>
+                <?php $esVendedorCaja = ((int)($_SESSION['rol'] ?? 0) === 2); $esAdminCaja = ((int)($_SESSION['rol'] ?? 0) === 1); ?>
+                <?php if ($esVendedorCaja && in_array('ventas.acceder', $slugs)): ?>
                 <a href="<?= BASE_URL ?>/Venta" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Venta') !== false) ? 'active' : '' ?>">
                     <i class="fa-solid fa-cash-register"></i> <span>Punto de Venta</span>
                 </a>
                 <?php endif; ?>
 
                 <?php
-                $puedeAccederCaja = in_array('turnos.acceder', $slugs);
+                $puedeAbrirCaja = $esVendedorCaja && in_array('turnos.abrir', $slugs);
+                $puedeMovimientosCaja = $esVendedorCaja && in_array('turnos.movimientos', $slugs);
+                $puedeArqueoCierre = $esVendedorCaja && (in_array('turnos.arqueo', $slugs) || in_array('turnos.cerrar', $slugs));
+                $puedeConsultarCaja = ($esVendedorCaja && in_array('turnos.acceder', $slugs)) || ($esAdminCaja && in_array('turnos.consultar_historico', $slugs));
+                $puedeAccederCaja = $puedeAbrirCaja || $puedeMovimientosCaja || $puedeArqueoCierre || $puedeConsultarCaja;
                 $enSeccionCaja = strpos($_GET['url'] ?? '', 'Caja') === 0;
                 ?>
                 <?php if ($puedeAccederCaja): ?>
@@ -153,22 +158,26 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                         <i class="fa-solid fa-chevron-down menu-chevron"></i>
                     </summary>
                     <div class="menu-submenu">
-                        <?php if (in_array('turnos.abrir', $slugs)): ?>
+                        <?php if ($puedeAbrirCaja): ?>
                         <a href="<?= BASE_URL ?>/Caja/abrir" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/abrir') === 0) ? 'active' : '' ?>">
                             <i class="fa-solid fa-lock-open"></i><span>Abrir caja</span>
                         </a>
                         <?php endif; ?>
+                        <?php if ($puedeMovimientosCaja): ?>
                         <a href="<?= BASE_URL ?>/Caja/movimientos" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0) ? 'active' : '' ?>">
                             <i class="fa-solid fa-arrow-right-arrow-left"></i><span>Movimientos</span>
                         </a>
-                        <?php if (in_array('turnos.cerrar', $slugs)): ?>
+                        <?php endif; ?>
+                        <?php if ($puedeArqueoCierre): ?>
                         <a href="<?= BASE_URL ?>/Caja/arqueo" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0) ? 'active' : '' ?>">
                             <i class="fa-solid fa-check"></i><span>Arqueo y cierre</span>
                         </a>
                         <?php endif; ?>
+                        <?php if ($puedeConsultarCaja): ?>
                         <a href="<?= BASE_URL ?>/Caja/consultar" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/consultar') === 0) ? 'active' : '' ?>">
                             <i class="fa-solid fa-magnifying-glass"></i><span>Consultar caja</span>
                         </a>
+                        <?php endif; ?>
                     </div>
                 </details>
                 <?php endif; ?>

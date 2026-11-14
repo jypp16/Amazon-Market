@@ -1,0 +1,20 @@
+{
+  "version": 3,
+  "sourceScripts": {
+    "01_preflight_y_control_sprint3.sql": "725252486befb85e3fdbc5b638970b6677113bb17e00e0401d9f3fe90a163895",
+    "02_estructura_turnos_y_programacion_sprint3.sql": "558d4151d02dfe48420d4b72d00735e669e1884811bea3426b224c0b6219aa0e",
+    "03_estructura_sesiones_arqueos_y_autorizaciones_sprint3.sql": "42624195aab500de704dcf53f432709e5fe1ab95d328cca035172687bf48efbe",
+    "04_estructura_movimientos_correcciones_y_ventas_sprint3.sql": "70f2bc4d87a2e80aae848f8b83246627f6625e0a18b650f1792b436ff526a38e",
+    "05_ampliacion_idempotencia_y_snapshots_reportes_sprint3.sql": "f8883f63769db8a94110a2dbeb3a36e7f20e59a062986db16f8123ac1a2fe8a6",
+    "06_configuracion_permisos_y_cierre_migracion_sprint3.sql": "ed8aa4cbdafa4cb5e184e968780b4b01f1f2d04cbd888b2d0c2f2b176634ec2a",
+    "07_ajuste_check_correccion_cero_sprint3.sql": "0bd1e39141c5714c107487fd446e7f1225c2e26530de832593b5239b9bfcae34",
+    "08_ampliar_referencia_visible_movimiento_caja_sprint3.sql": "b1303a8865a7cbc407ebf03d4c00ab0af7a589b6e04f9063c48357c06681bae3",
+    "09_ajuste_trigger_venta_efectivo_sprint3.sql": "a5decda5be68d84dd610d306ef6a38da82ed4cf6bfaa1e6480acc2900585e390"
+  },
+  "releaseSQL": "10_despliegue_local_sprint3.sql",
+  "sha256": "6af2b14391973a9b4b983eaaa45c92a1c0ed65ec2adce771fc130778253d9ab7",
+  "adaptation": "Solo nueve guardias de destino; datos, restricciones y lógica originales conservados. Preflight11 alinea únicamente DEFAULT COLLATION antes de crear variables/triggers; orden11→10.",
+  "main_sql_sha256": "bc5a16e6f56c420979640750b2dcf3c5fd3f31ee42851a41a1f4e86625d5d2a5",
+  "preflightSQL": "11_contexto_despliegue_local_sprint3.sql",
+  "preflight_sha256": "2e889e75a339e0a4af005ea2c3142b4be978717acef48cece1fbd56078b8c266"
+}

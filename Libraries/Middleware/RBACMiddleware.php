@@ -42,7 +42,15 @@ class RBACMiddleware extends Middleware {
             return;
         }
 
+        if (self::esRutaExclusivaVendedorSprint3($controller, $method) && $rol !== 2) {
+            $this->denegarAccesoVendedorSprint3();
+            return;
+        }
+
         $slug = self::mapControllerMethodToSlug($controller, $method);
+        if ($controller === 'caja' && $method === 'consultar' && $rol === 1) {
+            $slug = 'turnos.consultar_historico';
+        }
         if ($slug && !self::tienePermiso($rol, $slug)) {
             if ($this->isApiRequest()) {
                 $this->jsonResponse([
@@ -80,11 +88,40 @@ class RBACMiddleware extends Middleware {
             return true;
         }
 
-        if ($controller === 'reporte' && in_array($method, ['kardex', 'variaciones'], true)) {
+        if ($controller === 'reporte' && in_array($method, ['kardex', 'variaciones', 'cierrescaja', 'detallecierrecaja'], true)) {
             return true;
         }
 
         return false;
+    }
+
+    public static function esRutaExclusivaVendedorSprint3(string $controller, string $method): bool {
+        $controller = strtolower($controller);
+        $method = strtolower($method);
+
+        if ($controller === 'caja' && in_array($method, ['abrir', 'movimientos', 'arqueo'], true)) {
+            return true;
+        }
+
+        if ($controller === 'venta' && in_array($method, ['index', 'guardar'], true)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function denegarAccesoVendedorSprint3(): void {
+        if ($this->isApiRequest()) {
+            $this->jsonResponse([
+                'status' => false,
+                'code' => 'FORBIDDEN_SELLER_ONLY',
+                'message' => 'Acceso denegado. Esta operación está reservada exclusivamente a usuarios con rol Vendedor.',
+                'data' => null,
+            ], 403);
+        } else {
+            $_SESSION['error'] = 'Acceso denegado. Esta sección operativa está reservada exclusivamente al Vendedor.';
+            $this->redirect('/Home');
+        }
     }
 
     public static function esSlugExclusivoAdminSprint2(string $slug): bool {
@@ -93,7 +130,19 @@ class RBACMiddleware extends Middleware {
             'reportes.kardex',
             'reportes.variaciones',
             'reportes.exportar',
+            'turnos.programar',
+            'turnos.consultar_historico',
+            'reportes.cierres_caja',
         ], true);
+    }
+
+    /** Consulta asignación efectiva, sin bypass; usada por las exportaciones de caja. */
+    public static function tienePermisoAsignado(int $rol, string $slug): bool {
+        if ($rol <= 0 || (self::esSlugExclusivoAdminSprint2($slug) && $rol !== 1)) return false;
+        $model = new PermisoModel();
+        $permiso = $model->where(['slug'=>$slug, 'estado = 1'])->first();
+        return $permiso !== null && $permiso !== false
+            && $model->countPermisoByRol($rol, (int)$permiso['id_permiso']) > 0;
     }
 
     public static function tienePermiso(int $rol, string $slug): bool {
@@ -190,7 +239,7 @@ class RBACMiddleware extends Middleware {
             ],
             'caja' => [
                 'abrir'      => 'turnos.abrir',
-                'movimientos' => 'turnos.acceder',
+                'movimientos' => 'turnos.movimientos',
                 'arqueo'     => 'turnos.cerrar',
                 'consultar'  => 'turnos.acceder',
             ],
@@ -214,8 +263,8 @@ class RBACMiddleware extends Middleware {
                 'comprobantes'           => 'reportes.ver',
                 'metodospago'            => 'reportes.ver',
                 'resumen'                => 'reportes.ver',
-                'cierrescaja'            => 'reportes.ver',
-                'detallecierrecaja'      => 'reportes.ver',
+                'cierrescaja'            => 'reportes.cierres_caja',
+                'detallecierrecaja'      => 'reportes.cierres_caja',
             ],
         ];
 

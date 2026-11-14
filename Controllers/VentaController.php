@@ -10,6 +10,7 @@ use Models\ProductoModel;
 use Models\TipoComprobanteModel;
 use Models\MetodoPagoModel;
 use Models\CategoriaModel;
+use Models\CajaModel;
 use Throwable;
 
 class VentaController extends Controller {
@@ -22,6 +23,18 @@ class VentaController extends Controller {
     }
 
     public function index() {
+        // Consultar el estado actual en servidor: una caja ajena no habilita ventas.
+        if ((int)($_SESSION['rol'] ?? 0) === 2) {
+            header('Cache-Control: no-store');
+            $sesion = (new CajaModel())->obtenerSesionAbiertaActual();
+            if ($sesion === null || (int)$sesion['id_usuario_vendedor'] !== (int)($_SESSION['idUser'] ?? 0)) {
+                $this->views->render($this, 'cajaRequerida', [
+                    'page_title' => 'Punto de Venta - Amazon Market'
+                ]);
+                return;
+            }
+        }
+
         $clienteM = new ClienteModel();
         $productoM = new ProductoModel();
         $compM = new TipoComprobanteModel();

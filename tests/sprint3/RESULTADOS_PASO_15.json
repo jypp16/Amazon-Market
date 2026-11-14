@@ -1,0 +1,81 @@
+{
+  "date": "2026-11-14T02:47:35.921Z",
+  "target": "http://localhost/Amazon-Market",
+  "database": "amazon_market",
+  "smoke": {
+    "status": true,
+    "phase": "deployed",
+    "checks": 24,
+    "results": {
+      "32 tablas originales conservadas": true,
+      "esquema y triggers del Sprint 3": true,
+      "única caja inicial libre": true,
+      "permiso rol 1 turnos.programar": true,
+      "permiso rol 1 turnos.consultar_historico": true,
+      "permiso rol 1 reportes.cierres_caja": true,
+      "permiso rol 1 reportes.exportar": true,
+      "permiso rol 2 turnos.abrir": true,
+      "permiso rol 2 turnos.cerrar": true,
+      "permiso rol 2 turnos.acceder": true,
+      "permiso rol 2 turnos.movimientos": true,
+      "permiso rol 2 turnos.arqueo": true,
+      "administrador con correo y contraseña configurados": true,
+      "HTTP 200 /Auth": true,
+      "HTTP 401 /api/caja/estado": true,
+      "HTTP 401 /api/reportes/cierres-caja": true,
+      "HTTP 200 /Assets/js/api.js": true,
+      "HTTP 403 /.env": true,
+      "HTTP 403 /.git/config": true,
+      "HTTP 403 /.codex/tmp/paso14/php-conf.d/session.ini": true,
+      "HTTP 403 /Config/Config.php": true,
+      "HTTP 403 /Libraries/Core/Conexion.php": true,
+      "HTTP 403 /database/tercerSprint/README.md": true,
+      "HTTP 403 /tests/sprint3/paso14_generadores_test.php": true
+    },
+    "preservation": {
+      "original_tables_preserved": 32,
+      "original_triggers_preserved": 5
+    },
+    "schema": {
+      "tables": 43,
+      "triggers": 34,
+      "migration": {
+        "estado": "COMPLETADA",
+        "paso_actual": "06_COMPLETADA"
+      },
+      "historical_sales_reassigned": 0,
+      "reference_width": 500
+    }
+  },
+  "regressions": [
+    {
+      "step": 6,
+      "passed": 116,
+      "total": 116
+    },
+    {
+      "step": 9,
+      "passed": 107,
+      "total": 107
+    },
+    {
+      "step": 11,
+      "passed": 159,
+      "total": 159
+    },
+    {
+      "step": 12,
+      "passed": 190,
+      "total": 190
+    },
+    {
+      "step": 14,
+      "passed": 88,
+      "total": 88
+    }
+  ],
+  "pre_backup_sha256": "3604a8b2745fcdc34cfbeb45ef5ab0e0a6c8e4134c4ce8eb254dcf81a5333820",
+  "post_backup_sha256": "4ba166e8134f9c63e50e93ffa0d5ace441069cad6c5e6d2adb352738ff992968",
+  "deployment_state": "ACTIVATED",
+  "post_activation_activity": "Se conservan altas de turnos, programación y snapshots posteriores a la activación; no son fixtures de las suites aisladas."
+}

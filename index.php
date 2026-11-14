@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/Helpers/maintenance.php';
+
 // Reportar todos los errores pero no mostrarlos al usuario final (information disclosure)
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
@@ -41,27 +43,30 @@ if ($isApiRoute) {
     array_shift($arrUrl);
 
     $resource = strtolower($arrUrl[0] ?? '');
-    // El id (si existe) viaja como único parámetro del método index()
-    $params = $arrUrl[2] ?? $arrUrl[1] ?? '';
+    // Subrutas completas tras el recurso (ej. '4', 'bajas', 'movimientos/corregibles')
+    $params = implode('/', array_filter(array_slice($arrUrl, 1), static fn($seg) => $seg !== ''));
 
     // Mapeo de recursos a controladores API
     $apiMap = [
-        'productos'     => 'ProductoApiController',
-        'clientes'      => 'ClienteApiController',
-        'usuarios'      => 'UsuarioApiController',
-        'ventas'        => 'VentaApiController',
-        'categorias'    => 'CategoriaApiController',
-        'unidades'      => 'UnidadApiController',
-        'comprobantes'  => 'TipoComprobanteApiController',
-        'pagos'         => 'MetodoPagoApiController',
+        'productos'       => 'ProductoApiController',
+        'clientes'        => 'ClienteApiController',
+        'usuarios'        => 'UsuarioApiController',
+        'ventas'          => 'VentaApiController',
+        'categorias'      => 'CategoriaApiController',
+        'unidades'        => 'UnidadApiController',
+        'comprobantes'    => 'TipoComprobanteApiController',
+        'pagos'           => 'MetodoPagoApiController',
         'tipos-documento' => 'TipoDocumentoApiController',
-        'roles'         => 'RolApiController',
-        'reportes'      => 'ReporteApiController',
-        'imagenes'      => 'ImagenApiController',
-        'proveedores'   => 'ProveedorApiController',
-        'compras'       => 'CompraApiController',
-        'inventario'    => 'InventarioApiController',
-        'alertas'       => 'AlertaApiController',
+        'roles'           => 'RolApiController',
+        'reportes'        => 'ReporteApiController',
+        'imagenes'        => 'ImagenApiController',
+        'proveedores'     => 'ProveedorApiController',
+        'compras'         => 'CompraApiController',
+        'inventario'      => 'InventarioApiController',
+        'alertas'         => 'AlertaApiController',
+        'turnos'          => 'TurnoApiController',
+        'programaciones'  => 'ProgramacionApiController',
+        'caja'            => 'CajaApiController',
     ];
 
     $controller = $apiMap[$resource] ?? ucfirst($resource) . 'ApiController';
@@ -102,9 +107,24 @@ if (!$esRutaPublica && !$isApiRoute) {
     }
 }
 
-// Validación CSRF para peticiones API que modifican estado
-// (la autenticación de la API la maneja ApiController::enforceAuthentication)
+// Validación de sesión activa y CSRF para peticiones API que modifican estado
+// (si no hay sesión o el usuario está inactivo, responde 401 AUTH_REQUIRED antes de evaluar CSRF)
 if ($isApiRoute && in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+    if (Libraries\Middleware\AuthMiddleware::verificarUsuarioActivoEnSesion() === null) {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(401);
+        echo json_encode([
+            'status' => false,
+            'code' => 'AUTH_REQUIRED',
+            'message' => 'Su sesión ha expirado o el usuario ya no se encuentra activo.',
+            'errors' => new \stdClass(),
+            'data' => null,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     Libraries\Middleware\CSRFMiddleware::verifyOrFail();
 }
 
