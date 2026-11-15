@@ -16,6 +16,7 @@ $esCajaAbrir = strpos($_GET['url'] ?? '', 'Caja/abrir') === 0;
 $esCajaMovimientos = strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0;
 $esCajaArqueo = strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0;
 $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
+$esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === '1';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -176,10 +177,10 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                         </a>
                         <?php endif; ?>
                         <?php if ($esAdminCaja && in_array('turnos.acceder', $slugsOperativos)): ?>
-                        <a href="<?= BASE_URL ?>/Caja/consultar?propia=1" class="menu-sublink"><i class="fa-solid fa-wallet"></i><span>Consultar mi caja</span></a>
+                        <a href="<?= BASE_URL ?>/Caja/consultar?propia=1" class="menu-sublink <?= $esCajaConsultaPropia ? 'active' : '' ?>"><i class="fa-solid fa-wallet"></i><span>Consultar mi caja</span></a>
                         <?php endif; ?>
                         <?php if ($puedeConsultarCaja): ?>
-                        <a href="<?= BASE_URL ?>/Caja/consultar" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Caja/consultar') === 0) ? 'active' : '' ?>">
+                        <a href="<?= BASE_URL ?>/Caja/consultar" class="menu-sublink <?= ($esCajaConsultar && !$esCajaConsultaPropia) ? 'active' : '' ?>">
                             <i class="fa-solid fa-magnifying-glass"></i><span><?= $esAdminCaja ? 'Consultar historial' : 'Consultar caja' ?></span>
                         </a>
                         <?php endif; ?>
