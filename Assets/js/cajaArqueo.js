@@ -124,6 +124,7 @@
     function hasUnsavedCount() {
         var current = activeArqueo();
         if (!current) return false;
+        if (!countInput.value.trim() && !observationInput.value.trim()) return false;
         if (parseCount() === Number(current.counted)
             && observationInput.value.trim() === String(current.observation || '').trim()) return false;
         showFeedback(closeFeedback,
@@ -496,6 +497,10 @@
                 }
                 appendSavedArqueo(saved);
                 clearCountRequest();
+                countInput.value = '';
+                observationInput.value = '';
+                clearFieldError(countInput, 'cash_count_amount_error');
+                clearFieldError(observationInput, 'cash_count_observation_error');
                 showFeedback(countFeedback, 'Arqueo guardado. El nuevo arqueo está vigente.', false);
             } else if (result.type === 'cash_changed') {
                 handleChanged(result);
