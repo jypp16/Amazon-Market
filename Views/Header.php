@@ -64,6 +64,7 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
             </div>
 
             <nav class="menu">
+                <div class="menu-items">
                 <?php if (in_array('dashboard.ver', $slugs)): ?>
                 <a href="<?= BASE_URL ?>/Home" class="menu-link <?= (strpos($_GET['url'] ?? '', 'Home') !== false) ? 'active' : '' ?>">
                     <i class="fa-solid fa-chart-line"></i> <span>Dashboard</span>
@@ -191,6 +192,7 @@ $esCajaConsultar = strpos($_GET['url'] ?? '', 'Caja/consultar') === 0;
                     <i class="fa-solid fa-chart-pie"></i> <span>Reportes</span>
                 </a>
                 <?php endif; ?>
+                </div>
 
                 <a href="<?= BASE_URL ?>/Auth/logout" class="menu-link logout-btn">
                     <i class="fa-solid fa-right-from-bracket"></i> <span>Cerrar Sesión</span>

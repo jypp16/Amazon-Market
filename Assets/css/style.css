@@ -147,7 +147,8 @@ button, select, input, textarea { font-family: inherit; }
 .sidebar.collapsed .user-profile { justify-content: center; padding: 16px 0; }
 .sidebar.collapsed .user-avatar { margin: 0; }
 .sidebar.collapsed .user-info { opacity: 0; width: 0; overflow: hidden; }
-.sidebar.collapsed .menu { padding: 16px 8px; }
+.sidebar.collapsed .menu-items { padding: 16px 8px; }
+.sidebar.collapsed .logout-btn { margin: 8px 8px 16px; }
 .sidebar.collapsed .menu-link { justify-content: center; padding: 12px; gap: 0; }
 .sidebar.collapsed .menu-link span { display: none; }
 .sidebar.collapsed .menu-link i { width: auto; font-size: 18px; }
@@ -179,7 +180,26 @@ button, select, input, textarea { font-family: inherit; }
 .user-role { font-size: 12px; color: var(--text-light); }
 
 /* Navigation Menu */
-.menu { padding: 20px 16px; display: flex; flex-direction: column; gap: 8px; flex-grow: 1; }
+.menu {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.menu-items {
+    min-height: 0;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+}
 
 .menu-link {
     display: flex; align-items: center; gap: 12px;
@@ -216,7 +236,7 @@ button, select, input, textarea { font-family: inherit; }
 .menu-sublink i { width: 16px; text-align: center; font-size: 14px; }
 .menu-sublink:hover { background-color: rgba(255, 255, 255, 0.05); color: var(--accent-gold); }
 .menu-sublink.active { background-color: var(--accent-gold-light); color: var(--accent-gold); font-weight: 600; }
-.logout-btn { margin-top: auto; color: #fda4af; }
+.logout-btn { margin: 8px 16px 20px; flex: 0 0 auto; color: #fda4af; }
 .logout-btn:hover { background-color: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
 /* ============================ 5. MAIN / TOPBAR / FOOTER ============================ */
