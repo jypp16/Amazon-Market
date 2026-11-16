@@ -6,6 +6,7 @@ const serviceSource = fs.readFileSync('Assets/js/cajaArqueoService.js', 'utf8');
 const demoSource = fs.readFileSync('Assets/js/cajaDemoService.js', 'utf8');
 const screenSource = fs.readFileSync('Assets/js/cajaArqueo.js', 'utf8');
 const viewSource = fs.readFileSync('Views/Caja/arqueo.php', 'utf8');
+const stylesSource = fs.readFileSync('Assets/css/caja.css', 'utf8');
 const authPartialSource = fs.readFileSync('Views/Caja/_autorizacion.php', 'utf8');
 
 function createService(scenario, apiRequest) {
@@ -135,6 +136,11 @@ function testMarkupAndAccessibility() {
     assert.match(viewSource, /Historial de arqueos/);
     assert.match(viewSource, /Fecha y hora/);
     assert.match(screenSource, /formatArqueoDateTime/);
+    assert.match(screenSource, /countInput\.value\.trim\(\)\.startsWith\('-'\)/);
+    assert.match(screenSource, /El efectivo contado no puede ser negativo\./);
+    assert.match(screenSource, /Advertencia: /);
+    assert.match(screenSource, /respecto al efectivo esperado\. Revisa el conteo\./);
+    assert.match(stylesSource, /\.cash-opening-difference\.is-warning\s*\{\s*background:\s*#fee4e4;\s*color:\s*#c62828;/);
     assert.match(viewSource, /id="cash_close_confirm"/);
     assert.match(viewSource, /Views\/Caja\/_autorizacion\.php/);
     assert.match(authPartialSource, /role="dialog" aria-modal="true"/);
