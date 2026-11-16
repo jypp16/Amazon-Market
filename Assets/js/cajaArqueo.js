@@ -176,6 +176,9 @@
             amount.textContent = '—';
             label.textContent = 'Pendiente';
             text.textContent = 'Ingresa un conteo válido para calcular la diferencia.';
+            if (countInput.value.trim().startsWith('-')) {
+                setFieldError(countInput, 'cash_count_amount_error', 'El efectivo contado no puede ser negativo.');
+            }
         } else {
             var difference = Math.round((value - Number(session.expected)) * 100) / 100;
             if (!Number.isFinite(difference)) {
@@ -186,14 +189,14 @@
                 saveButton.disabled = true;
                 return;
             }
-            var stateName = difference < 0 ? 'shortage' : (difference > 0 ? 'surplus' : 'balanced');
             var stateLabel = difference < 0 ? 'Faltante' : (difference > 0 ? 'Sobrante' : 'Sin diferencia');
-            card.className = 'cash-opening-difference is-' + stateName;
+            card.className = 'cash-opening-difference ' + (difference === 0 ? 'is-balanced' : 'is-warning');
             amount.textContent = formatSigned(difference);
             label.textContent = stateLabel;
             text.textContent = difference === 0
                 ? 'El efectivo contado coincide con el efectivo esperado.'
-                : 'La diferencia es contado menos efectivo esperado.';
+                : 'Advertencia: ' + (difference < 0 ? 'faltan ' : 'sobran ')
+                    + formatMoney(difference) + ' respecto al efectivo esperado. Revisa el conteo.';
             observationRequired = difference !== 0;
         }
 
