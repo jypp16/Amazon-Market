@@ -176,8 +176,10 @@ class KardexModel extends Model {
         }
 
         try {
-            // Limpieza preventiva de snapshots vencidos hace más de 1 día
-            $db->exec("DELETE FROM reporte_consulta_snapshot WHERE expira_en < DATE_SUB(NOW(), INTERVAL 1 DAY)");
+            // Limpiar solo consultas de inventario; caja conserva snapshots protegidos.
+            $db->exec("DELETE FROM reporte_consulta_snapshot
+                       WHERE tipo_reporte IN ('kardex', 'variaciones')
+                         AND expira_en < DATE_SUB(NOW(), INTERVAL 1 DAY)");
 
             $sqlSnapshot = "INSERT INTO reporte_consulta_snapshot 
                             (referencia_consulta, id_usuario, tipo_reporte, hash_filtros, filtros_json, resumen_json, total_registros, exportable, creado_en, expira_en)
