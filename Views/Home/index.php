@@ -80,6 +80,23 @@ $nombre = e($_SESSION['nombre'] ?? '');
             <a href="<?= BASE_URL ?>/Producto" class="dash-kpi-link kpi-link-alert"><i class="fa-solid fa-arrow-right"></i></a>
         <?php endif; ?>
     </div>
+
+    <!-- NUEVO: inicio -->
+    <div id="expiration-dashboard-card" class="dash-kpi-card dash-kpi-expiration">
+        <div class="dash-kpi-icon kpi-gold"><i class="fa-regular fa-clock" aria-hidden="true"></i></div>
+        <div id="expiration-dashboard-state" class="dash-kpi-data" aria-live="polite">
+            <span class="dash-kpi-loading" aria-label="Cargando vencimientos"></span>
+            <span class="dash-kpi-label">Vencimientos por verificar</span>
+        </div>
+        <a id="expiration-dashboard-link" href="<?= BASE_URL ?>/Inventario/vencimientos" class="dash-kpi-link" aria-label="Vencimientos por verificar: ver avisos"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+        <button type="button" id="expiration-dashboard-retry" class="dash-kpi-retry" hidden><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>
+    </div>
+</div>
+
+<!-- NUEVO: nota -->
+<div class="dash-info-note" role="note">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <span>Los avisos incluyen fechas ya pasadas y las que vencen en los próximos 15 días. La tarjeta solo cuenta avisos activos: no muestra stock.</span>
 </div>
 
 <!-- Admin: Ventas Recientes + Más Vendidos -->

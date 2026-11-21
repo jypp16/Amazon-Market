@@ -1228,6 +1228,26 @@ button, select, input, textarea { font-family: inherit; }
 }
 .purchase-lines-footer .btn { min-height: 38px; padding: 8px 13px; font-size: 13px; }
 .purchase-lines-footer small { max-width: 64%; color: var(--text-secondary); font-size: 12px; }
+
+/* ===== Registrar compra: identificar producto por código de barras (HU-22) ===== */
+.purchase-scan { display: grid; gap: 8px; padding: 0 22px 16px; }
+.purchase-scan > label { font-size: 12px; font-weight: 700; color: var(--primary-color); }
+.purchase-scan-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.purchase-scan-input { position: relative; flex: 1 1 280px; }
+.purchase-scan-input i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-light); }
+.purchase-scan-input input { width: 100%; padding: 10px 12px 10px 36px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card); font: inherit; font-size: 14px; }
+.purchase-scan-input input.is-invalid { border-color: var(--color-danger); }
+.purchase-scan-input input[aria-busy="true"] { background: var(--bg-soft); }
+.purchase-scan-row .btn { min-height: 40px; white-space: nowrap; }
+.purchase-scan-status { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+.purchase-scan-status.is-info { background: var(--color-info-light); color: #1e3a8a; }
+.purchase-scan-status[hidden] { display: none; }
+.purchase-scan-status.is-ok { background: var(--color-success-light); color: #047857; }
+.purchase-scan-status.is-error { background: var(--color-danger-light); color: #b91c1c; }
+.purchase-scan-status.is-loading { background: var(--color-warning-light); color: #92400e; }
+.purchase-scan-status i { margin-top: 2px; }
+.purchase-line-scanned:not(.purchase-line-invalid) { background: #fffbeb; }
+
 .purchase-review-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; gap: 18px; }
 .purchase-review-card dl { display: flex; flex-direction: column; gap: 10px; }
 .purchase-review-card dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
@@ -2457,6 +2477,30 @@ body.pos-mode .app-footer { padding: 6px 10px; font-size: 11px; }
 .kpi-link-alert { background: #fee2e2; color: #dc2626; }
 .kpi-link-alert:hover { background: #dc2626; color: #fff; }
 
+/* Tarjeta: vencimientos por verificar */
+.dash-kpi-expiration { border-left: 4px solid #f59e0b; }
+.dash-kpi-expiration .dash-kpi-link[hidden], .dash-kpi-retry[hidden] { display: none; }
+.dash-kpi-loading {
+    display: block; width: 36px; height: 22px; border-radius: 6px;
+    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background-size: 200% 100%; animation: dash-kpi-shimmer 1.2s infinite;
+}
+@keyframes dash-kpi-shimmer { to { background-position: -200% 0; } }
+.dash-kpi-error { display: block; font-size: 13px; font-weight: 600; color: var(--color-danger); }
+.dash-kpi-retry {
+    position: absolute; top: 10px; right: 10px; border: 1px solid var(--border-color);
+    background: var(--bg-card); color: var(--text-primary); border-radius: 8px;
+    padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.dash-kpi-retry:hover { background: var(--bg-soft); }
+.dash-info-note {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 24px;
+    padding: 11px 16px; border-radius: 8px; font-size: 13px;
+    background: var(--color-info-light); color: #1e3a8a;
+}
+.dash-info-note i { flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) { .dash-kpi-loading { animation: none; } }
+
 .dash-two-col {
     display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
 }
@@ -2560,3 +2604,75 @@ body.pos-mode .app-footer { padding: 6px 10px; font-size: 11px; }
 .dash-year-num { display: block; font-size: 18px; font-weight: 700; color: var(--text-primary); }
 .dash-year-label { display: block; font-size: 12px; color: var(--text-muted); }
 .dash-year-divider { width: 1px; height: 40px; background: var(--border-color); }
+
+/* ===== Editar producto: código de barras (HU-20) ===== */
+.pcb-chip { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-soft); }
+.pcb-chip-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--color-info-light); color: var(--color-info); }
+.pcb-chip-data { flex: 1; min-width: 0; display: grid; }
+.pcb-chip-data small, .pcb-chip-code small { font-size: 11px; color: var(--text-secondary); }
+.pcb-chip-data strong { font-size: 14px; color: var(--primary-color); }
+.pcb-status { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.pcb-status.is-active { background: var(--color-success-light); color: #047857; }
+.pcb-status.is-inactive { background: var(--color-danger-light); color: #b91c1c; }
+.pcb-chip-code { display: grid; justify-items: end; gap: 2px; }
+.pcb-chip-code code, .pcb-dialog code { padding: 2px 6px; border-radius: 6px; background: #e8edf3; font-size: 11px; }
+.pcb-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pcb-optional { font-weight: 400; color: var(--text-secondary); }
+.pcb-quitar { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #fecaca; border-radius: 8px; background: var(--bg-card); color: #b91c1c; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pcb-quitar:hover:not(:disabled) { background: var(--color-danger-light); }
+.pcb-quitar:disabled { opacity: .45; cursor: not-allowed; }
+.pcb-error { grid-column: 1 / -1; margin: -4px 0 0; font-size: 12px; font-weight: 600; color: var(--color-danger); }
+.pcb-error[hidden] { display: none; }
+
+.pcb-dialog { margin: auto; width: calc(100% - 32px); max-width: 520px; padding: 32px 28px 24px; border: 0; border-radius: 16px; box-shadow: var(--shadow-lg); text-align: center; color: var(--text-primary); }
+.pcb-dialog::backdrop { background: rgba(15, 23, 42, .55); }
+.pcb-dialog-icon { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; display: grid; place-items: center; background: var(--color-warning-light); color: #b45309; font-size: 22px; }
+.pcb-dialog h3 { margin: 0 0 10px; font-size: 22px; color: var(--primary-color); }
+.pcb-dialog p { margin: 0 0 22px; font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
+.pcb-dialog-actions { display: flex; justify-content: center; gap: 12px; }
+.pcb-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-card); color: var(--primary-color); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.pcb-btn:hover { background: var(--bg-soft); }
+.pcb-btn-primary { background: var(--primary-color); border-color: var(--primary-color); color: #fff; }
+.pcb-btn-primary:hover { background: var(--primary-light); }
+.pcb-btn:focus-visible, .pcb-quitar:focus-visible { outline: 2px solid var(--accent-gold); outline-offset: 2px; }
+
+/* ===== POS: escaneo y método de pago (Sprint 4: HU-21 y HU-26) ===== */
+.pos-toolbar--scan { flex-wrap: wrap; align-items: stretch; }
+.pos-toolbar--scan .pos-search { flex: 1 1 100%; }
+.pos-toolbar--scan .pos-cats-wrap { flex: 1 1 100%; }
+.pos-search input.is-invalid { border-color: var(--color-danger); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
+
+.pos-scan-status { flex: 1 1 100%; display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.45; border: 1px solid transparent; }
+.pos-scan-status[hidden] { display: none; }
+.pos-scan-status i { margin-top: 2px; }
+.pos-scan-status code { font-family: "Courier New", monospace; font-size: 11.5px; background: rgba(255, 255, 255, 0.7); padding: 1px 5px; border-radius: 4px; }
+.pos-scan-status.is-ok { background: var(--color-success-light); color: #065f46; border-color: rgba(16, 185, 129, 0.25); }
+.pos-scan-status.is-error { background: var(--color-danger-light); color: #b91c1c; border-color: rgba(239, 68, 68, 0.3); }
+.pos-scan-status.is-warn { background: var(--color-warning-light); color: #92400e; border-color: rgba(245, 158, 11, 0.35); }
+.pos-scan-status.is-loading { background: var(--bg-soft); color: var(--text-secondary); border-color: var(--border-color); }
+
+.pos-paydoc--2 { grid-template-columns: repeat(2, 1fr); }
+
+.pos-pay { display: flex; flex-direction: column; gap: 6px; }
+.pos-pay-label { font-size: 11px; font-weight: 700; color: var(--primary-color); }
+.pos-pay-label span { font-weight: 500; color: var(--text-secondary); }
+.pos-pay-methods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.pos-pay-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+    padding: 10px 4px; border: 1.5px solid var(--border-color); border-radius: var(--radius-sm);
+    background: #fff; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.pos-pay-btn i { font-size: 15px; }
+.pos-pay-btn:hover:not(:disabled) { border-color: var(--accent-gold); color: var(--accent-gold-hover); }
+.pos-pay-btn.active { border-color: var(--primary-color); color: var(--primary-color); font-weight: 800; box-shadow: 0 0 0 1px var(--primary-color); }
+.pos-pay-btn.is-off { background: var(--bg-soft); color: var(--text-light); border-style: dashed; cursor: not-allowed; }
+.pos-pay-btn.is-off span { text-decoration: line-through; }
+.pos-pay-btn:focus-visible { outline: 2px solid var(--accent-gold); outline-offset: 2px; }
+.pos-pay-alert { display: flex; align-items: flex-start; gap: 7px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--color-danger-light); border: 1px solid rgba(239, 68, 68, 0.3); color: #b91c1c; font-size: 11.5px; line-height: 1.4; }
+.pos-pay-alert[hidden] { display: none; }
+.pos-pay-alert i { margin-top: 2px; }
+.pos-pay-required { font-size: 11.5px; color: var(--color-danger); font-weight: 500; }
+.pos-pay-required[hidden] { display: none; }
+.pos-cash[hidden] { display: none; }
+.pos-btn-pay:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }

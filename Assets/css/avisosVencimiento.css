@@ -1,0 +1,293 @@
+.expiration-alerts { padding: 0; }
+
+.expiration-alerts-card {
+    background: var(--bg-card);
+    border-radius: 16px;
+    box-shadow: var(--shadow-sm);
+    padding: 28px;
+}
+
+/* ---------- Encabezado ---------- */
+.expiration-alerts-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.expiration-alerts-icon-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+.expiration-alerts-icon-title i { color: #b45309; font-size: 20px; }
+.expiration-alerts-count {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--color-warning-light);
+    color: #92400e;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* ---------- Aviso informativo ---------- */
+.expiration-alerts-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+    padding: 11px 16px;
+    border-radius: 8px;
+    background: var(--color-info-light);
+    color: #1e3a8a;
+    font-size: 13.5px;
+}
+.expiration-alerts-info i { flex-shrink: 0; }
+.expiration-alerts-info p { margin: 0; }
+
+/* ---------- Estados (error / vacío) ---------- */
+.expiration-alerts-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 28px 16px;
+    border-radius: 10px;
+    background: var(--bg-soft);
+    color: var(--text-secondary);
+    font-size: 14px;
+    text-align: center;
+}
+.expiration-alerts-status[hidden] { display: none; }
+.expiration-alerts-status.is-error {
+    background: var(--color-danger-light);
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+.expiration-alerts-retry,
+.expiration-review-retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--primary-color);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.expiration-alerts-retry:hover,
+.expiration-review-retry:hover { background: var(--bg-soft); }
+.expiration-alerts-retry:disabled,
+.expiration-review-retry:disabled { opacity: .6; cursor: not-allowed; }
+.expiration-review-retry[hidden] { display: none; }
+
+/* ---------- Tabla ---------- */
+.expiration-alerts-table[hidden] { display: none; }
+.expiration-alerts-table { overflow-x: auto; margin-bottom: 14px; }
+.expiration-alerts-table .table { min-width: 860px; margin: 0; }
+.expiration-alerts-table .table th {
+    padding: 12px 16px;
+    background: var(--bg-soft);
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.expiration-alerts-table .table td {
+    padding: 14px 16px;
+    font-size: 14px;
+    vertical-align: middle;
+}
+.expiration-alerts-table .table td:nth-child(2) {
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+/* ---------- Condición ---------- */
+.expiration-condition {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.expiration-condition-fecha_pasada { background: #fee2e2; color: #b91c1c; }
+.expiration-condition-vence_hoy { background: #fef3c7; color: #92400e; }
+.expiration-condition-proximo_a_vencer { background: #dbeafe; color: #1d4ed8; }
+
+/* ---------- Botón Confirmar existencias ---------- */
+.expiration-confirm-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--primary-color);
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+.expiration-confirm-button::before {
+    content: "\f00c";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 11px;
+}
+.expiration-confirm-button:hover { background: var(--bg-soft); border-color: var(--text-light); }
+.expiration-confirm-button:focus-visible,
+.expiration-review-button:focus-visible,
+.expiration-review-close:focus-visible,
+.expiration-alerts-retry:focus-visible,
+.expiration-review-retry:focus-visible {
+    outline: 2px solid var(--accent-gold);
+    outline-offset: 2px;
+}
+
+/* ---------- Esqueleto de carga ---------- */
+.expiration-alerts-skeleton { display: grid; gap: 14px; padding: 6px 0; }
+.expiration-alerts-skeleton span {
+    display: block;
+    height: 18px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--border-soft) 25%, var(--border-color) 50%, var(--border-soft) 75%);
+    background-size: 200% 100%;
+    animation: expiration-shimmer 1.2s linear infinite;
+}
+@keyframes expiration-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+
+.expiration-alerts-footer {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+}
+
+/* ==========================================================================
+   MODAL "Confirmar existencias" (<dialog>)
+   ========================================================================== */
+.expiration-review-dialog {
+    width: min(92vw, 585px);
+    max-height: 90vh;
+    margin: auto;
+    padding: 20px 32px 32px;
+    border: none;
+    border-radius: 20px;
+    background: #fff;
+    color: var(--text-primary);
+    text-align: center;
+    box-shadow: 0 24px 60px rgba(0, 16, 38, .35);
+}
+.expiration-review-dialog::backdrop { background: rgba(0, 31, 63, .55); }
+.expiration-review-header { display: flex; justify-content: flex-end; }
+.expiration-review-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--primary-color);
+    cursor: pointer;
+}
+.expiration-review-close:hover { background: var(--bg-soft); }
+.expiration-review-close:disabled { opacity: .5; cursor: not-allowed; }
+
+.expiration-review-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    margin-top: -12px;
+    border-radius: 50%;
+    background: #fef3c7;
+    color: #b45309;
+    font-size: 22px;
+}
+.expiration-review-dialog h2 {
+    margin: 14px 0 10px;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+.expiration-review-question {
+    margin: 0 0 14px;
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.5;
+}
+.expiration-review-note {
+    margin: 0 0 20px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+.expiration-review-error {
+    margin: 0 0 16px;
+    padding: 10px 14px;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    background: var(--color-danger-light);
+    color: #b91c1c;
+    font-size: 13px;
+}
+.expiration-review-error[hidden] { display: none; }
+
+.expiration-review-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.expiration-review-button {
+    min-width: 114px;
+    padding: 12px 22px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s, opacity .15s;
+}
+.expiration-review-yes { background: #fff; color: var(--primary-color); }
+.expiration-review-yes:hover:not(:disabled) { background: var(--bg-soft); }
+.expiration-review-no { background: var(--primary-color); border-color: var(--primary-color); color: #fff; }
+.expiration-review-no:hover:not(:disabled) { background: var(--primary-light); }
+.expiration-review-button:disabled { opacity: .65; cursor: not-allowed; }
+.expiration-review-retry { margin-top: 14px; }
+
+@media (max-width: 640px) {
+    .expiration-alerts-card { padding: 18px; }
+    .expiration-review-dialog { padding: 16px 20px 24px; }
+    .expiration-review-actions { flex-direction: column; }
+    .expiration-review-button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .expiration-alerts-skeleton span { animation: none; }
+}

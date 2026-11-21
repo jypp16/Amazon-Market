@@ -6,6 +6,13 @@ let categoriasLista = [];
 let chipCategoriaActiva = '';
 let clienteSeleccionado = null;
 let paydocMap = { 'id_tipo_comprobante': {}, 'id_metodo_pago': {} };
+let pagosLista = [];
+let metodoSeleccionado = '';
+let metodosNoDisponibles = {};
+let ventaEnProceso = false;
+let escaneoEnCurso = false;
+let colaEscaneo = [];
+let fallosEscaneoSimulados = 0;
 
 document.addEventListener('DOMContentLoaded', function() {
     if (!document.getElementById('pos_shelf')) return;
@@ -49,12 +56,9 @@ async function cargarComprobantes() {
 }
 async function cargarPagos() {
     try {
-        var list = apiData(await Api.get('pagos'));
-        fillSelect('id_metodo_pago', list, 'id_metodo_pago', 'nombre');
-        list.forEach(function(p) {
-            var name = (p.nombre || '').toLowerCase();
-            if (name.includes('efectivo')) paydocMap['id_metodo_pago']['efectivo'] = String(p.id_metodo_pago);
-        });
+        pagosLista = apiData(await Api.get('pagos'));
+        fillSelect('id_metodo_pago', pagosLista, 'id_metodo_pago', 'nombre');
+        renderMetodosPago(true);
     } catch(e) { console.error(e); }
 }
 async function cargarCategorias() {
@@ -82,6 +86,18 @@ function fillSelect(id, list, valKey, labelKey) {
 function initPos() {
     var search = document.getElementById('pos_search');
     search.addEventListener('input', debounce(function() { renderProductos(search.value.trim()); }, 200));
+
+    search.addEventListener('input', function() { marcarEntradaEscaneo(false); });
+    search.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            manejarEntradaEscaneo(search.value.trim());
+        } else if (e.key === 'Escape') {
+            search.value = '';
+            ocultarEstadoEscaneo();
+            renderProductos('');
+        }
+    });
 
     document.getElementById('pos_client_box').addEventListener('click', toggleClientDD);
     document.getElementById('pos_client_clear').addEventListener('click', clearClient);
@@ -253,19 +269,30 @@ function renderProductos(query) {
     });
 }
 
-function agregarProducto(p) {
+// Agrega una unidad al carrito sin mostrar diálogos; la usan el clic en el catálogo y el escaneo.
+function intentarAgregar(p) {
     var stock = parseInt(p.stock_actual, 10) || 0;
-    if (stock <= 0) { Modal.warning('Sin stock', 'No hay stock de "' + p.nombre + '".'); return; }
+    if (stock <= 0) return { ok: false, motivo: 'sin_stock', stock: 0 };
     var idx = carrito.findIndex(function(i) { return i.id_producto == p.id_producto; });
+    var resultado;
     if (idx >= 0) {
-        if (carrito[idx].cantidad + 1 > stock) { Modal.warning('Stock insuficiente', 'Solo quedan ' + stock); return; }
+        if (carrito[idx].cantidad + 1 > stock) return { ok: false, motivo: 'stock_insuficiente', stock: stock };
         carrito[idx].cantidad += 1;
         carrito[idx].subtotal = carrito[idx].cantidad * carrito[idx].precio;
+        resultado = { ok: true, nueva: false, cantidad: carrito[idx].cantidad };
     } else {
         var precio = parseFloat(p.precio_venta) || 0;
         carrito.push({ id_producto: p.id_producto, nombre: p.nombre, unidad: p.unidad || '', precio: precio, cantidad: 1, subtotal: precio });
+        resultado = { ok: true, nueva: true, cantidad: 1 };
     }
     renderCarrito();
+    return resultado;
+}
+
+function agregarProducto(p) {
+    var r = intentarAgregar(p);
+    if (r.motivo === 'sin_stock') Modal.warning('Sin stock', 'No hay stock de "' + p.nombre + '".');
+    else if (r.motivo === 'stock_insuficiente') Modal.warning('Stock insuficiente', 'Solo quedan ' + r.stock);
 }
 
 function setQty(i, val) {
@@ -391,6 +418,7 @@ function actualizarTotales() {
     document.getElementById('lbl_igv').textContent = 'S/. ' + (total - sub).toFixed(2);
     document.getElementById('lbl_total').textContent = 'S/. ' + total.toFixed(2);
     calcularVuelto();
+    actualizarEstadoPago();
 }
 
 function calcularVuelto() {
@@ -575,16 +603,20 @@ async function procesarVenta() {
     if (btn.disabled) return;
     var id_cliente = document.getElementById('id_cliente').value;
     var id_tc = document.getElementById('id_tipo_comprobante').value;
-    var id_mp = document.getElementById('id_metodo_pago').value;
+    var id_mp = metodoSeleccionado;
     if (!id_cliente) { Modal.warning('Falta cliente', 'Seleccione o registre un cliente.'); return; }
     if (!id_tc) { Modal.warning('Falta comprobante', 'Seleccione un tipo de comprobante.'); return; }
-    if (!id_mp) { Modal.warning('Falta pago', 'Seleccione método de pago.'); return; }
+        if (!id_mp) { actualizarEstadoPago(); return; }
     if (!carrito.length) { Modal.warning('Carrito vacío', 'Agregue al menos un producto.'); return; }
+
+    // El servidor vuelve a validar el método al confirmar; esta consulta evita enviar uno ya desactivado.
+    if (!(await verificarMetodoDisponible(id_mp))) { marcarMetodoNoDisponible(id_mp); return; }
 
     var ok = await Modal.confirm('Procesar venta', '¿Confirmar venta por S/. ' + totalCarrito().toFixed(2) + '?', 'warning');
     if (!ok || btn.disabled) return;
 
     document.getElementById('loader_overlay').style.display = 'flex';
+    ventaEnProceso = true;
     btn.disabled = true;
     try {
         var payload = {
@@ -604,26 +636,37 @@ async function procesarVenta() {
             carrito = [];
             Api.confirmarSolicitud('venta-procesar');
             renderCarrito();
-            var tipoComprobante = document.getElementById('id_tipo_comprobante');
+             var tipoComprobante = document.getElementById('id_tipo_comprobante');
             var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex] ? tipoComprobante.options[tipoComprobante.selectedIndex].text : 'Boleta';
             var metodoPago = document.getElementById('id_metodo_pago');
             var mpNombre = metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '';
-            imprimirTicket(
-                { serie: d.serie, numero: d.numero, total: d.total, tipo: tipoNombre },
-                itemsConfirmados,
-                clienteSeleccionado ? clienteSeleccionado.nombre : 'Cliente general',
-                mpNombre
-            );
-            await Modal.success('Venta registrada',
-                'Serie: ' + d.serie + '\nNúmero: ' + d.numero + '\nTotal: S/. ' + parseFloat(d.total).toFixed(2));
-            await cargarProductos();
-            carrito = [];
+            var clienteNombre = clienteSeleccionado ? clienteSeleccionado.nombre : 'Cliente general';
+            var datosTicket = { serie: d.serie, numero: d.numero, total: d.total, tipo: tipoNombre };
+
+            // Dejar la pantalla lista antes de avisar al vendedor.
             clearClient();
             document.getElementById('monto_recibido').value = '';
             calcularVuelto();
-            renderCarrito();
+            await cargarProductos();
+
+            await Modal.success('Venta registrada',
+                'Serie: ' + d.serie + '\nNúmero: ' + d.numero + '\nTotal: S/. ' + parseFloat(d.total).toFixed(2));
+
+            // El ticket se abre después de pulsar Aceptar: así el diálogo de impresión no bloquea el modal.
+            try {
+                imprimirTicket(datosTicket, itemsConfirmados, clienteNombre, mpNombre);
+            } catch (e) {
+                console.error('No se pudo abrir el ticket:', e);
+            }
+            document.getElementById('pos_search').focus();
         } else {
             var errCode = res && res.data ? res.data.code : '';
+            var errCampos = res && res.data && res.data.errors ? res.data.errors : {};
+            if (errCampos.id_metodo_pago) {
+                // Método desactivado o inexistente: se conservan los productos y se pide elegir otro.
+                marcarMetodoNoDisponible(id_mp);
+                return;
+            }
             var errMsg = (res && res.data && res.data.message) || 'Error desconocido.';
             if (errCode === 'CASH_SESSION_CLOSED' || errCode === 'NO_OPEN_SESSION') {
                 await Modal.error('Caja cerrada o sin sesión abierta', errMsg + '\n\nVe a Caja → Abrir caja para iniciar tu turno antes de vender.');
@@ -635,8 +678,253 @@ async function procesarVenta() {
         document.getElementById('loader_overlay').style.display = 'none';
         await Modal.error('Error', 'No se pudo procesar: ' + e.message);
     } finally {
-        btn.disabled = false;
+        ventaEnProceso = false;
+        actualizarEstadoPago();
     }
+}
+
+/* ---------- Método de pago: un único método por venta (HU-26) ---------- */
+function claseMetodo(nombre) {
+    var n = String(nombre || '').toLowerCase();
+    if (n.includes('efectivo')) return 'efectivo';
+    if (n.includes('tarjeta')) return 'tarjeta';
+    if (n.includes('yape') || n.includes('plin')) return 'yape';
+    return 'otro';
+}
+
+function iconoMetodo(nombre) {
+    var c = claseMetodo(nombre);
+    if (c === 'efectivo') return 'fa-money-bill-wave';
+    if (c === 'tarjeta') return 'fa-credit-card';
+    if (c === 'yape') return 'fa-mobile-screen-button';
+    return 'fa-wallet';
+}
+
+function metodoPorId(id) {
+    return pagosLista.find(function(p) { return String(p.id_metodo_pago) === String(id); }) || null;
+}
+
+function metodoEsEfectivo(id) {
+    var m = metodoPorId(id);
+    return !!m && claseMetodo(m.nombre) === 'efectivo';
+}
+
+function renderMetodosPago(preseleccionar) {
+    var cont = document.getElementById('pos_pay_methods');
+    if (!cont) return;
+    if (preseleccionar && !metodoSeleccionado) {
+        var ef = pagosLista.find(function(p) { return claseMetodo(p.nombre) === 'efectivo'; });
+        metodoSeleccionado = ef ? String(ef.id_metodo_pago) : '';
+    }
+    var sel = document.getElementById('id_metodo_pago');
+    if (sel) sel.value = metodoSeleccionado;
+
+    cont.textContent = '';
+    pagosLista.forEach(function(p) {
+        var id = String(p.id_metodo_pago);
+        var off = !!metodosNoDisponibles[id];
+        var activo = !off && id === metodoSeleccionado;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pos-pay-btn' + (activo ? ' active' : '') + (off ? ' is-off' : '');
+        b.setAttribute('data-id', id);
+        b.setAttribute('aria-pressed', activo ? 'true' : 'false');
+        if (off) { b.disabled = true; b.title = 'Este método ya no está disponible'; }
+        var ico = document.createElement('i');
+        ico.className = 'fa-solid ' + iconoMetodo(p.nombre);
+        ico.setAttribute('aria-hidden', 'true');
+        var txt = document.createElement('span');
+        txt.textContent = p.nombre;
+        b.appendChild(ico);
+        b.appendChild(txt);
+        b.addEventListener('click', function() { seleccionarMetodo(id); });
+        cont.appendChild(b);
+    });
+    actualizarEstadoPago();
+}
+
+function seleccionarMetodo(id) {
+    id = String(id);
+    if (metodosNoDisponibles[id] || !metodoPorId(id)) return;
+    metodoSeleccionado = id;
+    var alerta = document.getElementById('pos_pay_alert');
+    if (alerta) alerta.hidden = true;
+    renderMetodosPago(false);
+}
+
+function marcarMetodoNoDisponible(id) {
+    id = String(id);
+    var m = metodoPorId(id);
+    metodosNoDisponibles[id] = true;
+    if (metodoSeleccionado === id) metodoSeleccionado = '';
+    var alerta = document.getElementById('pos_pay_alert');
+    if (alerta) {
+        alerta.textContent = '';
+        var ico = document.createElement('i');
+        ico.className = 'fa-solid fa-triangle-exclamation';
+        ico.setAttribute('aria-hidden', 'true');
+        var fuerte = document.createElement('strong');
+        fuerte.textContent = (m ? m.nombre : 'El método elegido') + ' ya no está disponible.';
+        alerta.appendChild(ico);
+        alerta.appendChild(fuerte);
+        alerta.appendChild(document.createTextNode(' Elige otro método para continuar; tus productos se conservan.'));
+        alerta.hidden = false;
+    }
+    renderMetodosPago(false);
+}
+
+function actualizarEstadoPago() {
+    var valido = !!metodoSeleccionado && !metodosNoDisponibles[metodoSeleccionado];
+    var btn = document.getElementById('btn_procesar');
+    if (btn) btn.disabled = !valido || ventaEnProceso;
+    var req = document.getElementById('pos_pay_required');
+    if (req) req.hidden = valido || !pagosLista.length;
+    var caja = document.getElementById('pos_cash');
+    if (caja) {
+        var esEf = valido && metodoEsEfectivo(metodoSeleccionado);
+        caja.hidden = !esEf;
+        if (!esEf) {
+            // Solo el efectivo usa recibido y vuelto; así no queda un monto de otra selección.
+            document.getElementById('monto_recibido').value = '';
+        }
+    }
+}
+
+async function verificarMetodoDisponible(id) {
+    // Simulación para probar el diseño sin backend: ?mockMetodoOff=3 trata ese método como desactivado al confirmar.
+    var simulado = new URLSearchParams(window.location.search).get('mockMetodoOff');
+    if (simulado && String(simulado) === String(id)) return false;
+    try {
+        var r = await Api.get('pagos');
+        if (!r || !r.ok) return true; // si la consulta falla, decide el servidor al confirmar
+        var lista = (r.data && r.data.data) || [];
+        return lista.some(function(p) { return String(p.id_metodo_pago) === String(id); });
+    } catch (e) {
+        return true;
+    }
+}
+
+/* ---------- Escaneo de código de barras (HU-21) ---------- */
+function mostrarEstadoEscaneo(tipo, partes) {
+    var el = document.getElementById('pos_scan_status');
+    if (!el) return;
+    el.textContent = '';
+    el.className = 'pos-scan-status is-' + tipo;
+    var iconos = { ok: 'fa-check', error: 'fa-triangle-exclamation', warn: 'fa-circle-exclamation', loading: 'fa-circle-notch fa-spin' };
+    var ico = document.createElement('i');
+    ico.className = 'fa-solid ' + iconos[tipo];
+    ico.setAttribute('aria-hidden', 'true');
+    var cuerpo = document.createElement('span');
+    partes.forEach(function(parte) {
+        if (typeof parte === 'string') { cuerpo.appendChild(document.createTextNode(parte)); return; }
+        var n = document.createElement(parte.tag);
+        n.textContent = parte.text;
+        cuerpo.appendChild(n);
+    });
+    el.appendChild(ico);
+    el.appendChild(cuerpo);
+    el.hidden = false;
+}
+
+function ocultarEstadoEscaneo() {
+    var el = document.getElementById('pos_scan_status');
+    if (el) el.hidden = true;
+    marcarEntradaEscaneo(false);
+}
+
+function marcarEntradaEscaneo(invalida) {
+    var input = document.getElementById('pos_search');
+    if (!input) return;
+    input.classList.toggle('is-invalid', !!invalida);
+    if (invalida) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+}
+
+function manejarEntradaEscaneo(texto) {
+    // Un texto con espacios es una búsqueda por nombre: el filtro del catálogo ya la atiende.
+    if (!texto || /\s/.test(texto)) return;
+    colaEscaneo.push(texto);
+    procesarColaEscaneo();
+}
+
+async function procesarColaEscaneo() {
+    if (escaneoEnCurso) return;
+    escaneoEnCurso = true;
+    try {
+        while (colaEscaneo.length) await resolverCodigo(colaEscaneo.shift());
+    } finally {
+        escaneoEnCurso = false;
+    }
+}
+
+async function buscarProductoPorCodigo(codigo) {
+    // Simulación para probar el diseño sin backend: ?mockScan=error provoca un fallo de conexión en la primera lectura.
+    if (new URLSearchParams(window.location.search).get('mockScan') === 'error' && fallosEscaneoSimulados === 0) {
+        fallosEscaneoSimulados++;
+        await new Promise(function(r) { setTimeout(r, 400); });
+        throw new Error('Conexión simulada');
+    }
+    // TODO backend: confirmar un endpoint por código que distinga inexistente de inactivo (hoy solo se lista lo activo).
+    var res = await Api.get('productos?q=' + encodeURIComponent(codigo) + '&limit=10');
+    if (!res || !res.ok) throw new Error('Consulta fallida');
+    var lista = (res.data && res.data.data) || [];
+    var p = lista.find(function(x) { return String(x.codigo_barra || '').trim() === codigo; }) || null;
+    if (p) {
+        var i = productosLista.findIndex(function(x) { return x.id_producto == p.id_producto; });
+        if (i >= 0) productosLista[i] = Object.assign({}, productosLista[i], p); else productosLista.push(p);
+    }
+    return p;
+}
+
+async function resolverCodigo(codigo) {
+    var input = document.getElementById('pos_search');
+    marcarEntradaEscaneo(false);
+    mostrarEstadoEscaneo('loading', ['Buscando producto…']);
+
+    var p;
+    try {
+        p = await buscarProductoPorCodigo(codigo);
+    } catch (e) {
+        // La venta no cambia y el código queda en el campo para reintentar o corregirlo.
+        mostrarEstadoEscaneo('error', [
+            { tag: 'strong', text: 'No se pudo consultar la información.' },
+            ' No se agregó nada a la venta. Vuelve a escanear o digita el código.'
+        ]);
+        marcarEntradaEscaneo(true);
+        return;
+    }
+
+    if (!p) {
+        if (/^\d+$/.test(codigo)) {
+            mostrarEstadoEscaneo('error', [
+                { tag: 'strong', text: 'No se pudo identificar el código ' },
+                { tag: 'code', text: codigo },
+                '. No se agregó nada a la venta. Digítalo de nuevo o busca el producto por nombre.'
+            ]);
+            marcarEntradaEscaneo(true);
+        } else {
+            ocultarEstadoEscaneo();
+        }
+        return;
+    }
+
+    if (p.estado !== undefined && Number(p.estado) !== 1) {
+        mostrarEstadoEscaneo('warn', [{ tag: 'strong', text: p.nombre }, ' está inactivo. No se agregó a la venta.']);
+        return;
+    }
+
+    var r = intentarAgregar(p);
+    if (!r.ok) {
+        mostrarEstadoEscaneo('warn', r.motivo === 'sin_stock'
+            ? [{ tag: 'strong', text: p.nombre }, ' no tiene stock. No se agregó a la venta.']
+            : [{ tag: 'strong', text: p.nombre }, ' · solo quedan ' + r.stock + ' en stock y ya están en el carrito.']);
+        return;
+    }
+
+    mostrarEstadoEscaneo('ok', r.nueva
+        ? ['Leído: ', { tag: 'strong', text: p.nombre }, ' · agregado al carrito.']
+        : ['Leído: ', { tag: 'strong', text: p.nombre }, ' · ya hay ' + r.cantidad + ' unidades en el carrito.']);
+    input.value = '';
+    renderProductos('');
 }
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }

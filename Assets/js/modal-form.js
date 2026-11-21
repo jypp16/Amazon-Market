@@ -124,6 +124,14 @@ const ModalForm = {
             errorDiv.style.display = 'none';
 
             try {
+                if(config.beforeSubmit){
+                    const continuar = await config.beforeSubmit(form);
+                    if(!continuar){
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> ' + (config.btnText || 'Guardar');
+                        return;
+                    }
+                }
                 const formData = new FormData(form);
                 const hasFiles = form.querySelector('input[type="file"]');
 
@@ -151,6 +159,11 @@ const ModalForm = {
                     await Modal.success('Éxito', result.data.message || 'Operación completada.');
                     if (config.onSuccess) config.onSuccess();
                 } else {
+                    if(config.onErro && config.onError(result, form)){
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> ' + (config.btnText || 'Guardar');
+                        return;
+                    }
                     let msg = result ? result.data.message : 'Error desconocido.';
                     if (result && result.data.errors) {
                         const errs = Object.values(result.data.errors).flat();

@@ -344,6 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         lineas.appendChild(row);
         actualizarResumen();
+        return row;
     }
 
     function renumerarLineas() {
@@ -471,6 +472,139 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (motivoCorreccion) motivoCorreccion.addEventListener('input', actualizarResumen);
     document.getElementById('compra_agregar_linea').addEventListener('click', agregarLinea);
+
+    /* ---------- HU-22: identificar el producto por código de barras ---------- */
+    const entradaCodigo = document.getElementById('compra_codigo_barras');
+    const estadoCodigo = document.getElementById('compra_scan_estado');
+    const botonManual = document.getElementById('compra_buscar_manual');
+    const DEMORA_AVISO_MS = 2000; // CL-22.1: pasado este tiempo se avisa de la demora
+    let identificando = false;
+
+    // TODO backend: reemplazar por la consulta al servidor (p. ej. GET productos?codigo_barra=...)
+    // para distinguir código inexistente de producto inactivo sin depender del catálogo cargado.
+    async function buscarProductoPorCodigo(codigo) {
+        const producto = catalogos.productos.find(item => String(item.codigo_barra || '').trim() === codigo);
+        if (!producto) return { estado: 'no_existe' };
+        if (String(producto.estado) === '0') return { estado: 'inactivo', producto };
+        return { estado: 'encontrado', producto };
+    }
+
+    function mostrarEstadoCodigo(tipo, ...partes) {
+        estadoCodigo.hidden = false;
+        estadoCodigo.className = 'purchase-scan-status is-' + tipo;
+        estadoCodigo.textContent = '';
+        const iconos = { ok: 'fa-solid fa-check', info: 'fa-solid fa-circle-info', loading: 'fa-solid fa-spinner fa-spin', error: 'fa-solid fa-triangle-exclamation' };
+        const icono = elemento('i', iconos[tipo] || iconos.error);
+        icono.setAttribute('aria-hidden', 'true');
+        estadoCodigo.appendChild(icono);
+        const texto = elemento('span');
+        partes.forEach(parte => {
+            texto.appendChild(typeof parte === 'string' ? document.createTextNode(parte) : parte);
+        });
+        estadoCodigo.appendChild(texto);
+    }
+
+    function limpiarEstadoCodigo() {
+        estadoCodigo.hidden = true;
+        estadoCodigo.textContent = '';
+        entradaCodigo.classList.remove('is-invalid');
+    }
+
+    function buscarLineaVacia() {
+        return obtenerFilas().find(row => !row.querySelector('[data-field="producto"]').value);
+    }
+
+    function marcarLineaLeida(row) {
+        obtenerFilas().forEach(item => item.classList.remove('purchase-line-scanned'));
+        row.classList.add('purchase-line-scanned');
+        row.scrollIntoView({ block: 'nearest' });
+    }
+
+    function seleccionarProductoEnLinea(row, producto) {
+        const select = row.querySelector('[data-field="producto"]');
+        select.value = String(producto.id_producto);
+        const visible = row.querySelector('.purchase-select-search input');
+        if (visible && select.selectedOptions[0]) visible.value = select.selectedOptions[0].textContent.trim();
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    async function identificarPorCodigo() {
+        if (identificando) return; // evita duplicar el registro si el lector envía el código dos veces
+        const codigo = entradaCodigo.value.trim();
+        if (!codigo) {
+            mostrarEstadoCodigo('error', 'Escanea o escribe un código de barras.');
+            entradaCodigo.classList.add('is-invalid');
+            return;
+        }
+
+        identificando = true;
+        entradaCodigo.setAttribute('aria-busy', 'true');
+        const aviso = setTimeout(() => {
+            mostrarEstadoCodigo('loading', 'La consulta está tardando más de lo normal. El código se conserva; espera un momento o busca el producto manualmente.');
+        }, DEMORA_AVISO_MS);
+
+        try {
+            const resultado = await buscarProductoPorCodigo(codigo);
+            if (resultado.estado === 'no_existe') {
+                entradaCodigo.classList.add('is-invalid');
+                mostrarEstadoCodigo('error', 'No se encontró ningún producto con el código ' + codigo + '. Puedes buscarlo manualmente.');
+                return;
+            }
+            if (resultado.estado === 'inactivo') {
+                entradaCodigo.classList.add('is-invalid');
+                mostrarEstadoCodigo('error', 'El producto ' + resultado.producto.nombre + ' está inactivo y no puede seleccionarse para la compra.');
+                return;
+            }
+
+            const producto = resultado.producto;
+            const repetidas = obtenerFilas().filter(row => row.querySelector('[data-field="producto"]').value === String(producto.id_producto)).length;
+            const row = buscarLineaVacia() || agregarLinea();
+            seleccionarProductoEnLinea(row, producto);
+            marcarLineaLeida(row);
+            entradaCodigo.value = '';
+            entradaCodigo.classList.remove('is-invalid');
+
+            const nombre = elemento('strong', '', producto.nombre);
+            mostrarEstadoCodigo(
+                'ok',
+                'Producto seleccionado en la línea ' + row.dataset.line + ': ',
+                nombre,
+                ' · Activo. La lectura solo selecciona el producto; completa presentación, cantidad, lote y vencimiento.' +
+                    (repetidas ? ' Este producto ya tiene ' + repetidas + (repetidas === 1 ? ' línea' : ' líneas') + ': usa otro lote o vencimiento.' : '')
+            );
+            const presentacion = row.querySelector('[data-field="presentacion"]');
+            if (presentacion) presentacion.focus();
+        } catch (fallo) {
+            mostrarEstadoCodigo('error', 'No se pudo consultar el producto. Los datos ingresados se conservan; puedes buscar manualmente.');
+        } finally {
+            clearTimeout(aviso);
+            identificando = false;
+            entradaCodigo.removeAttribute('aria-busy');
+        }
+    }
+
+    // El lector envía Enter al terminar la lectura: debe identificar el producto, no enviar el formulario.
+    entradaCodigo.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        identificarPorCodigo();
+    });
+    entradaCodigo.addEventListener('input', limpiarEstadoCodigo);
+    botonManual.addEventListener('click', () => {
+        const row = buscarLineaVacia() || agregarLinea();
+        marcarLineaLeida(row);
+        const buscador = row.querySelector('.purchase-select-search input');
+        if (buscador) buscador.focus();
+        mostrarEstadoCodigo('info', 'Busca el producto por nombre en la línea ' + row.dataset.line + '.');
+    });
+
+    // Los mensajes hacen referencia a un número de línea: se quitan cuando ese dato deja de ser válido.
+    lineas.addEventListener('change', event => {
+        if (event.target.matches('[data-field="producto"]')) limpiarEstadoCodigo();
+    });
+    lineas.addEventListener('click', event => {
+        if (event.target.closest('.purchase-remove-line')) limpiarEstadoCodigo();
+    });
 
     function asegurarOpcion(select, value, label, equivalencia) {
         const valor = String(value);
