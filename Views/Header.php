@@ -12,6 +12,7 @@ $esReporteVariaciones = strpos($_GET['url'] ?? '', 'Reporte/variaciones') === 0;
 $esReporteCierresCaja = strpos($_GET['url'] ?? '', 'Reporte/cierresCaja') === 0;
 $esDetalleCierreCaja = strpos($_GET['url'] ?? '', 'Reporte/detalleCierreCaja') === 0;
 $esReporteInventario = $esKardex || $esReporteVariaciones;
+$esInventarioVencimientos = strpos($_GET['url'] ?? '', 'Inventario/vencimientos') === 0;
 $esCajaAbrir = strpos($_GET['url'] ?? '', 'Caja/abrir') === 0;
 $esCajaMovimientos = strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0;
 $esCajaArqueo = strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0;
@@ -36,6 +37,9 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
     <?php endif; ?>
     <?php if ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/cierresCaja.css?v=<?= filemtime(__DIR__ . '/../Assets/css/cierresCaja.css') ?>">
+    <?php endif; ?>
+    <?php if ($esInventarioVencimientos): ?>
+    <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/avisosVencimiento.css?v=<?= filemtime(__DIR__ . '/../Assets/css/avisosVencimiento.css') ?>">
     <?php endif; ?>
     <script>const AUTH_USER_ID = <?= (int)($_SESSION['idUser'] ?? 0) ?>; const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
     <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
@@ -73,7 +77,7 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
                 <?php endif; ?>
 
                 <?php if (in_array('productos.listar', $slugs)): ?>
-                <?php $enSeccionInventario = strpos($_GET['url'] ?? '', 'Producto') !== false || strpos($_GET['url'] ?? '', 'Inventario') !== false; ?>
+                <?php $enSeccionInventario = strpos($_GET['url'] ?? '', 'Producto') !== false || strpos($_GET['url'] ?? '', 'Inventario') !== false || strpos($_GET['url'] ?? '', 'Reporte/kardex') === 0; ?>
                 <details class="menu-group" <?= $enSeccionInventario ? 'open' : '' ?>>
                     <summary class="menu-link menu-group-toggle <?= $enSeccionInventario ? 'active' : '' ?>">
                         <i class="fa-solid fa-house"></i>
@@ -87,6 +91,16 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
                         <?php if ($rol == 1 && in_array('inventario.ajustes', $slugs)): ?>
                         <a href="<?= BASE_URL ?>/Inventario/ajustes" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Inventario/ajustes') === 0) ? 'active' : '' ?>">
                             <i class="fa-solid fa-sliders"></i><span>Ajustes de inventario</span>
+                        </a>
+                        <?php endif; ?>
+                        <?php if ($rol == 1 && in_array('reportes.kardex', $slugs)): ?>
+                        <a href="<?= BASE_URL ?>/Reporte/kardex" class="menu-sublink <?= $esKardex ? 'active' : '' ?>">
+                            <i class="fa-solid fa-arrow-right-arrow-left"></i><span>Movimientos</span>
+                        </a>
+                        <?php endif; ?>
+                        <?php if ($rol == 1): ?>
+                        <a href="<?= BASE_URL ?>/Inventario/vencimientos" class="menu-sublink <?= $esInventarioVencimientos ? 'active' : '' ?>">
+                            <i class="fa-solid fa-clock"></i><span>Avisos de vencimiento</span>
                         </a>
                         <?php endif; ?>
                     </div>
