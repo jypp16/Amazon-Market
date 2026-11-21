@@ -317,17 +317,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function abrirModalEditar(prod) {
         ModalForm.open({
-            titulo: 'Editar Producto',
+            titulo: 'Editar producto',
             endpoint: 'productos',
             id: prod.id_producto,
             method: 'PUT',
             btnText: 'Guardar Cambios',
             width: '650px',
             onSuccess: () => cargarProductos(),
-            onMount: aplicarRestriccionStock,
+            onMount: (form) => {
+                aplicarRestriccionStock(form);
+                window.ProductoCodigoBarras.montar(form, prod);
+            },
+            beforeSubmit: (form) => window.ProductoCodigoBarras.confirmarCambio(form, prod),
+            onError: (resultado, form) => window.ProductoCodigoBarras.manejarErrorServidor(resultado, form),
             campos: [
                 { name: 'imagen', label: 'Imagen del Producto', type: 'file', col: 'col-12', accept: 'image/jpeg,image/png,image/webp', hint: 'Opcional. Si sube una nueva imagen, reemplazará la actual.' },
-                { name: 'codigo_barra', label: 'Código de Barra', type: 'text', col: 'col-6', required: true, value: prod.codigo_barra },
+                { name: 'codigo_barra', label: 'Código de Barra', type: 'text', col: 'col-6', required: false, value: prod.codigo_barra },
                 { name: 'nombre', label: 'Nombre del Producto', type: 'text', col: 'col-6', required: true, value: prod.nombre },
                 { name: 'descripcion', label: 'Descripción', type: 'textarea', col: 'col-12', value: prod.descripcion },
                 { name: 'id_categoria', label: 'Categoría', type: 'select', col: 'col-6', required: true,
@@ -339,9 +344,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 { name: 'id_unidad', label: 'Unidad de Medida', type: 'select', col: 'col-6', required: true,
                     options: unidades.map(u => ({ value: u.id_unidad, label: u.nombre + ' (' + u.abreviatura + ')' })),
                     value: prod.id_unidad },
-                { name: 'precio_venta', label: 'Precio de Venta (S/.)', type: 'number', col: 'col-4', required: true, step: '0.01', min: '0', value: prod.precio_venta },
-                { name: 'stock_actual', label: 'Stock Actual (Solo lectura)', type: 'number', col: 'col-4', required: false, step: '1', min: '0', value: Math.round(parseFloat(prod.stock_actual)) },
-                { name: 'stock_minimo', label: 'Stock Mínimo', type: 'number', col: 'col-4', required: true, step: '1', min: '0', value: Math.round(parseFloat(prod.stock_minimo)) }
+                { name: 'precio_venta', label: 'Precio de Venta (S/.)', type: 'number', col: 'col-6', required: true, step: '0.01', min: '0', value: prod.precio_venta },
+                { name: 'stock_actual', label: 'Stock Actual (Solo lectura)', type: 'number', col: 'col-6', required: false, step: '1', min: '0', value: Math.round(parseFloat(prod.stock_actual)) },
+                { name: 'stock_minimo', label: 'Stock Mínimo', type: 'number', col: 'col-6', required: true, step: '1', min: '0', value: Math.round(parseFloat(prod.stock_minimo)) }
             ]
         });
     }

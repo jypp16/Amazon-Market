@@ -13,6 +13,7 @@ $esReporteCierresCaja = strpos($_GET['url'] ?? '', 'Reporte/cierresCaja') === 0;
 $esDetalleCierreCaja = strpos($_GET['url'] ?? '', 'Reporte/detalleCierreCaja') === 0;
 $esReporteInventario = $esKardex || $esReporteVariaciones;
 $esInventarioVencimientos = strpos($_GET['url'] ?? '', 'Inventario/vencimientos') === 0;
+$esInventarioMovimientos = (bool)preg_match('#^Inventario/(movimientos|movimiento|editarMovimiento)#i', $_GET['url'] ?? '');
 $esCajaAbrir = strpos($_GET['url'] ?? '', 'Caja/abrir') === 0;
 $esCajaMovimientos = strpos($_GET['url'] ?? '', 'Caja/movimientos') === 0;
 $esCajaArqueo = strpos($_GET['url'] ?? '', 'Caja/arqueo') === 0;
@@ -40,6 +41,9 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
     <?php endif; ?>
     <?php if ($esInventarioVencimientos): ?>
     <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/avisosVencimiento.css?v=<?= filemtime(__DIR__ . '/../Assets/css/avisosVencimiento.css') ?>">
+    <?php endif; ?>
+    <?php if ($esInventarioMovimientos): ?>
+    <link rel="stylesheet" href="<?= BASE_URL ?>/Assets/css/movimientosInventario.css?v=<?= filemtime(__DIR__ . '/../Assets/css/movimientosInventario.css') ?>">
     <?php endif; ?>
     <script>const AUTH_USER_ID = <?= (int)($_SESSION['idUser'] ?? 0) ?>; const BASE_URL = '<?= BASE_URL ?>'; const API_URL = '<?= API_URL ?>'; const VENDEDOR_NOMBRE = '<?= e($_SESSION['nombre'] ?? 'Operador') ?>';</script>
     <script src="<?= BASE_URL ?>/Assets/js/api.js?v=<?= filemtime(__DIR__ . '/../Assets/js/api.js') ?>"></script>
@@ -93,8 +97,8 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
                             <i class="fa-solid fa-sliders"></i><span>Ajustes de inventario</span>
                         </a>
                         <?php endif; ?>
-                        <?php if ($rol == 1 && in_array('reportes.kardex', $slugs)): ?>
-                        <a href="<?= BASE_URL ?>/Reporte/kardex" class="menu-sublink <?= $esKardex ? 'active' : '' ?>">
+                        <?php if ($rol == 1): ?>
+                        <a href="<?= BASE_URL ?>/Inventario/movimientos" class="menu-sublink <?= $esInventarioMovimientos ? 'active' : '' ?>">
                             <i class="fa-solid fa-arrow-right-arrow-left"></i><span>Movimientos</span>
                         </a>
                         <?php endif; ?>

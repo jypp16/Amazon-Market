@@ -77,6 +77,24 @@
                     <p>Si un mismo producto llegó con otro lote o vencimiento, añade otra línea. No repitas el mismo lote para el mismo producto. Todas las líneas se suman al mismo saldo del producto.</p>
                 </div>
             </div>
+
+            <div class="purchase-scan">
+                <label for="compra_codigo_barras">Identificar producto por código de barras</label>
+                <div class="purchase-scan-row">
+                    <div class="purchase-scan-input">
+                        <i class="fa-solid fa-barcode" aria-hidden="true"></i>
+                        <input type="text" id="compra_codigo_barras" inputmode="numeric" autocomplete="off" placeholder="Escanea el código del producto…">
+                    </div>
+                    <button type="button" id="compra_buscar_manual" class="btn btn-secondary">
+                        <i class="fa-solid fa-magnifying-glass"></i> Buscar manualmente
+                    </button>
+                    <button type="button" id="compra_agregar_linea" class="btn btn-secondary">
+                        <i class="fa-solid fa-plus"></i> Agregar línea
+                    </button>
+                </div>
+                <div id="compra_scan_estado" class="purchase-scan-status" role="status" aria-live="polite" hidden></div>
+            </div>
+
             <div class="purchase-lines-scroll">
                 <table class="purchase-lines-table">
                     <thead>
@@ -102,9 +120,6 @@
                 </table>
             </div>
             <footer class="purchase-lines-footer">
-                <button type="button" id="compra_agregar_linea" class="btn btn-secondary">
-                    <i class="fa-solid fa-plus"></i> Añadir línea
-                </button>
                 <small>La fecha de vencimiento es obligatoria para cada producto. Lote: el código impreso en el empaque del fabricante, no el número de factura. Si no hay lote, registra “No aplica”.</small>
             </footer>
         </section>

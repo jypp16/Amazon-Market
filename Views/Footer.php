@@ -1,4 +1,4 @@
-            </div> <!-- Cierre content-wrapper -->
+</div> <!-- Cierre content-wrapper -->
 
             <!-- Footer General -->
             <footer class="app-footer">
@@ -12,6 +12,7 @@
     <script src="<?= BASE_URL ?>/Assets/js/modal-form.js"></script>
 
     <!-- Scripts de módulos API -->
+    <script src="<?= BASE_URL ?>/Assets/js/productoCodigoBarras.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/productos.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/clientes.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/usuarios.js"></script>
@@ -23,6 +24,18 @@
     <script src="<?= BASE_URL ?>/Assets/js/kardex.js?v=<?= filemtime(__DIR__ . "/../Assets/js/kardex.js") ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/variaciones.js?v=<?= filemtime(__DIR__ . "/../Assets/js/variaciones.js") ?>"></script>
 
+    <?php if ((int)($_SESSION['rol'] ?? 0) === 1 && in_array(trim($_GET['url'] ?? '', '/'), ['', 'Home', 'Home/index'], true)): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/avisosVencimientoApi.js?v=<?= filemtime(__DIR__ . "/../Assets/js/avisosVencimientoApi.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/dashboardAvisosVencimiento.js?v=<?= filemtime(__DIR__ . "/../Assets/js/dashboardAvisosVencimiento.js") ?>"></script>
+    <?php endif; ?>
+    <?php if (strpos($_GET['url'] ?? '', 'Inventario/vencimientos') === 0): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/avisosVencimientoApi.js?v=<?= filemtime(__DIR__ . "/../Assets/js/avisosVencimientoApi.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/avisosVencimiento.js?v=<?= filemtime(__DIR__ . "/../Assets/js/avisosVencimiento.js") ?>"></script>
+    <?php endif; ?>
+    <?php if (preg_match('#^Inventario/(movimientos|movimiento|editarMovimiento)#i', $_GET['url'] ?? '')): ?>
+    <script src="<?= BASE_URL ?>/Assets/js/movimientosInventarioApi.js?v=<?= filemtime(__DIR__ . "/../Assets/js/movimientosInventarioApi.js") ?>"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/movimientosInventario.js?v=<?= filemtime(__DIR__ . "/../Assets/js/movimientosInventario.js") ?>"></script>
+    <?php endif; ?>
     <?php if (strpos($_GET['url'] ?? '', 'Caja/abrir') === 0): ?>
     <script src="<?= BASE_URL ?>/Assets/js/cajaService.js?v=<?= filemtime(__DIR__ . "/../Assets/js/cajaService.js") ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/caja.js?v=<?= filemtime(__DIR__ . "/../Assets/js/caja.js") ?>"></script>

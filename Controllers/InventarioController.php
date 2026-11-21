@@ -81,4 +81,36 @@ class InventarioController extends Controller {
         ];
         $this->views->render($this, 'vencimientos', $data);
     }
+
+        private function exigirAdministrador(): void {
+        if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+            header('Location: ' . BASE_URL . '/Home');
+            exit;
+        }
+    }
+
+    public function movimientos() {
+        $this->exigirAdministrador();
+        $this->views->render($this, 'movimientos', [
+            'page_title' => 'Movimientos de inventario - Amazon Market',
+        ]);
+    }
+
+    public function movimiento($id = '') {
+        $this->exigirAdministrador();
+        $idMovimiento = ctype_digit((string)$id) ? (int)$id : 0;
+        $this->views->render($this, 'movimiento', [
+            'page_title' => 'Movimiento N.° ' . $idMovimiento . ' - Amazon Market',
+            'id_movimiento' => $idMovimiento,
+        ]);
+    }
+
+    public function editarMovimiento($id = '') {
+        $this->exigirAdministrador();
+        $idMovimiento = ctype_digit((string)$id) ? (int)$id : 0;
+        $this->views->render($this, 'editarMovimiento', [
+            'page_title' => 'Editar movimiento N.° ' . $idMovimiento . ' - Amazon Market',
+            'id_movimiento' => $idMovimiento,
+        ]);
+    }
 }

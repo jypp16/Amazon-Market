@@ -3,11 +3,12 @@
 <div class="pos-app">
     <!-- CATALOGO -->
     <section class="pos-catalog">
-        <div class="pos-toolbar">
-            <div class="pos-search">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="pos_search" placeholder="Buscar por nombre o código..." autocomplete="off">
+        <div class="pos-toolbar pos-toolbar--scan">
+            <div class="pos-search pos-search--scan">
+                <i class="fa-solid fa-barcode"></i>
+                <input type="text" id="pos_search" placeholder="Escanea el código o busca por nombre…" autocomplete="off" aria-describedby="pos_scan_status">
             </div>
+            <div id="pos_scan_status" class="pos-scan-status" role="status" aria-live="polite" hidden></div>
             <div class="pos-cats-wrap">
                 <button type="button" class="pos-cats-arrow pos-cats-prev" id="pos_cats_prev"><i class="fa-solid fa-chevron-left"></i></button>
                 <div class="pos-cats" id="pos_cats"></div>
@@ -67,16 +68,23 @@
             </div>
 
             <!-- Comprobante / Pago -->
-            <div class="pos-paydoc" id="pos_paydoc">
+            <div class="pos-paydoc pos-paydoc--2" id="pos_paydoc">
                 <button type="button" class="pos-paydoc-btn active" data-target="id_tipo_comprobante" data-key="boleta">Boleta</button>
                 <button type="button" class="pos-paydoc-btn" data-target="id_tipo_comprobante" data-key="factura">Factura</button>
-                <button type="button" class="pos-paydoc-btn active" data-target="id_metodo_pago" data-key="efectivo">Efectivo</button>
             </div>
             <div class="pos-paydoc-fields">
                 <select id="id_tipo_comprobante"></select>
                 <select id="id_metodo_pago"></select>
             </div>
             <small id="cliente-hint" class="pos-hint"><i class="fa-solid fa-circle-info"></i> Para factura elija cliente con RUC.</small>
+
+            <!-- Método de pago (uno por venta) -->
+            <div class="pos-pay" id="pos_pay">
+                <div class="pos-pay-label" id="pos_pay_label">Método de pago <span>· uno por venta</span></div>
+                <div class="pos-pay-methods" id="pos_pay_methods" role="group" aria-labelledby="pos_pay_label"></div>
+                <div class="pos-pay-alert" id="pos_pay_alert" role="alert" hidden></div>
+                <div class="pos-pay-required" id="pos_pay_required" role="status" hidden>Seleccione un método de pago válido para continuar</div>
+            </div>
 
             <!-- Lineas -->
             <div class="pos-lines" id="pos_lines">
@@ -100,7 +108,7 @@
             </div>
 
             <!-- Efectivo -->
-            <div class="pos-cash">
+            <div class="pos-cash" id="pos_cash">
                 <div class="pos-cash-row">
                     <label class="pos-cash-label" for="monto_recibido"><i class="fa-solid fa-hand-holding-dollar"></i> Recibido</label>
                     <div class="pos-cash-in">
