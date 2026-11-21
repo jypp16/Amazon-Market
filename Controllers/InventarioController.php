@@ -5,6 +5,7 @@ namespace Controllers;
 use Libraries\Core\Controller;
 use Libraries\Core\InventarioException;
 use Services\InventarioService;
+use Services\AlertaService;
 use Throwable;
 
 class InventarioController extends Controller {
@@ -65,5 +66,19 @@ class InventarioController extends Controller {
             }
             exit;
         }
+    }
+
+    public function vencimientos() {
+        if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+            header('Location: ' . BASE_URL . '/Home');
+            exit;
+        }
+
+        $alertaService = new AlertaService();
+        $data = [
+            'page_title' => 'Avisos de vencimiento - Amazon Market',
+            'vencimientos' => $alertaService->obtenerAlertasVencimiento(15),
+        ];
+        $this->views->render($this, 'vencimientos', $data);
     }
 }
