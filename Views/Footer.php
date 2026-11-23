@@ -12,8 +12,9 @@
     <script src="<?= BASE_URL ?>/Assets/js/modal-form.js"></script>
 
     <!-- Scripts de módulos API -->
+    <script src="<?= BASE_URL ?>/Assets/js/lector-codigo.js?v=<?= filemtime(__DIR__ . '/../Assets/js/lector-codigo.js') ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/productoCodigoBarras.js"></script>
-    <script src="<?= BASE_URL ?>/Assets/js/productos.js"></script>
+    <script src="<?= BASE_URL ?>/Assets/js/productos.js?v=<?= filemtime(__DIR__ . '/../Assets/js/productos.js') ?>"></script>
     <script src="<?= BASE_URL ?>/Assets/js/clientes.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/usuarios.js"></script>
     <script src="<?= BASE_URL ?>/Assets/js/proveedores.js?v=<?= time() ?>"></script>

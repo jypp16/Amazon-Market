@@ -123,6 +123,10 @@ function fillSelect(id, list, valKey, labelKey) {
 
 function initPos() {
   var search = document.getElementById("pos_search");
+  var modalCliente = document.getElementById("modal_cliente");
+  escucharEscaneoSinFoco(search, manejarEntradaEscaneo, function () {
+    return ventaEnProceso || modalCliente.style.display === "flex";
+  });
   search.addEventListener(
     "input",
     debounce(function () {
@@ -640,6 +644,10 @@ function calcularVuelto() {
 
 function vaciarCarrito() {
   if (!carrito.length) return;
+  if (escaneoEnCurso) {
+    cancelarEscaneosPendientes();
+    ocultarEstadoEscaneo();
+  }
   Modal.confirm(
     "Vaciar carrito",
     "¿Eliminar todos los productos?",
@@ -985,6 +993,10 @@ async function procesarVenta() {
     return;
   }
 
+  if (escaneoEnCurso) {
+    cancelarEscaneosPendientes();
+    ocultarEstadoEscaneo();
+  }
   var ok = await Modal.confirm(
     "Procesar venta",
     "¿Confirmar venta por S/. " + totalCarrito().toFixed(2) + "?",

@@ -11,12 +11,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let paginaActual = 1;
     const porPagina = 10;
     let ultimaPaginaInfo = { page: 1, per_page: 10, total: 0, total_pages: 1 };
+    let codigoEscaneado = null;
+    let consultaActual = 0;
+    let esperaBusqueda;
 
     async function cargarProductos(busqueda, categoria, pagina) {
         if (busqueda === undefined) busqueda = inputBusqueda ? inputBusqueda.value : '';
         if (categoria === undefined) categoria = filtroCategoria ? filtroCategoria.value : '';
         if (pagina === undefined) pagina = 1;
         paginaActual = pagina;
+        const consulta = ++consultaActual;
+        const porCodigo = codigoEscaneado !== null && busqueda === codigoEscaneado;
 
         try {
             tbody.textContent = '';
@@ -33,21 +38,31 @@ document.addEventListener('DOMContentLoaded', () => {
             trLoad.appendChild(tdLoad);
             tbody.appendChild(trLoad);
 
-            let endpoint = 'productos';
-            const params = [];
-            if (busqueda) params.push('q=' + encodeURIComponent(busqueda));
-            if (categoria) params.push('categoria=' + encodeURIComponent(categoria));
-            params.push('page=' + paginaActual);
-            params.push('limit=' + porPagina);
-            endpoint += '?' + params.join('&');
+            const params = new URLSearchParams({ page: paginaActual, limit: porPagina });
+            if (busqueda) params.set('q', busqueda);
+            if (categoria) params.set('categoria', categoria);
+            const endpoint = porCodigo
+                ? 'productos/codigo/' + encodeURIComponent(busqueda)
+                : 'productos?' + params.toString();
 
             const inicio = Date.now();
             const resultado = await Api.get(endpoint);
             const elapsed = Date.now() - inicio;
-            if (elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
+            if (!porCodigo && elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
+            if (consulta !== consultaActual) return;
 
             if (!resultado || !resultado.ok) {
                 mostrarError('No se pudieron cargar los productos.');
+                return;
+            }
+
+            if (porCodigo) {
+                const lectura = resultado.data.data;
+                const encontrado = lectura?.estado_busqueda === 'encontrado' && lectura.producto;
+                ultimaPaginaInfo = { page: 1, per_page: porPagina, total: encontrado ? 1 : 0, total_pages: 1 };
+                renderizarPaginacion();
+                if (encontrado) renderizarTabla([lectura.producto]);
+                else mostrarError(resultado.data.message || 'No se encontró un producto con ese código de barras.');
                 return;
             }
 
@@ -55,8 +70,17 @@ document.addEventListener('DOMContentLoaded', () => {
             renderizarTabla(resultado.data.data || []);
             renderizarPaginacion();
         } catch (error) {
-            mostrarError('Error de conexión: ' + error.message);
+            if (consulta === consultaActual) mostrarError('Error de conexión: ' + error.message);
         }
+    }
+
+    function buscarCodigoEscaneado(codigo) {
+        clearTimeout(esperaBusqueda);
+        codigoEscaneado = codigo;
+        inputBusqueda.value = codigo;
+        if (filtroCategoria) filtroCategoria.value = '';
+        if (paginacionDiv) paginacionDiv.textContent = '';
+        cargarProductos();
     }
 
     function renderizarPaginacion() {
@@ -400,13 +424,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (inputBusqueda) {
-        inputBusqueda.addEventListener('input', debounce(() => {
-            cargarProductos(inputBusqueda.value, filtroCategoria ? filtroCategoria.value : '');
-        }, 350));
+        escucharEscaneoSinFoco(inputBusqueda, buscarCodigoEscaneado);
+        inputBusqueda.addEventListener('keydown', event => {
+            const codigo = inputBusqueda.value.trim();
+            if (event.key !== 'Enter' || !esCodigoDeLector(codigo)) return;
+            event.preventDefault();
+            buscarCodigoEscaneado(codigo);
+        });
+        inputBusqueda.addEventListener('input', () => {
+            codigoEscaneado = null;
+            consultaActual++;
+            clearTimeout(esperaBusqueda);
+            esperaBusqueda = setTimeout(() => cargarProductos(), 350);
+        });
     }
 
     if (filtroCategoria) {
         filtroCategoria.addEventListener('change', () => {
+            codigoEscaneado = null;
+            clearTimeout(esperaBusqueda);
             cargarProductos(inputBusqueda ? inputBusqueda.value : '', filtroCategoria.value);
         });
     }
