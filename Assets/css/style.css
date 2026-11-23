@@ -2683,3 +2683,40 @@ body.pos-mode .app-footer { padding: 6px 10px; font-size: 11px; }
 .pos-pay-required[hidden] { display: none; }
 .pos-cash[hidden] { display: none; }
 .pos-btn-pay:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* ===== HU: ventas a clientes no identificados (Consumidor final) ===== */
+.pos-client-btn--cf { border-color: var(--accent-gold); background: #fdf6df; }
+.pos-client-btn--cf .pos-client-ico { background: var(--accent-gold); color: #fff; }
+.pos-client-btn--cf .pos-client-txt strong { font-size: 13px; font-weight: 600; }
+.pos-client-btn--cf .pos-client-txt small { font-size: 10.5px; }
+.pos-client-btn.is-error { border-color: var(--color-danger); background: var(--color-danger-light); }
+.pos-client-btn.is-error .pos-client-ico { background: var(--color-danger); }
+
+.pos-client-tag {
+    font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 7px; white-space: nowrap;
+    background: rgba(212, 175, 55, 0.35); color: #6b5200;
+}
+.pos-client-tag.is-error { background: #fbd0d1; color: #9d1c20; }
+
+.pos-client-sel.is-error { border-color: var(--color-danger); background: var(--color-danger-light); }
+.pos-client-clear {
+    width: auto; height: auto; border-radius: 7px; padding: 4px 9px;
+    font-size: 10.5px; font-weight: 600; white-space: nowrap;
+    background: #fdecec; color: #9d1c20;
+}
+.pos-client-clear i { font-size: 10px; }
+
+.pos-dd-cf.is-current { box-shadow: inset 0 0 0 1.5px var(--accent-gold); }
+
+.pos-ident-note {
+    display: flex; align-items: flex-start; gap: 7px;
+    margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+    font-size: 10.5px; line-height: 1.4;
+    background: #fbf6e6; color: #6b5a1a;
+}
+.pos-ident-note i { margin-top: 2px; flex-shrink: 0; }
+.pos-ident-note.is-ok { background: var(--color-success-light); color: #2b6a3d; }
+.pos-ident-note.is-error {
+    background: var(--color-danger-light); color: #9d1c20;
+    border: 1px solid rgba(239, 68, 68, 0.3); font-size: 11px; font-weight: 500;
+}

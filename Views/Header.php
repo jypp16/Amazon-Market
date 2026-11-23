@@ -234,7 +234,19 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
                     <?php elseif ($esCajaAbrir || $esCajaMovimientos || $esCajaArqueo || $esCajaConsultar): ?>
                     <h1 class="page-title">
                         <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
-                        <?= $esCajaAbrir ? 'Abrir caja' : ($esCajaMovimientos ? 'Movimientos de caja' : ($esCajaArqueo ? 'Arqueo y cierre' : 'Consultar caja')) ?>
+                        <?php
+                        $tituloCaja = 'Consultar caja';
+                        if ($esCajaAbrir) {
+                            $tituloCaja = 'Abrir caja';
+                        } elseif ($esCajaMovimientos) {
+                            $tituloCaja = 'Movimientos de caja';
+                        } elseif ($esCajaArqueo) {
+                            $tituloCaja = 'Arqueo y cierre';
+                        } elseif ($esCajaConsultar && (int)($_SESSION['rol'] ?? 0) === 1) {
+                            $tituloCaja = $esCajaConsultaPropia ? 'Consultar mi caja' : 'Consultar historial';
+                        }
+                        ?>
+                        <?= $tituloCaja ?>
                     </h1>
                     <?php elseif ($esReporteCierresCaja || $esDetalleCierreCaja): ?>
                     <nav class="kardex-breadcrumb close-report-breadcrumb" aria-label="Ruta de navegación">

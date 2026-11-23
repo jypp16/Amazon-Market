@@ -33,7 +33,9 @@ class CajaController extends Controller {
             'is_administrator' => $isAdministrator,
             'page_size' => 10,
             'default_date' => $today,
-            'page_title' => 'Consultar caja - Amazon Market'
+            'page_title' => ($role === 1
+                ? ((string)($_GET['propia'] ?? '') === '1' ? 'Consultar mi caja' : 'Consultar historial')
+                : 'Consultar caja') . ' - Amazon Market'
         ]);
     }
 }
