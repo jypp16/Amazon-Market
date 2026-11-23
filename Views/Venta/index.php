@@ -38,14 +38,16 @@
         </div>
 
         <div class="pos-cart-body">
-            <!-- Cliente -->
+            
+            <!-- Cliente (por defecto: Consumidor final) -->
             <div class="pos-client" id="pos_client">
-                <button type="button" class="pos-client-btn" id="pos_client_box">
+                <button type="button" class="pos-client-btn pos-client-btn--cf" id="pos_client_box">
                     <span class="pos-client-ico"><i class="fa-solid fa-user"></i></span>
                     <span class="pos-client-txt">
-                        <small>Cliente</small>
-                        <strong id="pos_client_name">Seleccionar cliente</strong>
+                        <strong id="pos_client_name">Consumidor final</strong>
+                        <small id="pos_client_sub">Venta sin datos del comprador</small>
                     </span>
+                    <span class="pos-client-tag" id="pos_client_tag">Predeterminado</span>
                     <i class="fa-solid fa-chevron-down pos-client-chev"></i>
                 </button>
                 <div class="pos-client-sel" id="pos_client_sel">
@@ -54,14 +56,16 @@
                         <strong id="pos_client_name2">--</strong>
                         <small id="pos_client_doc">--</small>
                     </span>
-                    <button type="button" class="pos-client-clear" id="pos_client_clear"><i class="fa-solid fa-xmark"></i></button>
+                    <button type="button" class="pos-client-clear" id="pos_client_clear" title="Quitar cliente y volver a Consumidor final">
+                        <i class="fa-solid fa-xmark"></i> Quitar
+                    </button>
                 </div>
                 <div class="pos-client-dd" id="pos_client_dd">
                     <div class="pos-dd-search">
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <input type="text" id="pos_client_search" placeholder="Buscar nombre o documento..." autocomplete="off">
                     </div>
-                    
+
                     <div class="pos-dd-cf" id="pos_client_cf" role="button" tabindex="0">
                         <span class="pos-dd-cf-ico"><i class="fa-solid fa-user"></i></span>
                         <span class="pos-dd-info">
@@ -78,6 +82,12 @@
                 <input type="hidden" id="id_cliente" value="">
             </div>
 
+            <!-- Aviso de identificación del comprador (info / error) -->
+            <div class="pos-ident-note" id="pos_ident_note" role="status" aria-live="polite">
+                <i class="fa-solid fa-circle-info"></i>
+                <span id="pos_ident_note_txt"></span>
+            </div>
+
             <!-- Comprobante / Pago -->
             <div class="pos-paydoc pos-paydoc--2" id="pos_paydoc">
                 <button type="button" class="pos-paydoc-btn active" data-target="id_tipo_comprobante" data-key="boleta">Boleta</button>
@@ -87,7 +97,7 @@
                 <select id="id_tipo_comprobante"></select>
                 <select id="id_metodo_pago"></select>
             </div>
-            <small id="cliente-hint" class="pos-hint"><i class="fa-solid fa-circle-info"></i> Para factura elija cliente con RUC.</small>
+            
 
             <!-- Método de pago (uno por venta) -->
             <div class="pos-pay" id="pos_pay">
