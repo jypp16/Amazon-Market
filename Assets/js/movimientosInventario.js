@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var pager = document.getElementById('mov-pager');
 
         var filtros = { q: qs('q'), tipo: qs('tipo'), desde: qs('desde'), hasta: qs('hasta'), pagina: parseInt(qs('pagina'), 10) || 1 };
+        var consultaSeq = 0;
         inputQ.value = filtros.q; selectTipo.value = filtros.tipo; inputDesde.value = filtros.desde; inputHasta.value = filtros.hasta;
 
         function consulta() {
@@ -84,10 +85,11 @@ document.addEventListener('DOMContentLoaded', function () {
             estado.hidden = true; tabla.hidden = false;
             tbody.innerHTML = res.items.map(function (m) {
                 var e = efecto(m.tipo, m.cantidad);
+                var codigoTxt = m.codigoBarras ? esc(m.codigoBarras) : 'Sin código';
                 return '<tr>' +
                     '<td class="mov-num">#' + m.id + '</td>' +
                     '<td>' + esc(fechaHora(m.fechaHora)) + '</td>' +
-                    '<td><strong>' + esc(m.producto) + '</strong><small>' + esc(m.codigoBarras) + '</small></td>' +
+                    '<td><strong>' + esc(m.producto) + '</strong><small>' + codigoTxt + '</small></td>' +
                     '<td>' + badgeTipo(m.tipo) + '</td>' +
                     '<td class="mov-qty ' + claseSigno(e) + '">' + firmado(e, true) + '</td>' +
                     '<td>' + (m.corregido ? '<span class="mov-badge mov-badge-corregido">Corregido</span>' : '<span class="mov-dash">—</span>') + '</td>' +
@@ -103,11 +105,25 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         async function cargar() {
+            var miSeq = ++consultaSeq;
             cargando();
             try {
-                renderizar(await api.listarMovimientos(filtros));
+                var res = await api.listarMovimientos(filtros);
+                if (miSeq !== consultaSeq) return;
+                renderizar(res);
             } catch (e) {
+                if (miSeq !== consultaSeq || (e && e.codigo === 'ABORTADO')) return;
                 tabla.hidden = true; pager.innerHTML = ''; resumen.textContent = '';
+                if (e && e.codigo === 'VALIDACION') {
+                    errorFecha.textContent = e.message;
+                    errorFecha.hidden = false;
+                    inputDesde.classList.add('is-invalid');
+                    inputHasta.classList.add('is-invalid');
+                    pegarEstado(estado, 'error', '<span>' + esc(e.message) + '</span>' +
+                        '<button type="button" class="mov-btn" id="mov-limpiar-val">Limpiar filtros</button>');
+                    document.getElementById('mov-limpiar-val').addEventListener('click', limpiar);
+                    return;
+                }
                 pegarEstado(estado, 'error', '<span>No se pudieron consultar los movimientos de inventario.</span>' +
                     '<button type="button" class="mov-btn" id="mov-reintentar"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>');
                 document.getElementById('mov-reintentar').addEventListener('click', cargar);
@@ -173,6 +189,11 @@ document.addEventListener('DOMContentLoaded', function () {
             var e = efecto(m.tipo, m.cantidad);
             var o = m.original;
             var n = m.correcciones.length;
+            var codigoHtml = m.codigoBarras ? '<code>' + esc(m.codigoBarras) + '</code>' : '<span>Sin código</span>';
+            var muestraLoteOriginal = Boolean(o.lote) || (api.tipos[o.tipo] && api.tipos[o.tipo].esBaja);
+            var botonEditar = api.edicionHabilitada
+                ? '<a class="mov-btn mov-btn-gold" href="' + esc(urlEdicion(m.id, lq)) + '"><i class="fa-solid fa-pencil" aria-hidden="true"></i> Editar movimiento</a>'
+                : '<button type="button" class="mov-btn" id="mov-btn-editar-bloqueado" disabled aria-disabled="true" title="La edición de movimientos se habilitará en la HU-24"><i class="fa-solid fa-lock" aria-hidden="true"></i> Editar movimiento</button>';
             contenido.hidden = false;
             if (qs('corregido') === '1') pegarEstado(estado, 'ok', '<span>Corrección confirmada. El detalle, el saldo y el historial se actualizaron.</span>');
             else estado.hidden = true;
@@ -180,20 +201,23 @@ document.addEventListener('DOMContentLoaded', function () {
             contenido.innerHTML =
                 '<div class="mov-detail-head"><div><h2>Movimiento N.º ' + m.id + '</h2>' + badgeTipo(m.tipo) +
                     (n ? ' <span class="mov-badge mov-badge-corregido">Corregido ' + n + (n === 1 ? ' vez' : ' veces') + '</span>' : '') + '</div>' +
-                    '<a class="mov-btn mov-btn-gold" href="' + esc(urlEdicion(m.id, lq)) + '"><i class="fa-solid fa-pencil" aria-hidden="true"></i> Editar movimiento</a></div>' +
+                    botonEditar + '</div>' +
                 '<div class="mov-detail-grid"><div>' +
                     '<section class="mov-card"><h3>Datos vigentes</h3><dl class="mov-dl">' +
-                        '<div><dt>Producto</dt><dd>' + esc(m.producto) + ' · <code>' + esc(m.codigoBarras) + '</code></dd></div>' +
+                        '<div><dt>Producto</dt><dd>' + esc(m.producto) + ' · ' + codigoHtml + '</dd></div>' +
                         '<div><dt>Tipo</dt><dd>' + esc(etiquetaTipo(m.tipo)) + '</dd></div>' +
                         '<div><dt>Cantidad vigente</dt><dd class="mov-qty ' + claseSigno(e) + '">' + esc(unidades(e)) + '</dd></div>' +
                         '<div><dt>Justificación</dt><dd>' + esc(m.justificacion) + '</dd></div>' +
-                        '<div><dt>Lote</dt><dd>' + esc(m.lote || 'Sin referencia de lote') + '</dd></div></dl></section>' +
+                        '<div><dt>Lote</dt><dd>' + esc(m.lote || 'Sin referencia de lote') + '</dd></div>' +
+                        '<div><dt>Stock actual del producto</dt><dd>' + esc(unidades(m.stockActual)) + '</dd></div></dl></section>' +
                     '<section class="mov-card"><h3><i class="fa-solid fa-lock" aria-hidden="true"></i> Registro original</h3><p class="mov-sub">No se modifica ni se elimina.</p><dl class="mov-dl">' +
-                        '<div><dt>Fecha y hora</dt><dd>' + esc(fechaHora(m.fechaHora)) + '</dd></div>' +
-                        '<div><dt>Responsable</dt><dd>' + esc(m.responsable) + '</dd></div>' +
+                        '<div><dt>Fecha y hora</dt><dd>' + esc(fechaHora(o.fechaHora || m.fechaHora)) + '</dd></div>' +
+                        '<div><dt>Responsable</dt><dd>' + esc(o.responsable || m.responsable) + '</dd></div>' +
                         '<div><dt>Tipo y cantidad</dt><dd>' + esc(etiquetaTipo(o.tipo)) + ' · ' + esc(unidades(efecto(o.tipo, o.cantidad))) + '</dd></div>' +
-                        '<div><dt>Saldo anterior</dt><dd>' + esc(unidades(m.saldoAnterior)) + '</dd></div>' +
-                        '<div><dt>Saldo resultante</dt><dd>' + esc(unidades(m.saldoResultante)) + '</dd></div></dl></section>' +
+                        '<div><dt>Justificación original</dt><dd>' + esc(o.justificacion || m.justificacion) + '</dd></div>' +
+                        (muestraLoteOriginal ? '<div><dt>Lote original</dt><dd>' + esc(o.lote || 'Sin referencia de lote') + '</dd></div>' : '') +
+                        '<div><dt>Saldo anterior</dt><dd>' + esc(unidades(o.saldoAnterior != null ? o.saldoAnterior : m.saldoAnterior)) + '</dd></div>' +
+                        '<div><dt>Saldo resultante</dt><dd>' + esc(unidades(o.saldoResultante != null ? o.saldoResultante : m.saldoResultante)) + '</dd></div></dl></section>' +
                 '</div><section class="mov-card"><h3>Historial de correcciones</h3>' + historialHtml(m) + '</section></div>';
         }
 
@@ -223,7 +247,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var estado = $('mov-status'), formulario = $('mov-form-wrap');
         var tipo = $('mov-e-tipo'), cantidad = $('mov-e-cantidad'), justificacion = $('mov-e-justificacion'),
             lote = $('mov-e-lote'), motivo = $('mov-e-motivo'), confirmar = $('mov-confirmar'), errorGeneral = $('mov-e-error');
-        var movimiento = null, guardando = false;
+        var movimiento = null, baseMovimiento = null, guardando = false, recargandoConflicto = false, recargaFallida = false;
 
         $('mov-back').href = urlDetalle(id, lq);
         $('mov-cancelar').href = urlDetalle(id, lq);
@@ -265,8 +289,12 @@ document.addEventListener('DOMContentLoaded', function () {
             var celdaSaldo = $('mov-p-saldo');
             celdaSaldo.textContent = valida ? unidades(saldo) : '—';
             celdaSaldo.classList.toggle('is-negative', valida && saldo < 0);
+            var orig = movimiento.original || { tipo: movimiento.tipo, cantidad: movimiento.cantidad, saldoAnterior: movimiento.saldoAnterior, saldoResultante: movimiento.saldoResultante };
+            var efectoOrig = efecto(orig.tipo, orig.cantidad);
             $('mov-p-formula').textContent = valida
-                ? movimiento.stockActual + ' ' + MENOS + ' (' + firmado(anterior) + ') + (' + firmado(nuevo) + ') = ' + firmado(saldo) + '. Se usa el saldo actual, no el del registro original (' + movimiento.saldoResultante + ' unidades).'
+                ? movimiento.stockActual + ' ' + MENOS + ' (' + firmado(anterior) + ') + (' + firmado(nuevo) + ') = ' + firmado(saldo) +
+                  '. Original: ' + etiquetaTipo(orig.tipo) + ' (' + firmado(efectoOrig, true) + ', saldo ' + orig.saldoAnterior + ' → ' + orig.saldoResultante + '); vigente: ' +
+                  etiquetaTipo(movimiento.tipo) + ' (' + firmado(anterior, true) + ').'
                 : 'Ingresa una cantidad válida para calcular el saldo resultante.';
             var aviso = $('mov-p-negativo');
             aviso.hidden = !(valida && saldo < 0);
@@ -288,21 +316,157 @@ document.addEventListener('DOMContentLoaded', function () {
             return v;
         }
 
-        function mostrarError(texto) {
+        function snapshotBase(m) {
+            return {
+                tipo: m.tipo,
+                cantidad: Number(m.cantidad),
+                justificacion: m.justificacion || '',
+                lote: m.lote || ''
+            };
+        }
+
+        function mostrarErrorHtml(html) {
             errorGeneral.hidden = false;
-            errorGeneral.innerHTML = '<span>' + esc(texto) + '</span>';
+            errorGeneral.innerHTML = html;
             errorGeneral.scrollIntoView({ block: 'nearest' });
         }
 
+        function mostrarError(texto) {
+            mostrarErrorHtml('<span>' + esc(texto) + '</span>');
+        }
+
+        function reconciliarTrasConflicto(editado, nuevoMov, mensajeServidor) {
+            var prevBase = baseMovimiento || snapshotBase(movimiento);
+            var srv = snapshotBase(nuevoMov);
+            var cambioVersion = Number(nuevoMov.version) !== Number(movimiento.version);
+            var cambioStock = Number(nuevoMov.stockActual) !== Number(movimiento.stockActual);
+
+            var userChanged = {
+                tipo: editado.tipo !== prevBase.tipo,
+                cantidad: String(editado.cantidadTexto) !== String(prevBase.cantidad),
+                justificacion: editado.justificacion !== prevBase.justificacion,
+                lote: editado.lote !== prevBase.lote
+            };
+            var srvChanged = {
+                tipo: srv.tipo !== prevBase.tipo,
+                cantidad: srv.cantidad !== prevBase.cantidad,
+                justificacion: srv.justificacion !== prevBase.justificacion,
+                lote: srv.lote !== prevBase.lote
+            };
+
+            var actualizadosDesdeServidor = [];
+            var conflictos = [];
+
+            // 1. Tipo
+            if (!userChanged.tipo) {
+                tipo.value = srv.tipo;
+                if (srvChanged.tipo) {
+                    actualizadosDesdeServidor.push('Tipo: ' + etiquetaTipo(prevBase.tipo) + ' → ' + etiquetaTipo(srv.tipo));
+                }
+            } else if (srvChanged.tipo && editado.tipo !== srv.tipo) {
+                tipo.value = srv.tipo;
+                conflictos.push('Tipo (vigente: ' + etiquetaTipo(srv.tipo) + ', tu edición: ' + etiquetaTipo(editado.tipo) + ')');
+            }
+
+            // 2. Cantidad
+            if (!userChanged.cantidad) {
+                cantidad.value = srv.cantidad;
+                if (srvChanged.cantidad) {
+                    actualizadosDesdeServidor.push('Cantidad: ' + prevBase.cantidad + ' → ' + srv.cantidad);
+                }
+            } else if (srvChanged.cantidad && Number(editado.cantidad) !== srv.cantidad) {
+                cantidad.value = srv.cantidad;
+                conflictos.push('Cantidad (vigente: ' + srv.cantidad + ', tu edición: ' + editado.cantidadTexto + ')');
+            }
+
+            // 3. Justificación
+            if (!userChanged.justificacion) {
+                justificacion.value = srv.justificacion;
+                if (srvChanged.justificacion) {
+                    actualizadosDesdeServidor.push('Justificación actualizada desde el servidor');
+                }
+            } else if (srvChanged.justificacion && editado.justificacion !== srv.justificacion) {
+                justificacion.value = srv.justificacion;
+                conflictos.push('Justificación (vigente: «' + srv.justificacion + '», tu edición: «' + editado.justificacion + '»)');
+            }
+
+            // 4. Lote (incluyendo impacto si la reclasificación de tipo afecta al lote)
+            var tipoFinalEsBaja = Boolean(api.tipos[tipo.value] && api.tipos[tipo.value].esBaja);
+            var srvEsBaja = Boolean(api.tipos[srv.tipo] && api.tipos[srv.tipo].esBaja);
+            if (!tipoFinalEsBaja) {
+                lote.value = '';
+                if (userChanged.lote && !srvEsBaja) {
+                    conflictos.push('Lote (el movimiento vigente es ' + etiquetaTipo(srv.tipo) + ' y no admite lote; tu edición era «' + editado.lote + '»)');
+                }
+            } else if (!userChanged.lote) {
+                lote.value = srv.lote;
+                if (srvChanged.lote) {
+                    actualizadosDesdeServidor.push('Lote: ' + (prevBase.lote || 'Sin lote') + ' → ' + (srv.lote || 'Sin lote'));
+                }
+            } else if (srvChanged.lote && editado.lote !== srv.lote) {
+                lote.value = srv.lote;
+                conflictos.push('Lote (vigente: ' + (srv.lote || 'Sin lote') + ', tu edición: ' + (editado.lote || 'Sin lote') + ')');
+            }
+
+            movimiento = nuevoMov;
+            baseMovimiento = srv;
+            recargaFallida = false;
+            actualizarVistaPrevia();
+
+            if (conflictos.length) {
+                mostrarError('Otro usuario modificó el mismo campo: ' + conflictos.join('; ') + '. Se cargaron los valores vigentes para que revises y ajustes antes de volver a confirmar.');
+            } else if (cambioVersion) {
+                var detalle = actualizadosDesdeServidor.length ? ' (' + actualizadosDesdeServidor.join(', ') + ')' : '';
+                mostrarError('El movimiento pasó a la versión ' + nuevoMov.version + detalle + '. Se actualizaron los campos que no editaste y se conservaron tus cambios; revisa la vista previa y vuelve a confirmar.');
+            } else if (cambioStock) {
+                mostrarError('El stock actual cambió a ' + unidades(nuevoMov.stockActual) + ' mientras revisabas. Se actualizó la vista previa y se conservaron tus cambios; revisa el saldo resultante y vuelve a confirmar.');
+            } else {
+                mostrarError(mensajeServidor || 'El movimiento o su saldo cambió mientras revisabas. Revisa la vista previa actualizada y confirma de nuevo.');
+            }
+        }
+
+        async function recargarTrasConflicto(editado, mensajeServidor) {
+            recargandoConflicto = true;
+            confirmar.disabled = true;
+            confirmar.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Actualizando datos...';
+            try {
+                var nuevoMov = await api.obtenerMovimiento(id);
+                reconciliarTrasConflicto(editado, nuevoMov, mensajeServidor);
+                confirmar.disabled = false;
+                confirmar.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Confirmar corrección';
+            } catch (x) {
+                recargaFallida = true;
+                confirmar.disabled = true;
+                confirmar.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Confirmar corrección';
+                mostrarErrorHtml('<span>No se pudieron recargar los datos vigentes tras el conflicto. Actualiza el formulario antes de reintentar.</span>' +
+                    '<button type="button" class="mov-btn" id="mov-recargar-conflicto"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Recargar datos vigentes</button>');
+                var btnRecargar = $('mov-recargar-conflicto');
+                if (btnRecargar) {
+                    btnRecargar.addEventListener('click', function () {
+                        recargarTrasConflicto(editado, mensajeServidor);
+                    });
+                }
+            } finally {
+                recargandoConflicto = false;
+            }
+        }
+
         function llenar() {
+            baseMovimiento = snapshotBase(movimiento);
+            recargaFallida = false;
             $('mov-e-producto').textContent = movimiento.producto;
-            $('mov-e-codigo').textContent = movimiento.codigoBarras;
+            $('mov-e-codigo').textContent = movimiento.codigoBarras || 'Sin código';
             $('mov-e-numero').textContent = movimiento.id;
             $('mov-e-fecha').textContent = fechaHora(movimiento.fechaHora);
             $('mov-e-responsable').textContent = movimiento.responsable;
             tipo.value = movimiento.tipo; cantidad.value = movimiento.cantidad;
             justificacion.value = movimiento.justificacion || ''; lote.value = movimiento.lote || ''; motivo.value = '';
             actualizarVistaPrevia();
+            if (!api.edicionHabilitada) {
+                [tipo, cantidad, justificacion, lote, motivo].forEach(function (el) { el.disabled = true; });
+                confirmar.disabled = true;
+                mostrarError('La edición de movimientos estará disponible en la HU-24. Esta pantalla opera en modo solo lectura.');
+            }
         }
 
         async function cargar() {
@@ -323,27 +487,40 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         async function guardar() {
-            if (guardando) return;
+            if (!api.edicionHabilitada) {
+                mostrarError('La edición de movimientos aún no está habilitada (HU-24). No se guardó ningún cambio.');
+                return;
+            }
+            if (guardando || recargandoConflicto || recargaFallida) return;
             var v = validar();
             if (!v) return;
             guardando = true; confirmar.disabled = true;
             confirmar.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Guardando...';
             try {
-                await api.guardarCorreccion(id, { tipo: v.tipo, cantidad: v.cantidad, justificacion: v.justificacion, lote: v.lote, motivo: v.motivo, version: movimiento.version });
+                await api.guardarCorreccion(id, {
+                    tipo: v.tipo,
+                    cantidad: v.cantidad,
+                    justificacion: v.justificacion,
+                    lote: v.lote,
+                    motivo: v.motivo,
+                    version: movimiento.version,
+                    stockActualEsperado: movimiento.stockActual
+                });
                 window.location.href = urlDetalle(id, lq, 'corregido=1');
             } catch (e) {
-                guardando = false; confirmar.disabled = false;
-                confirmar.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Confirmar corrección';
+                guardando = false;
                 if (e.codigo === 'CONFLICTO') {
-                    try { movimiento = await api.obtenerMovimiento(id); } catch (x) { /* se mantiene lo cargado */ }
-                    actualizarVistaPrevia();
-                    mostrarError('El movimiento o su saldo cambió mientras revisabas. Revisa la vista previa actualizada y confirma de nuevo.');
-                } else if (e.codigo === 'NO_ENCONTRADO') {
-                    mostrarError('El movimiento ya no existe. Vuelve al listado.');
-                } else if (e.codigo === 'VALIDACION') {
-                    mostrarError(e.message);
+                    await recargarTrasConflicto(v, e.message);
                 } else {
-                    mostrarError('No se pudo guardar la corrección. No se aplicó ningún cambio; puedes reintentar.');
+                    confirmar.disabled = false;
+                    confirmar.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Confirmar corrección';
+                    if (e.codigo === 'NO_ENCONTRADO') {
+                        mostrarError('El movimiento ya no existe. Vuelve al listado.');
+                    } else if (e.codigo === 'VALIDACION') {
+                        mostrarError(e.message);
+                    } else {
+                        mostrarError('No se pudo guardar la corrección. No se aplicó ningún cambio; puedes reintentar.');
+                    }
                 }
             }
         }

@@ -157,7 +157,10 @@ document.addEventListener('DOMContentLoaded', function () {
             : 'No quedan';
 
         try {
-            var resultado = await window.AvisosVencimientoApi.registrarRevision(avisoSeleccionado.id, respuesta);
+            var resultado = await window.AvisosVencimientoApi.registrarRevision(avisoSeleccionado.id, respuesta, {
+                fechaVencimiento: avisoSeleccionado.fechaVencimiento,
+                idDetalleCompra: avisoSeleccionado.idDetalleCompra
+            });
             establecerGuardando(false);
 
             if (resultado.estado === 'cerrado') {
@@ -172,7 +175,19 @@ document.addEventListener('DOMContentLoaded', function () {
             establecerGuardando(false);
             yesButton.textContent = 'Sí, quedan';
             noButton.textContent = 'No quedan';
-            errorBox.textContent = 'No se pudo guardar la respuesta. El aviso sigue pendiente.';
+            if (error && error.codigo === 'CONFLICTO_VIGENCIA') {
+                errorBox.textContent = error.message || 'El aviso cambió mientras lo revisabas. Se actualizará el listado.';
+                errorBox.hidden = false;
+                retryButton.hidden = true;
+                yesButton.disabled = true;
+                noButton.disabled = true;
+                setTimeout(function () {
+                    cerrarModal();
+                    cargarAvisos();
+                }, 1400);
+                return;
+            }
+            errorBox.textContent = (error && error.message) || 'No se pudo guardar la respuesta. El aviso sigue pendiente.';
             errorBox.hidden = false;
             retryButton.hidden = false;
             retryButton.focus();

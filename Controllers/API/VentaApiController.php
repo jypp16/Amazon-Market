@@ -45,16 +45,10 @@ class VentaApiController extends ApiController
     {
         try {
             $esAdmin = (int)($_SESSION['rol'] ?? 0) === 1;
+            $filtroUsuario = $esAdmin ? null : (int)$this->authenticatedUserId;
 
             if (!empty($id)) {
-                $condiciones = ['id_venta' => (int)$id, 'estado = 1'];
-                if (!$esAdmin) {
-                    $condiciones['id_usuario'] = (int)$this->authenticatedUserId;
-                }
-
-                $venta = $this->ventaModel
-                    ->where($condiciones)
-                    ->first();
+                $venta = $this->ventaModel->obtenerVentaConCliente((int)$id, $filtroUsuario);
 
                 if (!$venta) {
                     $this->sendJsonResponse(['status' => false, 'message' => 'Venta no encontrada.'], 404);
@@ -62,15 +56,7 @@ class VentaApiController extends ApiController
 
                 $this->sendJsonResponse(['status' => true, 'data' => $venta]);
             } else {
-                $condiciones = ['estado = 1'];
-                if (!$esAdmin) {
-                    $condiciones['id_usuario'] = (int)$this->authenticatedUserId;
-                }
-
-                $ventas = $this->ventaModel
-                    ->where($condiciones)
-                    ->orderBy('id_venta', 'DESC')
-                    ->get();
+                $ventas = $this->ventaModel->listarVentasConCliente($filtroUsuario);
 
                 $this->sendJsonResponse(['status' => true, 'data' => $ventas]);
             }

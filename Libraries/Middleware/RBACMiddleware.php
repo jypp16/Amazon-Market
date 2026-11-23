@@ -51,6 +51,9 @@ class RBACMiddleware extends Middleware {
         if ($controller === 'caja' && $method === 'consultar' && $rol === 1) {
             $slug = (string)($_GET['propia'] ?? '') === '1' ? 'turnos.acceder' : 'turnos.consultar_historico';
         }
+        if ($controller === 'inventario' && $method === 'ajustes' && $rol !== 1 && self::tienePermisoAsignado($rol, 'inventario.bajas_vencimiento')) {
+            $slug = 'inventario.bajas_vencimiento';
+        }
         $permisoEfectivo = $slug && (self::esRutaOperativaCajaSprint3($controller, $method)
             || ($controller === 'caja' && $method === 'consultar' && (string)($_GET['propia'] ?? '') === '1'))
             ? self::tienePermisoAsignado($rol, $slug)
@@ -88,7 +91,7 @@ class RBACMiddleware extends Middleware {
         $controller = strtolower($controller);
         $method = strtolower($method);
 
-        if ($controller === 'inventario' && $method === 'ajustes') {
+        if ($controller === 'inventario' && in_array($method, ['movimientos', 'movimiento', 'editarmovimiento'], true)) {
             return true;
         }
 
@@ -215,7 +218,12 @@ class RBACMiddleware extends Middleware {
                 'detalle'    => 'productos.listar',
             ],
             'inventario' => [
-                'ajustes' => 'inventario.ajustes',
+                'ajustes'          => 'inventario.ajustes',
+                'bajas'            => 'inventario.bajas_vencimiento',
+                'vencimientos'     => 'inventario.vencimientos',
+                'movimientos'      => 'inventario.ajustes',
+                'movimiento'       => 'inventario.ajustes',
+                'editarmovimiento' => 'inventario.ajustes',
             ],
             'cliente' => [
                 'index'      => 'clientes.listar',

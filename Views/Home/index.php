@@ -283,7 +283,26 @@ $nombre = e($_SESSION['nombre'] ?? '');
         </div>
         <span class="dash-kpi-badge badge-muted"><?= e($data['mis_ventas_mes'] ?? 0) ?> mis ventas</span>
     </div>
+
+    <?php if (in_array('inventario.vencimientos', $slugs ?? [])): ?>
+    <div id="expiration-dashboard-card" class="dash-kpi-card dash-kpi-expiration">
+        <div class="dash-kpi-icon kpi-gold"><i class="fa-regular fa-clock" aria-hidden="true"></i></div>
+        <div id="expiration-dashboard-state" class="dash-kpi-data" aria-live="polite">
+            <span class="dash-kpi-loading" aria-label="Cargando vencimientos"></span>
+            <span class="dash-kpi-label">Vencimientos por verificar</span>
+        </div>
+        <a id="expiration-dashboard-link" href="<?= BASE_URL ?>/Inventario/vencimientos" class="dash-kpi-link" aria-label="Vencimientos por verificar: ver avisos"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+        <button type="button" id="expiration-dashboard-retry" class="dash-kpi-retry" hidden><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>
+    </div>
+    <?php endif; ?>
 </div>
+
+<?php if (in_array('inventario.vencimientos', $slugs ?? [])): ?>
+<div class="dash-info-note" role="note">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <span>Los avisos incluyen fechas ya pasadas y las que vencen en los próximos 15 días. La tarjeta solo cuenta avisos activos: no muestra stock.</span>
+</div>
+<?php endif; ?>
 
 <!-- Vendedor: Mis Ventas Recientes + Más Vendidos -->
 <div class="dash-two-col">

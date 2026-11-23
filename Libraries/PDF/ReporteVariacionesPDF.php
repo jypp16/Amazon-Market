@@ -29,7 +29,7 @@ class ReporteVariacionesPDF extends ReporteInventarioPDF {
         $rows=[];
         foreach($items as $item)$rows[]=[
             $this->formatDateFull($item['fecha_hora']??$item['fecha_movimiento']),
-            trim(($item['codigo_barra']??'')."\n".($item['producto_nombre']??'')."\n".($item['categoria_nombre']??'Sin categoría').' / '.($item['subcategoria_nombre']??'General')),
+            trim((trim((string)($item['codigo_barra']??'')) ?: 'Sin código')."\n".($item['producto_nombre']??'')."\n".($item['categoria_nombre']??'Sin categoría').' / '.($item['subcategoria_nombre']??'General')),
             $item['tipo_variacion']??$item['tipo_movimiento']??'',
             ($item['entrada']===null?'--':$this->formatNumber($item['entrada'])).' / '.($item['salida']===null?'--':$this->formatNumber($item['salida'])).' '.($item['unidad_abreviatura']??'UND'),
             $this->formatNumber($item['saldo_anterior']).' / '.$this->formatNumber($item['saldo_resultante']),

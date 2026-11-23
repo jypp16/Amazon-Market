@@ -10,7 +10,8 @@ class ReporteKardexPDF extends ReporteInventarioPDF {
         $this->seccion('RESUMEN EJECUTIVO');
         if (!empty($summary['aplicable'])) {
             $unit=$summary['unidad_inventario']??'UND';
-            $this->metaEnvuelta('Producto:',trim((string)($summary['producto']??'Producto')) . ' · ' . (string)($summary['codigo_barra']??''));
+            $codigoVisible = trim((string)($summary['codigo_barra'] ?? '')) ?: 'Sin código';
+            $this->metaEnvuelta('Producto:',trim((string)($summary['producto']??'Producto')) . ' · ' . $codigoVisible);
             $this->writeKPIRow([
                 ['label'=>'Unidad','value'=>$unit],
                 ['label'=>'Saldo inicial','value'=>$this->formatNumber($summary['saldo_inicial'])],
@@ -43,7 +44,7 @@ class ReporteKardexPDF extends ReporteInventarioPDF {
             $rows=[];
             foreach($items as $item) $rows[]=[
                 $this->formatDateFull($item['fecha_hora']??$item['fecha_movimiento']),
-                trim(($item['codigo_barra']??'')."\n".($item['producto_nombre']??'')."\n".($item['categoria_nombre']??'Sin categoría').' / '.($item['subcategoria_nombre']??'General')),
+                trim((trim((string)($item['codigo_barra']??'')) ?: 'Sin código')."\n".($item['producto_nombre']??'')."\n".($item['categoria_nombre']??'Sin categoría').' / '.($item['subcategoria_nombre']??'General')),
                 $item['tipo_movimiento']??$item['origen']??'',
                 $item['entrada']===null?'--':$this->formatNumber($item['entrada']).' '.($item['unidad_abreviatura']??'UND'),
                 $item['salida']===null?'--':$this->formatNumber($item['salida']).' '.($item['unidad_abreviatura']??'UND'),

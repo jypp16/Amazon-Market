@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const celdaCodigo = document.createElement('td');
             const badgeCodigo = document.createElement('span');
             badgeCodigo.className = 'barcode-badge';
-            badgeCodigo.textContent = prod.codigo_barra;
+            badgeCodigo.textContent = (prod.codigo_barra && String(prod.codigo_barra).trim() !== '') ? prod.codigo_barra : 'Sin código';
             celdaCodigo.appendChild(badgeCodigo);
 
             const celdaNombre = document.createElement('td');
@@ -296,10 +296,21 @@ document.addEventListener('DOMContentLoaded', () => {
             btnText: 'Guardar Producto',
             width: '650px',
             onSuccess: () => cargarProductos(),
-            onMount: aplicarRestriccionStock,
+            onMount: (form) => {
+                aplicarRestriccionStock(form);
+                if (window.ProductoCodigoBarras && window.ProductoCodigoBarras.montarCrear) {
+                    window.ProductoCodigoBarras.montarCrear(form);
+                }
+            },
+            beforeSubmit: (form) => window.ProductoCodigoBarras && window.ProductoCodigoBarras.validarCrear
+                ? window.ProductoCodigoBarras.validarCrear(form)
+                : true,
+            onError: (resultado, form) => window.ProductoCodigoBarras
+                ? window.ProductoCodigoBarras.manejarErrorServidor(resultado, form)
+                : false,
             campos: [
-                { name: 'imagen', label: 'Imagen del Producto', type: 'file', col: 'col-12', accept: 'image/jpeg,image/png,image/webp', hint: 'Opcional. JPG, PNG o WEBP (max 2MB). Se guarda con el código de barras.' },
-                { name: 'codigo_barra', label: 'Código de Barra', type: 'text', col: 'col-6', required: true, placeholder: 'Escriba o escanee el código' },
+                { name: 'imagen', label: 'Imagen del Producto', type: 'file', col: 'col-12', accept: 'image/jpeg,image/png,image/webp', hint: 'Opcional. JPG, PNG o WEBP (max 2MB).' },
+                { name: 'codigo_barra', label: 'Código de Barra', type: 'text', col: 'col-6', required: false, placeholder: 'Escanea o escribe el código (opcional)' },
                 { name: 'nombre', label: 'Nombre del Producto', type: 'text', col: 'col-6', required: true, placeholder: 'Nombre comercial' },
                 { name: 'descripcion', label: 'Descripción', type: 'textarea', col: 'col-12', placeholder: 'Detalles del producto...' },
                 { name: 'id_categoria', label: 'Categoría', type: 'select', col: 'col-6', required: true,

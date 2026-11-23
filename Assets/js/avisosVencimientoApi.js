@@ -1,80 +1,82 @@
 (function () {
-    function esperar(ms) {
-        return new Promise(function (resolve) {
-            setTimeout(resolve, ms);
-        });
+    function crearError(mensaje, codigo, data) {
+        var e = new Error(mensaje);
+        e.codigo = codigo || 'ERROR';
+        if (data !== undefined) e.data = data;
+        return e;
     }
 
-    function crearAvisosMock() {
-        return [
-            { id: 'av-001', categoria: 'Lácteos', subcategoria: 'Leches', producto: 'Leche evaporada 400 g', fechaVencimiento: '2026-11-14', condicion: 'fecha_pasada', lote: null },
-            { id: 'av-002', categoria: 'Abarrotes', subcategoria: 'Aceites', producto: 'Aceite Vegetal PRIMOR Clásico Botella 1.8L', fechaVencimiento: '2026-11-20', condicion: 'vence_hoy', lote: 'L-2403' },
-            { id: 'av-003', categoria: 'Lácteos', subcategoria: 'Yogures', producto: 'Yogur natural 1 L', fechaVencimiento: '2026-11-25', condicion: 'proximo_a_vencer', lote: null },
-            { id: 'av-004', categoria: 'Lácteos', subcategoria: 'Yogures', producto: 'Yogur natural 1 L', fechaVencimiento: '2026-11-30', condicion: 'proximo_a_vencer', lote: 'L-2411' }
-        ];
+    function normalizarAviso(item) {
+        return {
+            id: String(item.id != null ? item.id : item.id_aviso),
+            idAviso: Number(item.id_aviso != null ? item.id_aviso : item.id),
+            idLineaCompra: Number(item.id_linea_compra || 0),
+            idDetalleCompra: Number(item.id_detalle_compra || 0),
+            categoria: String(item.categoria || ''),
+            subcategoria: String(item.subcategoria || 'General'),
+            producto: String(item.producto || ''),
+            fechaVencimiento: String(item.fecha_vencimiento || ''),
+            condicion: String(item.condicion || 'proximo_a_vencer'),
+            lote: item.lote != null && item.lote !== '' ? String(item.lote) : null
+        };
     }
-
-    var avisosActivos = null;
-    var fallosSimulados = 0;
-    var fallosConsultaSimulados = 0;
-    var fallosResumenSimulados = 0;
 
     window.AvisosVencimientoApi = {
         obtenerAvisos: async function () {
-            // TODO backend: reemplazar este mock por la consulta real de avisos de vencimiento.
-            await esperar(650);
-
-            var parametros = new URLSearchParams(window.location.search);
-            if (parametros.get('mockError') === '1' && fallosConsultaSimulados === 0) {
-                fallosConsultaSimulados += 1;
-                throw new Error('No se pudo consultar los avisos de vencimiento.');
+            var res = await Api.get('alertas/vencimientos');
+            if (!res || !res.ok || !res.data || res.data.status !== true || !res.data.data) {
+                var msg = (res && res.data && res.data.message) || 'No se pudieron consultar los avisos de vencimiento.';
+                var code = (res && res.data && res.data.code) || 'ERROR';
+                throw crearError(msg, code);
             }
-
-            if (avisosActivos === null) {
-                avisosActivos = crearAvisosMock();
-            }
-            return avisosActivos.map(function (aviso) {
-                return Object.assign({}, aviso);
-            });
+            var items = Array.isArray(res.data.data.items) ? res.data.data.items : [];
+            return items.map(normalizarAviso);
         },
 
-        registrarRevision: async function (id, respuesta) {
-            // TODO backend: reemplazar este mock por el servicio real de registro de revisiones.
-            await esperar(700);
-
-            var parametros = new URLSearchParams(window.location.search);
-            if (parametros.get('mockSaveError') === '1' && fallosSimulados === 0) {
-                fallosSimulados += 1;
-                throw new Error('No se pudo guardar la respuesta.');
-            }
-
-            if (respuesta === 'no') {
-                avisosActivos = avisosActivos.filter(function (aviso) {
-                    return aviso.id !== id;
-                });
-            }
-
-            return {
-                estado: respuesta === 'no' ? 'cerrado' : 'activo',
-                avisosActivos: avisosActivos.length
+        registrarRevision: async function (id, respuesta, meta) {
+            var fechaVista = meta && meta.fechaVencimiento ? String(meta.fechaVencimiento) : '';
+            var idDetalle = meta && meta.idDetalleCompra ? Number(meta.idDetalleCompra) : null;
+            var payload = {
+                respuesta: String(respuesta || ''),
+                fecha_vencimiento_vista: fechaVista,
+                id_detalle_compra_visto: idDetalle
             };
+            var scope = 'aviso-revision-' + String(id) + '-' + fechaVista + '-' + String(respuesta);
+            var referencia = await Api.referenciaSolicitud(scope, payload);
+            var body = Object.assign({}, payload, { referencia_solicitud: referencia });
+
+            var res = await Api.post('alertas/vencimientos/' + encodeURIComponent(String(id)) + '/revisiones', body);
+            if (!res) {
+                throw crearError('No se pudo comunicar con el servidor.', 'ERROR');
+            }
+            if (res.ok && res.data && res.data.status === true && res.data.data) {
+                Api.confirmarSolicitud(scope);
+                var d = res.data.data;
+                return {
+                    estado: String(d.estado || (respuesta === 'no' ? 'cerrado' : 'activo')),
+                    avisosActivos: Number(d.avisos_activos != null ? d.avisos_activos : 0),
+                    idRevision: Number(d.id_revision || 0)
+                };
+            }
+
+            var code = (res.data && res.data.code) || 'ERROR';
+            var msg = (res.data && res.data.message) || 'No se pudo guardar la respuesta.';
+            if (code === 'EXPIRATION_DATE_CHANGED' || code === 'AVISO_ALREADY_CLOSED' || code === 'AVISO_NOT_ELIGIBLE') {
+                Api.confirmarSolicitud(scope);
+                throw crearError(msg, 'CONFLICTO_VIGENCIA', res.data && res.data.data);
+            }
+            throw crearError(msg, code);
         },
 
         obtenerResumenAvisos: async function () {
-            // TODO backend: reemplazar este mock por el resumen real de avisos activos.
-            await esperar(450);
-
-            var parametros = new URLSearchParams(window.location.search);
-            if (parametros.get('mockResumenError') === '1' && fallosResumenSimulados === 0) {
-                fallosResumenSimulados += 1;
-                throw new Error('No se pudo consultar el resumen de avisos.');
+            var res = await Api.get('alertas/vencimientos/resumen');
+            if (!res || !res.ok || !res.data || res.data.status !== true || !res.data.data) {
+                var msg = (res && res.data && res.data.message) || 'No se pudo consultar el resumen de avisos.';
+                throw crearError(msg, (res && res.data && res.data.code) || 'ERROR');
             }
-
-            if (avisosActivos === null) {
-                avisosActivos = crearAvisosMock();
-            }
-
-            return { avisosActivos: avisosActivos.length };
+            return {
+                avisosActivos: Number(res.data.data.avisos_activos)
+            };
         }
     };
 })();

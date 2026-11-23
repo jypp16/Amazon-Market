@@ -64,4 +64,83 @@ document.addEventListener('DOMContentLoaded', function() {
         stockActual.step = "1";
         stockActual.min = "0";
     }
+
+    // HU-20: manejo de código de barras opcional y confirmación en formularios web clásicos
+    const formNuevo = document.getElementById('form_producto_nuevo');
+    const formEditar = document.getElementById('form_producto_editar');
+    const formActivo = formEditar || formNuevo;
+    const codigoInput = document.getElementById('codigo_barra');
+    const btnQuitar = document.getElementById('btn_quitar_codigo_barra');
+    const errCodigo = document.getElementById('codigo_barra_error');
+    const FORMATO_CODIGO = /^\d{8,14}$/;
+    const MSG_FORMATO = 'Ingresa o escanea un código válido: solo números, de 8 a 14 dígitos.';
+
+    if (codigoInput && formActivo) {
+        function mostrarErrorCodigo(msg) {
+            if (errCodigo) {
+                errCodigo.textContent = msg || '';
+                errCodigo.style.display = msg ? 'block' : 'none';
+            }
+            codigoInput.classList.toggle('is-invalid', !!msg);
+        }
+
+        function syncQuitar() {
+            if (btnQuitar) btnQuitar.disabled = codigoInput.value.trim() === '';
+            mostrarErrorCodigo('');
+        }
+
+        codigoInput.addEventListener('input', syncQuitar);
+        codigoInput.addEventListener('keydown', function(ev) {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                const nombreInput = document.getElementById('nombre');
+                if (nombreInput) nombreInput.focus();
+            }
+        });
+
+        if (btnQuitar) {
+            btnQuitar.addEventListener('click', function() {
+                codigoInput.value = '';
+                syncQuitar();
+                codigoInput.focus();
+            });
+        }
+        syncQuitar();
+
+        let confirmandoEnvio = false;
+        formActivo.addEventListener('submit', async function(ev) {
+            if (confirmandoEnvio) return;
+            const nuevo = codigoInput.value.trim();
+            codigoInput.value = nuevo;
+            mostrarErrorCodigo('');
+
+            const anterior = formEditar ? (formEditar.dataset.codigoOriginal || '').trim() : '';
+            const sinCambio = formEditar && nuevo === anterior;
+
+            if (!sinCambio && nuevo !== '' && !FORMATO_CODIGO.test(nuevo)) {
+                ev.preventDefault();
+                mostrarErrorCodigo(MSG_FORMATO);
+                codigoInput.focus();
+                return;
+            }
+
+            if (formEditar && anterior !== '' && nuevo !== anterior) {
+                ev.preventDefault();
+                const nombreProd = formEditar.dataset.productoNombre || (document.getElementById('nombre') ? document.getElementById('nombre').value : 'este producto');
+                let confirmado = false;
+                if (window.ProductoCodigoBarras && window.ProductoCodigoBarras.dialogo) {
+                    confirmado = await window.ProductoCodigoBarras.dialogo({ nombre: nombreProd }, anterior, nuevo);
+                } else {
+                    const texto = nuevo === ''
+                        ? '¿Quitar el código de barras ' + anterior + ' de ' + nombreProd + '?'
+                        : '¿Cambiar el código de barras de ' + nombreProd + ' de ' + anterior + ' a ' + nuevo + '?';
+                    confirmado = window.confirm(texto);
+                }
+                if (confirmado) {
+                    confirmandoEnvio = true;
+                    formActivo.submit();
+                }
+            }
+        });
+    }
 });

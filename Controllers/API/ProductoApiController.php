@@ -3,20 +3,32 @@
 namespace Controllers\API;
 
 use Libraries\Core\ApiController;
-use Models\CategoriaModel;
+use Libraries\Middleware\RBACMiddleware;
 use Models\SubcategoriaModel;
-use Models\UnidadMedidaModel;
+use Services\ProductoService;
+use Services\StorageService;
+use PDOException;
 
 class ProductoApiController extends ApiController {
 
     private SubcategoriaModel $subcategoriaModel;
+    private ProductoService $productoService;
+    private StorageService $storageService;
 
     public function __construct() {
         parent::__construct();
         $this->subcategoriaModel = new SubcategoriaModel();
+        $this->storageService = new StorageService();
+        $this->productoService = new ProductoService($this->model, $this->subcategoriaModel, $this->storageService);
     }
 
     public function get(?string $params = ""): void {
+        $trimmedParams = trim((string)$params, '/');
+        if (preg_match('#^codigo(?:/(.*))?$#i', $trimmedParams, $matches)) {
+            $this->getProductoPorCodigoExacto($matches[1] ?? '');
+            return;
+        }
+
         $modo = $this->getParam('modo', '');
         if ($modo === 'reporte') {
             $this->requireAdminActivo('reportes.ver');
@@ -26,7 +38,90 @@ class ProductoApiController extends ApiController {
         $this->getProductos($params);
     }
 
+    /**
+     * GET /api/productos/codigo/{codigo}
+     * Consulta exacta compartida de solo lectura para POS (HU-21), Compras y Ajustes (HU-22).
+     */
+    private function getProductoPorCodigoExacto(string $rawCodigo): void {
+        $rol = (int)($this->authenticatedUser['id_rol'] ?? ($_SESSION['rol'] ?? 0));
+        $permisosHabilitados = [
+            'productos.listar',
+            'productos.crear',
+            'productos.editar',
+            'ventas.acceder',
+            'compras.crear',
+            'compras.editar',
+            'inventario.ajustes',
+        ];
+        if (!RBACMiddleware::tieneAlgunPermiso($rol, $permisosHabilitados)) {
+            $this->sendJsonResponse([
+                'status'  => false,
+                'code'    => 'FORBIDDEN',
+                'message' => 'No tienes permisos para consultar productos por código de barras.',
+                'errors'  => new \stdClass(),
+                'data'    => null,
+            ], 403);
+        }
+
+        $codigo = trim(rawurldecode($rawCodigo));
+        if ($codigo === '' || preg_match('/\s/', $codigo)) {
+            $this->sendJsonResponse([
+                'status'  => false,
+                'code'    => 'INVALID_BARCODE',
+                'message' => 'Debe proporcionar un código de barras válido sin espacios.',
+                'errors'  => ['codigo_barra' => 'El código de barras es obligatorio y no debe contener espacios.'],
+                'data'    => null,
+            ], 400);
+        }
+
+        $producto = $this->productoService->buscarPorCodigoExacto($codigo);
+
+        if ($producto === null) {
+            $this->sendJsonResponse([
+                'status'  => true,
+                'code'    => 'PRODUCT_NOT_FOUND',
+                'message' => 'No se encontró ningún producto con el código indicado.',
+                'data'    => [
+                    'estado_busqueda' => 'no_existe',
+                    'producto'        => null,
+                ],
+            ], 200);
+        }
+
+        if ((int)($producto['estado'] ?? 0) !== 1) {
+            $this->sendJsonResponse([
+                'status'  => true,
+                'code'    => 'PRODUCT_INACTIVE',
+                'message' => 'El producto se encuentra inactivo.',
+                'data'    => [
+                    'estado_busqueda' => 'inactivo',
+                    'producto'        => [
+                        'id_producto'  => (int)$producto['id_producto'],
+                        'codigo_barra' => (string)$producto['codigo_barra'],
+                        'nombre'       => (string)$producto['nombre'],
+                        'estado'       => 0,
+                    ],
+                ],
+            ], 200);
+        }
+
+        $productoConImagen = $this->adjuntarMetadatosImagen($producto);
+        $this->sendJsonResponse([
+            'status' => true,
+            'code'   => 'PRODUCT_FOUND',
+            'data'   => [
+                'estado_busqueda' => 'encontrado',
+                'producto'        => $productoConImagen,
+            ],
+        ], 200);
+    }
+
     public function post(?string $params = ""): void {
+        // ApiController convierte POST multipart con _method=PUT en $this->requestMethod === 'PUT'
+        if ($this->requestMethod === 'PUT' && !empty($params)) {
+            $this->updateProducto($params);
+            return;
+        }
         if (!empty($params)) {
             $this->uploadImage($params);
         } else {
@@ -40,6 +135,15 @@ class ProductoApiController extends ApiController {
 
     public function delete(?string $params = ""): void {
         $this->deleteProducto($params);
+    }
+
+    private function adjuntarMetadatosImagen(array $producto): array {
+        $id = (int)($producto['id_producto'] ?? 0);
+        if ($id > 0) {
+            $producto['tiene_imagen'] = $this->storageService->existeImagenProducto($id);
+            $producto['imagen_url'] = $producto['tiene_imagen'] ? (API_URL . '/imagenes/producto/' . $id) : null;
+        }
+        return $producto;
     }
 
     private function getProductos(?string $id): void {
@@ -69,7 +173,7 @@ class ProductoApiController extends ApiController {
             if (!$producto) {
                 $this->sendJsonResponse(['status' => false, 'message' => 'El producto solicitado no existe'], 404);
             }
-            $this->sendJsonResponse(['status' => true, 'data' => $producto]);
+            $this->sendJsonResponse(['status' => true, 'data' => $this->adjuntarMetadatosImagen($producto)]);
         } else {
             $search = $this->getParam('q', '');
             $categoria = $this->getParam('categoria', '');
@@ -112,11 +216,12 @@ class ProductoApiController extends ApiController {
             }
 
             $total = $query->countWithQuery();
-            $totalPaginas = max(1, ceil($total / $limit));
+            $totalPaginas = max(1, (int)ceil($total / $limit));
             if ($page > $totalPaginas) $page = $totalPaginas;
 
             $offset = ($page - 1) * $limit;
             $productos = $query->orderBy('producto.nombre', 'ASC')->limit($limit)->offset($offset)->get();
+            $productos = array_map(fn(array $p) => $this->adjuntarMetadatosImagen($p), $productos);
 
             $this->sendJsonResponse([
                 'status' => true,
@@ -136,78 +241,51 @@ class ProductoApiController extends ApiController {
 
         $data = $this->getInput();
 
-        if (empty($data['nombre']) || empty($data['codigo_barra']) || empty($data['precio_venta'])) {
-            $this->sendJsonResponse(['status' => false, 'message' => 'Faltan campos obligatorios: nombre, codigo_barra, precio_venta'], 400);
+        if (empty($data['nombre']) || !isset($data['precio_venta']) || $data['precio_venta'] === '') {
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => 'VALIDATION_ERROR',
+                'message' => 'Faltan campos obligatorios: nombre, precio_venta',
+                'errors' => [
+                    'nombre' => empty($data['nombre']) ? 'El campo nombre es obligatorio.' : null,
+                    'precio_venta' => (!isset($data['precio_venta']) || $data['precio_venta'] === '') ? 'El campo precio_venta es obligatorio.' : null,
+                ],
+            ], 400);
         }
 
-        $validator = new \Libraries\Core\Validation($data);
-        $validator->required(['nombre', 'codigo_barra', 'precio_venta'])
-            ->minLength('nombre', 3)
-            ->maxLength('nombre', 100)
-            ->minLength('codigo_barra', 3)
-            ->maxLength('codigo_barra', 50)
-            ->positiveNumber('precio_venta')
-            ->unique('codigo_barra', $this->model);
-
-        if ($validator->fails()) {
-            $this->sendJsonResponse(['status' => false, 'message' => 'Error de validación', 'errors' => $validator->errors()], 422);
+        $resultado = $this->productoService->crear($data);
+        if (!$resultado['status']) {
+            $httpCode = !empty($resultado['errors']) ? 422 : 500;
+            $this->sendJsonResponse($resultado, $httpCode);
         }
 
-        $idCategoria = intval($data['id_categoria'] ?? 1);
-        $idSubcategoria = isset($data['id_subcategoria']) && $data['id_subcategoria'] !== ''
-            ? intval($data['id_subcategoria'])
-            : null;
-
-        // Validar correspondencia estricta entre subcategoría y categoría
-        if ($idSubcategoria !== null) {
-            if (!$this->subcategoriaModel->perteneceACategoria($idSubcategoria, $idCategoria)) {
-                $this->sendJsonResponse([
-                    'status' => false,
-                    'message' => 'La subcategoría seleccionada no pertenece a la categoría elegida.',
-                    'errors' => ['id_subcategoria' => 'La subcategoría no corresponde a la categoría.']
-                ], 422);
-            }
-        } else {
-            // Asignar automáticamente la subcategoría General de la categoría
-            $subcats = $this->subcategoriaModel->obtenerPorCategoria($idCategoria, true);
-            if (!empty($subcats)) {
-                $idSubcategoria = (int)$subcats[0]['id_subcategoria'];
-            }
-        }
-
-        $stockMinimo = isset($data['stock_minimo']) ? intval($data['stock_minimo']) : 1;
-        if ($stockMinimo < 0) {
-            $this->sendJsonResponse(['status' => false, 'message' => 'El stock mínimo debe ser un número entero mayor o igual a cero.'], 422);
-        }
-
-        // REGLA FUNDAMENTAL DEL SPRINT 2:
-        // Los productos nuevos comienzan estrictamente con stock cero.
-        $productoData = [
-            'codigo_barra' => trim($data['codigo_barra']),
-            'nombre' => trim($data['nombre']),
-            'descripcion' => trim($data['descripcion'] ?? ''),
-            'id_categoria' => $idCategoria,
-            'id_subcategoria' => $idSubcategoria,
-            'id_unidad' => intval($data['id_unidad'] ?? 1),
-            'precio_venta' => floatval($data['precio_venta']),
-            'stock_actual' => 0, // Siempre cero en creación
-            'stock_minimo' => $stockMinimo,
-            'estado' => 1
+        $idInsertado = (int)$resultado['id_producto'];
+        $respuestaData = [
+            'id_producto'  => $idInsertado,
+            'codigo_barra' => $resultado['codigo_barra'] ?? null,
+            'imagen_url'   => null,
         ];
 
-        $exito = $this->model->insert($productoData);
-
-        if ($exito) {
-            if (!empty($_FILES['imagen']) && $_FILES['imagen']['error'] !== UPLOAD_ERR_NO_FILE) {
-                $img = guardar_imagen_producto($_FILES['imagen'], trim($data['codigo_barra']));
-                if (!$img['ok'] && $img['message'] !== 'No se envió archivo.') {
-                    $this->sendJsonResponse(['status' => true, 'message' => 'Producto registrado, pero la imagen no se guardó: ' . $img['message']], 201);
-                }
+        if (!empty($_FILES['imagen']) && ($_FILES['imagen']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+            $img = $this->storageService->guardarImagenPorProducto($_FILES['imagen'], $idInsertado);
+            if (!$img['ok'] && $img['message'] !== 'No se envió archivo.') {
+                $this->sendJsonResponse([
+                    'status'  => true,
+                    'warning' => 'IMAGE_SAVE_FAILED',
+                    'message' => 'Producto registrado, pero la imagen no se guardó: ' . $img['message'],
+                    'data'    => $respuestaData,
+                ], 201);
             }
-            $this->sendJsonResponse(['status' => true, 'message' => 'Producto registrado exitosamente'], 201);
-        } else {
-            $this->sendJsonResponse(['status' => false, 'message' => 'Ocurrió un error interno en el servidor'], 500);
+            if ($img['ok']) {
+                $respuestaData['imagen_url'] = API_URL . '/imagenes/producto/' . $idInsertado;
+            }
         }
+
+        $this->sendJsonResponse([
+            'status'  => true,
+            'message' => 'Producto registrado exitosamente',
+            'data'    => $respuestaData,
+        ], 201);
     }
 
     private function updateProducto(?string $id): void {
@@ -220,40 +298,35 @@ class ProductoApiController extends ApiController {
         $idVal = intval($id);
         $productoExistente = $this->model->find($idVal);
 
-        if (!$productoExistente || $productoExistente['estado'] != 1) {
+        if (!$productoExistente || (int)$productoExistente['estado'] !== 1) {
             $this->sendJsonResponse(['status' => false, 'message' => 'El recurso a modificar no existe'], 404);
         }
 
         $data = $this->getInput();
         $datosActualizar = [];
 
-        if (isset($data['nombre'])) $datosActualizar['nombre'] = trim($data['nombre']);
-        if (isset($data['codigo_barra'])) $datosActualizar['codigo_barra'] = trim($data['codigo_barra']);
-        if (isset($data['descripcion'])) $datosActualizar['descripcion'] = trim($data['descripcion']);
-        if (isset($data['id_categoria'])) $datosActualizar['id_categoria'] = intval($data['id_categoria']);
-        if (isset($data['id_subcategoria'])) $datosActualizar['id_subcategoria'] = intval($data['id_subcategoria']);
-        if (isset($data['id_unidad'])) $datosActualizar['id_unidad'] = intval($data['id_unidad']);
-        if (isset($data['precio_venta'])) $datosActualizar['precio_venta'] = floatval($data['precio_venta']);
-        if (isset($data['stock_minimo'])) $datosActualizar['stock_minimo'] = intval($data['stock_minimo']);
+        if (array_key_exists('nombre', $data)) $datosActualizar['nombre'] = trim((string)$data['nombre']);
+        if (array_key_exists('descripcion', $data)) $datosActualizar['descripcion'] = trim((string)$data['descripcion']);
+        if (array_key_exists('id_categoria', $data)) $datosActualizar['id_categoria'] = intval($data['id_categoria']);
+        if (array_key_exists('id_subcategoria', $data) && $data['id_subcategoria'] !== '') $datosActualizar['id_subcategoria'] = intval($data['id_subcategoria']);
+        if (array_key_exists('id_unidad', $data)) $datosActualizar['id_unidad'] = intval($data['id_unidad']);
+        if (array_key_exists('precio_venta', $data)) $datosActualizar['precio_venta'] = floatval($data['precio_venta']);
+        if (array_key_exists('stock_minimo', $data)) $datosActualizar['stock_minimo'] = intval($data['stock_minimo']);
 
-        // REGLA FUNDAMENTAL DEL SPRINT 2:
-        // No se permite modificar el stock_actual desde la edición del catálogo.
-        // Se ignora intencionalmente $data['stock_actual'].
+        // Validar código de barras con la misma regla unificada de ProductoService
+        $codigoCheck = $this->productoService->validarYNormalizarCodigoBarra($data, $productoExistente);
+        if ($codigoCheck['present']) {
+            $datosActualizar['codigo_barra'] = $codigoCheck['value'];
+        }
 
-        if (empty($datosActualizar)) {
+        $hasFile = !empty($_FILES['imagen']) && ($_FILES['imagen']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+        if (empty($datosActualizar) && !$hasFile) {
             $this->sendJsonResponse(['status' => false, 'message' => 'No se proporcionaron datos para actualizar'], 400);
         }
 
         $validator = new \Libraries\Core\Validation($datosActualizar);
-
         if (isset($datosActualizar['nombre'])) {
-            $validator->minLength('nombre', 3)
-                ->maxLength('nombre', 100);
-        }
-        if (isset($datosActualizar['codigo_barra'])) {
-            $validator->minLength('codigo_barra', 3)
-                ->maxLength('codigo_barra', 50)
-                ->unique('codigo_barra', $this->model, $idVal);
+            $validator->minLength('nombre', 3)->maxLength('nombre', 150);
         }
         if (isset($datosActualizar['precio_venta'])) {
             $validator->positiveNumber('precio_venta');
@@ -261,9 +334,19 @@ class ProductoApiController extends ApiController {
         if (isset($datosActualizar['stock_minimo'])) {
             $validator->nonNegativeNumber('stock_minimo');
         }
+        if ($codigoCheck['error'] !== null) {
+            $validator->addError('codigo_barra', $codigoCheck['error']);
+        }
 
         if ($validator->fails()) {
-            $this->sendJsonResponse(['status' => false, 'message' => 'Error de validación', 'errors' => $validator->errors()], 422);
+            $code = $codigoCheck['code'] ?? 'VALIDATION_ERROR';
+            $message = $code === 'BARCODE_DUPLICATE' ? 'El código de barras ya está en uso.' : 'Error de validación';
+            $this->sendJsonResponse([
+                'status' => false,
+                'code' => $code,
+                'message' => $message,
+                'errors' => $validator->errors(),
+            ], 422);
         }
 
         $catEfectiva = $datosActualizar['id_categoria'] ?? intval($productoExistente['id_categoria']);
@@ -271,35 +354,78 @@ class ProductoApiController extends ApiController {
             if (!$this->subcategoriaModel->perteneceACategoria($datosActualizar['id_subcategoria'], $catEfectiva)) {
                 $this->sendJsonResponse([
                     'status' => false,
+                    'code' => 'VALIDATION_ERROR',
                     'message' => 'La subcategoría no corresponde a la categoría seleccionada.',
                     'errors' => ['id_subcategoria' => 'La subcategoría no pertenece a la categoría.']
                 ], 422);
             }
         } elseif (isset($datosActualizar['id_categoria']) && $datosActualizar['id_categoria'] !== intval($productoExistente['id_categoria'])) {
-            // Si cambió la categoría pero no se envió subcategoría, asignar General de la nueva
             $subcats = $this->subcategoriaModel->obtenerPorCategoria($catEfectiva, true);
             if (!empty($subcats)) {
                 $datosActualizar['id_subcategoria'] = (int)$subcats[0]['id_subcategoria'];
             }
         }
 
-        $exito = $this->model->update($idVal, $datosActualizar);
+        // Antes de liberar o cambiar el código en BD, asegurar que la foto legada quede asociada a prod_{id}.
+        // Si existe una foto heredada y no puede preservarse, impedir el cambio/retiro y conservar el código actual.
+        if ($codigoCheck['changed'] && !empty($productoExistente['codigo_barra'])) {
+            $prom = $this->storageService->promoverImagenAClaveProducto($idVal, (string)$productoExistente['codigo_barra']);
+            if (!$prom['ok']) {
+                $this->sendJsonResponse([
+                    'status'  => false,
+                    'code'    => 'LEGACY_IMAGE_PRESERVATION_FAILED',
+                    'message' => 'No se pudo preservar la foto asociada al producto antes de modificar el código de barras: ' . $prom['message'],
+                    'errors'  => ['codigo_barra' => 'No se pudo preservar la foto actual del producto (' . $prom['message'] . '). El código no fue modificado.'],
+                ], 409);
+            }
+        }
 
-        if ($exito) {
-            if (isset($data['codigo_barra']) && $productoExistente['codigo_barra'] !== trim($data['codigo_barra'])) {
-                renombrar_imagen_producto($productoExistente['codigo_barra'], trim($data['codigo_barra']));
+        try {
+            $exito = empty($datosActualizar) ? true : (bool)$this->model->update($idVal, $datosActualizar);
+        } catch (PDOException $e) {
+            if (ProductoService::esColisionCodigoBarraUnico($e)) {
+                $this->sendJsonResponse([
+                    'status' => false,
+                    'code' => 'BARCODE_DUPLICATE',
+                    'message' => 'El código de barras ya está en uso.',
+                    'errors' => ['codigo_barra' => ProductoService::MSG_DUPLICADO_GENERICO],
+                ], 422);
             }
-            if (!empty($_FILES['imagen']) && $_FILES['imagen']['error'] !== UPLOAD_ERR_NO_FILE) {
-                $codigo = trim($data['codigo_barra'] ?? $productoExistente['codigo_barra']);
-                $img = guardar_imagen_producto($_FILES['imagen'], $codigo);
-                if (!$img['ok'] && $img['message'] !== 'No se envió archivo.') {
-                    $this->sendJsonResponse(['status' => true, 'message' => 'Producto actualizado, pero la imagen no se guardó: ' . $img['message']]);
-                }
-            }
-            $this->sendJsonResponse(['status' => true, 'message' => 'Producto actualizado de forma exitosa']);
-        } else {
+            throw $e;
+        }
+
+        if (!$exito) {
             $this->sendJsonResponse(['status' => false, 'message' => 'No se pudo actualizar el registro en el servidor'], 500);
         }
+
+        $codigoFinal = $codigoCheck['present'] ? $codigoCheck['value'] : $productoExistente['codigo_barra'];
+        $tieneImagen = $this->storageService->existeImagenProducto($idVal);
+        $respuestaData = [
+            'id_producto'  => $idVal,
+            'codigo_barra' => $codigoFinal,
+            'imagen_url'   => $tieneImagen ? (API_URL . '/imagenes/producto/' . $idVal) : null,
+        ];
+
+        if ($hasFile) {
+            $img = $this->storageService->guardarImagenPorProducto($_FILES['imagen'], $idVal);
+            if (!$img['ok'] && $img['message'] !== 'No se envió archivo.') {
+                $this->sendJsonResponse([
+                    'status'  => true,
+                    'warning' => 'IMAGE_SAVE_FAILED',
+                    'message' => 'Producto actualizado, pero la imagen no se guardó: ' . $img['message'],
+                    'data'    => $respuestaData,
+                ], 200);
+            }
+            if ($img['ok']) {
+                $respuestaData['imagen_url'] = API_URL . '/imagenes/producto/' . $idVal;
+            }
+        }
+
+        $this->sendJsonResponse([
+            'status'  => true,
+            'message' => 'Producto actualizado de forma exitosa',
+            'data'    => $respuestaData,
+        ], 200);
     }
 
     private function uploadImage(?string $id): void {
@@ -307,19 +433,34 @@ class ProductoApiController extends ApiController {
         $idVal = intval($id);
         $producto = $this->model->find($idVal);
 
-        if (!$producto || $producto['estado'] != 1) {
+        if (!$producto || (int)$producto['estado'] !== 1) {
             $this->sendJsonResponse(['status' => false, 'message' => 'El producto no existe'], 404);
         }
 
-        if (empty($_FILES['imagen']) || $_FILES['imagen']['error'] === UPLOAD_ERR_NO_FILE) {
+        if (empty($_FILES['imagen']) || ($_FILES['imagen']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
             $this->sendJsonResponse(['status' => false, 'message' => 'No se envió ninguna imagen'], 400);
         }
 
-        $img = guardar_imagen_producto($_FILES['imagen'], trim($producto['codigo_barra']));
+        $img = $this->storageService->guardarImagenPorProducto($_FILES['imagen'], $idVal);
         if ($img['ok']) {
-            $this->sendJsonResponse(['status' => true, 'message' => 'Imagen actualizada correctamente']);
+            // Solo tras confirmar la nueva imagen bajo prod_{id}, limpiar restos legados del código si existían
+            if (!empty($producto['codigo_barra'])) {
+                $this->storageService->limpiarRestosLegadosCodigo($idVal, (string)$producto['codigo_barra']);
+            }
+            $this->sendJsonResponse([
+                'status'  => true,
+                'message' => 'Imagen actualizada correctamente',
+                'data'    => [
+                    'id_producto' => $idVal,
+                    'imagen_url'  => API_URL . '/imagenes/producto/' . $idVal,
+                ],
+            ]);
         } else {
-            $this->sendJsonResponse(['status' => false, 'message' => $img['message']], 400);
+            $this->sendJsonResponse([
+                'status'  => false,
+                'code'    => 'IMAGE_SAVE_FAILED',
+                'message' => $img['message'],
+            ], 400);
         }
     }
 
@@ -333,7 +474,7 @@ class ProductoApiController extends ApiController {
         $idVal = intval($id);
         $productoExistente = $this->model->find($idVal);
 
-        if (!$productoExistente || $productoExistente['estado'] != 1) {
+        if (!$productoExistente || (int)$productoExistente['estado'] !== 1) {
             $this->sendJsonResponse(['status' => false, 'message' => 'El recurso no fue encontrado'], 404);
         }
 

@@ -27,6 +27,9 @@ define('MAIL_FROM_NAME', getenv('MAIL_FROM_NAME') ?: 'AmazonMarket');
 define('MAIL_ENCRYPTION', getenv('MAIL_ENCRYPTION') ?: 'tls');
 
 define('STORAGE_PATH', getenv('STORAGE_PATH') ?: 'C:/xampp/storage/amazon_market/productos');
+if (!defined('PUBLIC_PRODUCT_IMAGES_PATH') && getenv('PUBLIC_PRODUCT_IMAGES_PATH')) {
+    define('PUBLIC_PRODUCT_IMAGES_PATH', getenv('PUBLIC_PRODUCT_IMAGES_PATH'));
+}
 
 if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_httponly', 1);

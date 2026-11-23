@@ -479,14 +479,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const botonManual = document.getElementById('compra_buscar_manual');
     const DEMORA_AVISO_MS = 2000; // CL-22.1: pasado este tiempo se avisa de la demora
     let identificando = false;
+    let consultaCodigoSeq = 0;
 
-    // TODO backend: reemplazar por la consulta al servidor (p. ej. GET productos?codigo_barra=...)
-    // para distinguir código inexistente de producto inactivo sin depender del catálogo cargado.
     async function buscarProductoPorCodigo(codigo) {
-        const producto = catalogos.productos.find(item => String(item.codigo_barra || '').trim() === codigo);
-        if (!producto) return { estado: 'no_existe' };
-        if (String(producto.estado) === '0') return { estado: 'inactivo', producto };
-        return { estado: 'encontrado', producto };
+        const res = await Api.get('productos/codigo/' + encodeURIComponent(codigo));
+        if (res === null) return { estado: 'interrumpido', producto: null };
+        if (!res.ok || !res.data || res.data.status !== true || !res.data.data) {
+            throw new Error((res.data && res.data.message) || 'No se pudo consultar el producto.');
+        }
+        return {
+            estado: res.data.data.estado_busqueda || 'no_existe',
+            producto: res.data.data.producto || null
+        };
     }
 
     function mostrarEstadoCodigo(tipo, ...partes) {
@@ -521,8 +525,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function seleccionarProductoEnLinea(row, producto) {
+        if (!catalogos.productos.some(item => String(item.id_producto) === String(producto.id_producto))) {
+            catalogos.productos.push(producto);
+        }
         const select = row.querySelector('[data-field="producto"]');
-        select.value = String(producto.id_producto);
+        const etiqueta = producto.nombre + (producto.codigo_barra ? ' ' + producto.codigo_barra : '');
+        asegurarOpcion(select, producto.id_producto, etiqueta);
         const visible = row.querySelector('.purchase-select-search input');
         if (visible && select.selectedOptions[0]) visible.value = select.selectedOptions[0].textContent.trim();
         select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -537,15 +545,23 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const miSeq = ++consultaCodigoSeq;
         identificando = true;
         entradaCodigo.setAttribute('aria-busy', 'true');
+        mostrarEstadoCodigo('loading', 'Buscando producto…');
         const aviso = setTimeout(() => {
-            mostrarEstadoCodigo('loading', 'La consulta está tardando más de lo normal. El código se conserva; espera un momento o busca el producto manualmente.');
+            if (miSeq === consultaCodigoSeq) {
+                mostrarEstadoCodigo('loading', 'La consulta está tardando más de lo normal. El código se conserva; espera un momento o busca el producto manualmente.');
+            }
         }, DEMORA_AVISO_MS);
 
         try {
             const resultado = await buscarProductoPorCodigo(codigo);
-            if (resultado.estado === 'no_existe') {
+            // Si el usuario cambió de selección manualmente o modificó el código mientras esperaba, descartar respuesta tardía
+            if (miSeq !== consultaCodigoSeq) return;
+            if (resultado.estado === 'interrumpido') return;
+
+            if (resultado.estado === 'no_existe' || !resultado.producto) {
                 entradaCodigo.classList.add('is-invalid');
                 mostrarEstadoCodigo('error', 'No se encontró ningún producto con el código ' + codigo + '. Puedes buscarlo manualmente.');
                 return;
@@ -575,11 +591,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const presentacion = row.querySelector('[data-field="presentacion"]');
             if (presentacion) presentacion.focus();
         } catch (fallo) {
+            if (miSeq !== consultaCodigoSeq) return;
             mostrarEstadoCodigo('error', 'No se pudo consultar el producto. Los datos ingresados se conservan; puedes buscar manualmente.');
         } finally {
             clearTimeout(aviso);
-            identificando = false;
-            entradaCodigo.removeAttribute('aria-busy');
+            if (miSeq === consultaCodigoSeq) {
+                identificando = false;
+                entradaCodigo.removeAttribute('aria-busy');
+            }
         }
     }
 
@@ -589,8 +608,16 @@ document.addEventListener('DOMContentLoaded', () => {
         event.preventDefault();
         identificarPorCodigo();
     });
-    entradaCodigo.addEventListener('input', limpiarEstadoCodigo);
+    entradaCodigo.addEventListener('input', () => {
+        consultaCodigoSeq++;
+        identificando = false;
+        entradaCodigo.removeAttribute('aria-busy');
+        limpiarEstadoCodigo();
+    });
     botonManual.addEventListener('click', () => {
+        consultaCodigoSeq++;
+        identificando = false;
+        entradaCodigo.removeAttribute('aria-busy');
         const row = buscarLineaVacia() || agregarLinea();
         marcarLineaLeida(row);
         const buscador = row.querySelector('.purchase-select-search input');
@@ -600,7 +627,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Los mensajes hacen referencia a un número de línea: se quitan cuando ese dato deja de ser válido.
     lineas.addEventListener('change', event => {
-        if (event.target.matches('[data-field="producto"]')) limpiarEstadoCodigo();
+        if (event.target.matches('[data-field="producto"]')) {
+            consultaCodigoSeq++;
+            identificando = false;
+            entradaCodigo.removeAttribute('aria-busy');
+            limpiarEstadoCodigo();
+        }
     });
     lineas.addEventListener('click', event => {
         if (event.target.closest('.purchase-remove-line')) limpiarEstadoCodigo();
@@ -651,6 +683,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 agregarLinea();
                 const filas = obtenerFilas();
                 const fila = filas[filas.length - 1];
+                fila.dataset.detalleId = detalle.id_detalle_compra ? String(detalle.id_detalle_compra) : '';
+                fila.dataset.productoOriginalId = detalle.id_producto ? String(detalle.id_producto) : '';
                 const producto = fila.querySelector('[data-field="producto"]');
                 const presentacion = fila.querySelector('[data-field="presentacion"]');
                 asegurarOpcion(producto, detalle.id_producto, detalle.producto);
@@ -689,8 +723,13 @@ document.addEventListener('DOMContentLoaded', () => {
             ...(esCorreccion ? { motivo: motivoCorreccion.value.trim() } : {}),
             detalles: review.rows.map((row, index) => {
                 const line = review.lineData[index];
+                const idProductoActual = Number(row.querySelector('[data-field="producto"]').value);
+                const mismoProductoOriginal = row.dataset.detalleId
+                    && row.dataset.productoOriginalId
+                    && Number(row.dataset.productoOriginalId) === idProductoActual;
                 return {
-                    id_producto: Number(row.querySelector('[data-field="producto"]').value),
+                    ...(esCorreccion ? { id_detalle_compra: mismoProductoOriginal ? Number(row.dataset.detalleId) : null } : {}),
+                    id_producto: idProductoActual,
                     id_presentacion: Number(row.querySelector('[data-field="presentacion"]').value),
                     cantidad_presentaciones: line.cantidad,
                     equivalencia_aplicada: line.equivalencia,
