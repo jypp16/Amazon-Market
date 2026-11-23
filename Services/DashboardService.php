@@ -97,7 +97,7 @@ class DashboardService {
 
     private function obtenerVentasRecientes(int $limite): array {
         $sql = "SELECT v.id_venta, v.serie, v.numero, v.total, v.fecha_venta,
-                       c.nombre AS cliente,
+                       CASE WHEN v.id_cliente IS NULL THEN 'Consumidor final' ELSE COALESCE(c.nombre, 'Consumidor final') END AS cliente,
                        mp.nombre AS metodo_pago
                 FROM venta v
                 LEFT JOIN cliente c ON v.id_cliente = c.id_cliente
@@ -114,7 +114,7 @@ class DashboardService {
 
     private function obtenerVentasRecientesVendedor(int $limite, int $idUsuario): array {
         $sql = "SELECT v.id_venta, v.serie, v.numero, v.total, v.fecha_venta,
-                       c.nombre AS cliente,
+                       CASE WHEN v.id_cliente IS NULL THEN 'Consumidor final' ELSE COALESCE(c.nombre, 'Consumidor final') END AS cliente,
                        mp.nombre AS metodo_pago
                 FROM venta v
                 LEFT JOIN cliente c ON v.id_cliente = c.id_cliente

@@ -21,15 +21,17 @@ class ReporteModel extends Model {
 
     public function ventasPorPeriodo(array $filtros): array {
         return $this->ventaModel->as('v')->select([
-                'v.id_venta', 'v.fecha_venta', 'v.serie', 'v.numero', 'v.total',
-                'c.nombre AS cliente', 'tc.nombre AS comprobante',
+                'v.id_venta', 'v.id_cliente', 'v.fecha_venta', 'v.serie', 'v.numero', 'v.total',
+                'tc.nombre AS comprobante',
                 'u.nombre AS vendedor', 'mp.nombre AS metodo_pago'
             ])
-            ->join('cliente c', 'v.id_cliente = c.id_cliente')
+            ->selectRaw("CASE WHEN v.id_cliente IS NULL THEN 'Consumidor final' ELSE COALESCE(c.nombre, 'Consumidor final') END AS cliente")
+            ->leftJoin('cliente c', 'v.id_cliente = c.id_cliente')
             ->join('tipo_comprobante tc', 'v.id_tipo_comprobante = tc.id_tipo_comprobante')
             ->join('usuario u', 'v.id_usuario = u.id_usuario')
             ->join('metodo_pago mp', 'v.id_metodo_pago = mp.id_metodo_pago')
-            ->where(['v.estado' => 1, 'c.estado' => 1, 'u.estado' => 1])
+            ->where(['v.estado' => 1, 'u.estado' => 1])
+            ->whereRaw('(v.id_cliente IS NULL OR c.estado = 1)')
             ->whereBetween('DATE(v.fecha_venta)', $filtros['desde'], $filtros['hasta'])
             ->when(!empty($filtros['id_tipo_comprobante']), function($q) use ($filtros) {
                 return $q->where(['v.id_tipo_comprobante' => intval($filtros['id_tipo_comprobante'])]);

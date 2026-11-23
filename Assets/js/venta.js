@@ -647,6 +647,9 @@ function vaciarCarrito() {
   ).then(function (ok) {
     if (ok) {
       carrito = [];
+      clearClient();
+      restablecerMetodoPagoPorDefecto();
+      document.getElementById("monto_recibido").value = "";
       renderCarrito();
     }
   });
@@ -723,10 +726,11 @@ function esConsumidorFinal() {
 
 function clienteTieneRUC(c) {
   if (!c) return false;
-  return (
+  var esTipoRuc =
     String(c.id_tipo_documento) === "2" ||
-    /ruc/i.test(String(c.tipo_documento || ""))
-  );
+    /ruc/i.test(String(c.tipo_documento || ""));
+  var nroDoc = String(c.nro_documento || "").trim();
+  return esTipoRuc && /^\d{11}$/.test(nroDoc);
 }
 
 function esFacturaActiva() {
@@ -736,10 +740,20 @@ function esFacturaActiva() {
   return !!(b && b.classList.contains("active"));
 }
 
+function totalCarritoCentimos() {
+  return carrito.reduce(function (t, i) {
+    return (
+      t +
+      Math.round((parseFloat(i.precio) || 0) * 100) *
+        (parseInt(i.cantidad, 10) || 0)
+    );
+  }, 0);
+}
+
 // Exactamente S/ 700.00 sí se permite; solo se bloquea si es mayor.
 function excedeLimiteConsumidorFinal() {
   return (
-    Math.round(totalCarrito() * 100) > Math.round(LIMITE_CONSUMIDOR_FINAL * 100)
+    totalCarritoCentimos() > Math.round(LIMITE_CONSUMIDOR_FINAL * 100)
   );
 }
 
@@ -749,7 +763,7 @@ function validarIdentificacion() {
     return {
       tipo: "factura",
       mensaje: clienteSeleccionado
-        ? "El cliente seleccionado no tiene RUC. Para emitir factura elige un cliente con RUC."
+        ? "El cliente seleccionado no tiene un RUC válido de 11 dígitos. Para emitir factura elige un cliente con RUC."
         : "Para emitir factura selecciona un cliente con RUC.",
     };
   }
@@ -970,11 +984,6 @@ async function procesarVenta() {
     );
     return;
   }
-  // El servidor vuelve a validar el método al confirmar; esta consulta evita enviar uno ya desactivado.
-  if (!(await verificarMetodoDisponible(id_mp))) {
-    marcarMetodoNoDisponible(id_mp);
-    return;
-  }
 
   var ok = await Modal.confirm(
     "Procesar venta",
@@ -1008,23 +1017,28 @@ async function procesarVenta() {
     document.getElementById("loader_overlay").style.display = "none";
     if (res && res.ok && res.data.status) {
       var d = res.data.data;
-      // La operación ya está confirmada: liberar el carrito antes de
-      // imprimir o recargar catálogos (esos pasos también pueden fallar).
+      // La operación ya está confirmada: capturar datos antes de restablecer el formulario.
       var itemsConfirmados = carrito;
-      carrito = [];
-      Api.confirmarSolicitud("venta-procesar");
-      renderCarrito();
       var tipoComprobante = document.getElementById("id_tipo_comprobante");
       var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex]
         ? tipoComprobante.options[tipoComprobante.selectedIndex].text
         : "Boleta";
       var metodoPago = document.getElementById("id_metodo_pago");
-      var mpNombre = metodoPago.options[metodoPago.selectedIndex]
-        ? metodoPago.options[metodoPago.selectedIndex].text
-        : "";
-      var clienteNombre = clienteSeleccionado
+      var mpNombre =
+        d && typeof d.metodo_pago === "string" && d.metodo_pago.trim() !== ""
+          ? d.metodo_pago
+          : metodoPago.options[metodoPago.selectedIndex]
+            ? metodoPago.options[metodoPago.selectedIndex].text
+            : "";
+      var clienteFallback = clienteSeleccionado
         ? clienteSeleccionado.nombre
         : "Consumidor final";
+      var clienteNombre =
+        d && typeof d.cliente === "string" && d.cliente.trim() !== ""
+          ? d.cliente
+          : d && d.consumidor_final === true
+            ? "Consumidor final"
+            : clienteFallback;
       var datosTicket = {
         serie: d.serie,
         numero: d.numero,
@@ -1032,10 +1046,14 @@ async function procesarVenta() {
         tipo: tipoNombre,
       };
 
+      carrito = [];
+      Api.confirmarSolicitud("venta-procesar");
+
       // Dejar la pantalla lista antes de avisar al vendedor.
       clearClient();
+      restablecerMetodoPagoPorDefecto();
       document.getElementById("monto_recibido").value = "";
-      calcularVuelto();
+      renderCarrito();
       await cargarProductos();
 
       await Modal.success(
@@ -1114,13 +1132,37 @@ function metodoEsEfectivo(id) {
   return !!m && claseMetodo(m.nombre) === "efectivo";
 }
 
+function obtenerMetodoEfectivoActivo() {
+  return (
+    pagosLista.find(function (p) {
+      var id = String(p.id_metodo_pago);
+      return (
+        !metodosNoDisponibles[id] &&
+        (id === "1" || claseMetodo(p.nombre) === "efectivo")
+      );
+    }) || null
+  );
+}
+
+function hayMetodosPagoActivos() {
+  return pagosLista.some(function (p) {
+    return !metodosNoDisponibles[String(p.id_metodo_pago)];
+  });
+}
+
+function restablecerMetodoPagoPorDefecto() {
+  var ef = obtenerMetodoEfectivoActivo();
+  metodoSeleccionado = ef ? String(ef.id_metodo_pago) : "";
+  var alerta = document.getElementById("pos_pay_alert");
+  if (alerta) alerta.hidden = true;
+  renderMetodosPago(false);
+}
+
 function renderMetodosPago(preseleccionar) {
   var cont = document.getElementById("pos_pay_methods");
   if (!cont) return;
   if (preseleccionar && !metodoSeleccionado) {
-    var ef = pagosLista.find(function (p) {
-      return String(p.id_metodo_pago) === "1";
-    });
+    var ef = obtenerMetodoEfectivoActivo();
     metodoSeleccionado = ef ? String(ef.id_metodo_pago) : "";
   }
   var sel = document.getElementById("id_metodo_pago");
@@ -1193,13 +1235,27 @@ function marcarMetodoNoDisponible(id) {
 
 function actualizarEstadoPago() {
   renderIdentificacion();
+  var hayActivos = hayMetodosPagoActivos();
   var valido =
-    !!metodoSeleccionado && !metodosNoDisponibles[metodoSeleccionado];
+    hayActivos &&
+    !!metodoSeleccionado &&
+    !metodosNoDisponibles[metodoSeleccionado] &&
+    !!metodoPorId(metodoSeleccionado);
   var btn = document.getElementById("btn_procesar");
   if (btn)
     btn.disabled = !valido || ventaEnProceso || !!validarIdentificacion();
   var req = document.getElementById("pos_pay_required");
-  if (req) req.hidden = valido || !pagosLista.length;
+  if (req) {
+    if (!hayActivos) {
+      req.textContent = "No hay métodos de pago disponibles";
+      req.hidden = false;
+    } else if (!valido) {
+      req.textContent = "Seleccione un método de pago válido para continuar";
+      req.hidden = false;
+    } else {
+      req.hidden = true;
+    }
+  }
   var caja = document.getElementById("pos_cash");
   if (caja) {
     var esEf = valido && metodoEsEfectivo(metodoSeleccionado);
@@ -1208,24 +1264,6 @@ function actualizarEstadoPago() {
       // Solo el efectivo usa recibido y vuelto; así no queda un monto de otra selección.
       document.getElementById("monto_recibido").value = "";
     }
-  }
-}
-
-async function verificarMetodoDisponible(id) {
-  // Simulación para probar el diseño sin backend: ?mockMetodoOff=3 trata ese método como desactivado al confirmar.
-  var simulado = new URLSearchParams(window.location.search).get(
-    "mockMetodoOff",
-  );
-  if (simulado && String(simulado) === String(id)) return false;
-  try {
-    var r = await Api.get("pagos");
-    if (!r || !r.ok) return true; // si la consulta falla, decide el servidor al confirmar
-    var lista = (r.data && r.data.data) || [];
-    return lista.some(function (p) {
-      return String(p.id_metodo_pago) === String(id);
-    });
-  } catch (e) {
-    return true;
   }
 }
 

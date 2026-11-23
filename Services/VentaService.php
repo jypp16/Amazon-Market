@@ -17,6 +17,9 @@ use Exception;
 use Throwable;
 
 class VentaService {
+    public const ETIQUETA_CONSUMIDOR_FINAL = 'Consumidor final';
+    public const LIMITE_BOLETA_CONSUMIDOR_FINAL_CENTIMOS = 70000;
+
     private VentaModel $ventaModel;
     private DetalleVentaModel $detalleModel;
     private ProductoModel $productoModel;
@@ -80,12 +83,51 @@ class VentaService {
         }
 
         // 2. Validación sintáctica previa a idempotencia (no consultar estado mutable aún)
-        $rawCliente = $input['id_cliente'] ?? null;
-        $idCliente = is_bool($rawCliente) ? false : filter_var($rawCliente, FILTER_VALIDATE_INT);
-        if ($idCliente === false || $idCliente <= 0) {
+        $consumidorFinalFlag = null;
+        if (array_key_exists('consumidor_final', $input) && $input['consumidor_final'] !== null && $input['consumidor_final'] !== '') {
+            $rawCF = $input['consumidor_final'];
+            if (is_bool($rawCF)) {
+                $consumidorFinalFlag = $rawCF;
+            } elseif (is_int($rawCF) && ($rawCF === 0 || $rawCF === 1)) {
+                $consumidorFinalFlag = ($rawCF === 1);
+            } elseif (is_string($rawCF)) {
+                $cfNorm = strtolower(trim($rawCF));
+                if ($cfNorm === 'true' || $cfNorm === '1') {
+                    $consumidorFinalFlag = true;
+                } elseif ($cfNorm === 'false' || $cfNorm === '0') {
+                    $consumidorFinalFlag = false;
+                } else {
+                    throw InventarioException::validacion(['consumidor_final' => 'El indicador de consumidor final no es válido.']);
+                }
+            } else {
+                throw InventarioException::validacion(['consumidor_final' => 'El indicador de consumidor final no es válido.']);
+            }
+        }
+
+        $tieneIdCliente = array_key_exists('id_cliente', $input) && $input['id_cliente'] !== null && $input['id_cliente'] !== '';
+        if ($consumidorFinalFlag === true && $tieneIdCliente) {
+            throw InventarioException::validacion(
+                [
+                    'id_cliente' => 'No puede enviar un cliente seleccionado junto con consumidor final.',
+                    'consumidor_final' => 'Datos contradictorios: consumidor final no admite id_cliente.'
+                ],
+                'No puede registrar una venta como Consumidor final e indicar un cliente al mismo tiempo.'
+            );
+        }
+
+        if ($consumidorFinalFlag === false && !$tieneIdCliente) {
             throw InventarioException::validacion(['id_cliente' => 'Debe seleccionar un cliente válido.']);
         }
-        $idCliente = (int)$idCliente;
+
+        $idCliente = null;
+        if ($tieneIdCliente) {
+            $rawCliente = $input['id_cliente'];
+            $parsedCliente = is_bool($rawCliente) ? false : filter_var($rawCliente, FILTER_VALIDATE_INT);
+            if ($parsedCliente === false || $parsedCliente <= 0) {
+                throw InventarioException::validacion(['id_cliente' => 'Debe seleccionar un cliente válido.']);
+            }
+            $idCliente = (int)$parsedCliente;
+        }
 
         $rawTipoComp = $input['id_tipo_comprobante'] ?? null;
         $idTipoComp = is_bool($rawTipoComp) ? false : filter_var($rawTipoComp, FILTER_VALIDATE_INT);
@@ -179,25 +221,57 @@ class VentaService {
                 }
                 $idSesion = (int)$sesionAbierta['id_sesion_caja'];
 
-                // Validar cliente activo en BD
-                $stmtCli = $pdo->prepare('SELECT id_cliente, id_tipo_documento, estado FROM cliente WHERE id_cliente = :id LIMIT 1');
-                $stmtCli->execute([':id' => $idCliente]);
-                $cliente = $stmtCli->fetch(PDO::FETCH_ASSOC);
-                if (!$cliente || (int)($cliente['estado'] ?? 0) !== 1) {
-                    throw InventarioException::validacion(['id_cliente' => 'El cliente seleccionado no existe o está inactivo.']);
-                }
-
-                // Validar tipo de comprobante activo y regla de Factura con RUC
+                // Validar tipo de comprobante activo
                 $stmtComp = $pdo->prepare('SELECT id_tipo_comprobante, nombre FROM tipo_comprobante WHERE id_tipo_comprobante = :id AND estado = 1 LIMIT 1');
                 $stmtComp->execute([':id' => $idTipoComp]);
                 $tipoComp = $stmtComp->fetch(PDO::FETCH_ASSOC);
                 if (!$tipoComp) {
                     throw InventarioException::validacion(['id_tipo_comprobante' => 'El tipo de comprobante seleccionado no es válido o está inactivo.']);
                 }
-                if (stripos((string)$tipoComp['nombre'], 'factura') !== false && (int)($cliente['id_tipo_documento'] ?? 0) !== 2) {
-                    throw InventarioException::validacion([
-                        'id_tipo_comprobante' => 'Para emitir Factura, el cliente debe tener RUC. Seleccione un cliente con RUC.'
-                    ]);
+                $nombreComprobante = trim((string)$tipoComp['nombre']);
+                $esBoleta = stripos($nombreComprobante, 'boleta') !== false;
+                $esFactura = stripos($nombreComprobante, 'factura') !== false;
+
+                // Validar cliente (Consumidor final solo con Boleta; Factura exige cliente activo con RUC de 11 dígitos)
+                $clienteNombre = self::ETIQUETA_CONSUMIDOR_FINAL;
+                if ($idCliente === null) {
+                    if ($esFactura) {
+                        throw InventarioException::validacion(
+                            ['id_cliente' => 'Para emitir Factura debe seleccionar un cliente activo con RUC de 11 dígitos.'],
+                            'Para emitir Factura debe seleccionar un cliente activo con RUC de 11 dígitos.'
+                        );
+                    }
+                    if (!$esBoleta) {
+                        throw InventarioException::validacion(
+                            ['id_tipo_comprobante' => 'Las ventas a Consumidor final solo pueden registrarse con Boleta.'],
+                            'Las ventas a Consumidor final solo pueden registrarse con Boleta.'
+                        );
+                    }
+                } else {
+                    $stmtCli = $pdo->prepare(
+                        'SELECT c.id_cliente, c.id_tipo_documento, c.nro_documento, c.nombre, c.estado, td.nombre AS tipo_documento_nombre
+                           FROM cliente c
+                           LEFT JOIN tipo_documento td ON td.id_tipo_documento = c.id_tipo_documento
+                          WHERE c.id_cliente = :id
+                          LIMIT 1'
+                    );
+                    $stmtCli->execute([':id' => $idCliente]);
+                    $cliente = $stmtCli->fetch(PDO::FETCH_ASSOC);
+                    if (!$cliente || (int)($cliente['estado'] ?? 0) !== 1) {
+                        throw InventarioException::validacion(['id_cliente' => 'El cliente seleccionado no existe o está inactivo.']);
+                    }
+                    if ($esFactura) {
+                        $esTipoRuc = (int)($cliente['id_tipo_documento'] ?? 0) === 2
+                            && strtoupper(trim((string)($cliente['tipo_documento_nombre'] ?? ''))) === 'RUC';
+                        $nroDoc = trim((string)($cliente['nro_documento'] ?? ''));
+                        if (!$esTipoRuc || preg_match('/^\d{11}$/', $nroDoc) !== 1) {
+                            throw InventarioException::validacion(
+                                ['id_cliente' => 'Para emitir Factura, el cliente debe tener tipo de documento RUC y un número válido de 11 dígitos.'],
+                                'Para emitir Factura, el cliente debe tener tipo de documento RUC y un número válido de 11 dígitos.'
+                            );
+                        }
+                    }
+                    $clienteNombre = (string)$cliente['nombre'];
                 }
 
                 // Validar método de pago activo y permitido (1=Efectivo, 2=Tarjeta, 3=Yape/Plin)
@@ -275,6 +349,14 @@ class VentaService {
                         'precio_unitario' => CajaService::centimosADecimal($precioCentimos),
                         'subtotal' => CajaService::centimosADecimal($subtotalCentimos),
                     ];
+                }
+
+                // Regla HU-27: Boleta sin cliente hasta S/ 700.00 inclusive (70000 céntimos)
+                if ($idCliente === null && $totalCentimos > self::LIMITE_BOLETA_CONSUMIDOR_FINAL_CENTIMOS) {
+                    throw InventarioException::validacion(
+                        ['id_cliente' => 'Para ventas con Boleta mayores a S/ 700.00 es obligatorio seleccionar un cliente.'],
+                        'Para ventas con Boleta mayores a S/ 700.00 es obligatorio seleccionar un cliente.'
+                    );
                 }
 
                 // Verificar límites de acumulados de sesión antes de persistir
@@ -437,6 +519,9 @@ class VentaService {
                     'data' => [
                         'result_code' => 'SALE_CREATED',
                         'id_venta' => $idVenta,
+                        'id_cliente' => $idCliente,
+                        'consumidor_final' => ($idCliente === null),
+                        'cliente' => $clienteNombre,
                         'id_sesion_caja' => $idSesion,
                         'serie' => $serie,
                         'numero' => $numero,
