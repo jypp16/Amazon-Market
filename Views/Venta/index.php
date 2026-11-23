@@ -61,7 +61,18 @@
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <input type="text" id="pos_client_search" placeholder="Buscar nombre o documento..." autocomplete="off">
                     </div>
+                    
+                    <div class="pos-dd-cf" id="pos_client_cf" role="button" tabindex="0">
+                        <span class="pos-dd-cf-ico"><i class="fa-solid fa-user"></i></span>
+                        <span class="pos-dd-info">
+                            <strong>Consumidor final</strong>
+                            <small>Venta sin datos del comprador</small>
+                        </span>
+                        <span class="pos-dd-cf-badge">Solo boleta<br>hasta S/ 700.00</span>
+                    </div>
+                    <div class="pos-dd-section" id="pos_client_section">Clientes registrados</div>
                     <div class="pos-dd-list" id="pos_client_results"></div>
+
                     <button type="button" class="pos-dd-new" id="pos_client_new"><i class="fa-solid fa-user-plus"></i> Nuevo cliente</button>
                 </div>
                 <input type="hidden" id="id_cliente" value="">
