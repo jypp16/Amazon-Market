@@ -243,8 +243,9 @@ class MovimientoInventarioService {
         $sentido = (string)($comando['sentido_movimiento'] ?? '');
         DefinicionMovimiento::validarCombinacionOrigenSentido($origen, $sentido);
 
-        $exigirAdmin = DefinicionMovimiento::esOrigenDeVariaciones($origen)
-            || !empty($comando['exigir_admin']);
+        $exigirAdmin = array_key_exists('exigir_admin', $comando)
+            ? (bool)$comando['exigir_admin']
+            : DefinicionMovimiento::esOrigenDeVariaciones($origen);
         $responsable = $this->verificarResponsableActivo((int)$idUsuario, $exigirAdmin);
 
         $cantidad = DefinicionMovimiento::validarCantidadEnteraPositiva(

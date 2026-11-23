@@ -1,13 +1,16 @@
 <?php
 require_once "Views/Header.php";
+$soloBajaVencimiento = !empty($data['solo_baja_vencimiento']);
 ?>
 
 <section class="inventory-adjustments" aria-label="Ajustes de inventario">
     <div class="inventory-adjustment-tabs" role="group" aria-label="Tipo de ajuste">
-        <button type="button" class="inventory-adjustment-tab is-active" aria-pressed="true" data-description="Registra productos dañados o vencidos para mantener el inventario y justificar la pérdida." data-panel="writeoff">Registrar baja</button>
+        <button type="button" class="inventory-adjustment-tab is-active" aria-pressed="true" data-description="<?= $soloBajaVencimiento ? 'Registra únicamente bajas manuales por vencimiento de unidades físicamente verificadas.' : 'Registra productos dañados o vencidos para mantener el inventario y justificar la pérdida.' ?>" data-panel="writeoff"><?= $soloBajaVencimiento ? 'Registrar baja por vencimiento' : 'Registrar baja' ?></button>
+        <?php if (!$soloBajaVencimiento): ?>
         <button type="button" class="inventory-adjustment-tab" aria-pressed="false" data-description="Registra una diferencia por conteo físico como entrada o salida del stock general." data-panel="adjustment">Registrar ajuste de stock</button>
+        <?php endif; ?>
     </div>
-    <p class="inventory-adjustment-description" aria-live="polite">Registra productos dañados o vencidos para mantener el inventario y justificar la pérdida.</p>
+    <p class="inventory-adjustment-description" aria-live="polite"><?= $soloBajaVencimiento ? 'Registra únicamente bajas manuales por vencimiento de unidades físicamente verificadas.' : 'Registra productos dañados o vencidos para mantener el inventario y justificar la pérdida.' ?></p>
 
     <div class="inventory-writeoff" data-inventory-panel="writeoff">
         <div class="inventory-writeoff-grid">
@@ -53,9 +56,13 @@ require_once "Views/Header.php";
                     </div>
                     <div class="inventory-field">
                         <label for="writeoff-reason">Motivo de la baja <span class="inventory-required">*</span></label>
-                        <select id="writeoff-reason">
+                        <select id="writeoff-reason"<?= $soloBajaVencimiento ? ' disabled' : '' ?>>
+                            <?php if ($soloBajaVencimiento): ?>
+                            <option value="Vencimiento" selected>Vencimiento</option>
+                            <?php else: ?>
                             <option selected>Daño</option>
                             <option>Vencimiento</option>
+                            <?php endif; ?>
                         </select>
                     </div>
                     <div class="inventory-field inventory-field-full">

@@ -122,7 +122,19 @@ class CompraService {
                 $totalCalculadoCentimos += (int)round($importeLinea * 100);
                 $idsProductos[] = (int)$idProd;
 
+                $tieneIdDetalle = array_key_exists('id_detalle_compra', $det);
+                $idDetalleRecibido = null;
+                if ($tieneIdDetalle && $det['id_detalle_compra'] !== null && $det['id_detalle_compra'] !== '') {
+                    $idDetVal = filter_var($det['id_detalle_compra'], FILTER_VALIDATE_INT);
+                    if ($idDetVal === false || $idDetVal <= 0) {
+                        throw InventarioException::validacion(["detalle_{$numLinea}" => "El identificador de línea (id_detalle_compra) en la línea {$numLinea} no es válido."]);
+                    }
+                    $idDetalleRecibido = (int)$idDetVal;
+                }
+
                 $detallesNormalizados[] = [
+                    'tiene_id_detalle_compra' => $tieneIdDetalle,
+                    'id_detalle_compra' => $idDetalleRecibido,
                     'id_producto' => (int)$idProd,
                     'id_presentacion' => (int)$idPres,
                     'cantidad_presentaciones' => $cantPres,
@@ -182,8 +194,10 @@ class CompraService {
                 ]);
                 $idCompra = (int)$pdo->lastInsertId();
 
-                // Insertar detalles e invocar aplicarMovimiento
-                $stmtDetalle = $pdo->prepare('INSERT INTO detalle_compra (id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea, numero_lote, fecha_vencimiento, version_detalle, es_vigente, id_detalle_origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, NULL)');
+                // Insertar detalles con identidad estable id_linea_compra, crear avisos de vencimiento e invocar aplicarMovimiento
+                $stmtDetalle = $pdo->prepare('INSERT INTO detalle_compra (id_linea_compra, id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea, numero_lote, fecha_vencimiento, version_detalle, es_vigente, id_detalle_origen) VALUES (0, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, NULL)');
+                $stmtSetLinea = $pdo->prepare('UPDATE detalle_compra SET id_linea_compra = ? WHERE id_detalle_compra = ?');
+                $stmtAviso = $pdo->prepare('INSERT INTO aviso_vencimiento (id_linea_compra, id_compra, id_detalle_compra_vigente, fecha_vencimiento_vigente, estado) VALUES (?, ?, ?, ?, "ACTIVO")');
 
                 foreach ($detallesNormalizados as $det) {
                     $stmtDetalle->execute([
@@ -198,6 +212,11 @@ class CompraService {
                         $det['fecha_vencimiento']
                     ]);
                     $idDetalle = (int)$pdo->lastInsertId();
+                    $stmtSetLinea->execute([$idDetalle, $idDetalle]);
+
+                    if ($det['fecha_vencimiento'] !== null) {
+                        $stmtAviso->execute([$idDetalle, $idCompra, $idDetalle, $det['fecha_vencimiento']]);
+                    }
 
                     // Aplicar movimiento de inventario (INCREMENTO canónico)
                     $this->movimientoService->aplicarMovimiento([
@@ -324,7 +343,19 @@ class CompraService {
                 $idsProductosNuevos[] = (int)$idProd;
                 $unidadesNuevasPorProducto[(int)$idProd] = ($unidadesNuevasPorProducto[(int)$idProd] ?? 0) + $cantBase;
 
+                $tieneIdDetalle = array_key_exists('id_detalle_compra', $det);
+                $idDetalleRecibido = null;
+                if ($tieneIdDetalle && $det['id_detalle_compra'] !== null && $det['id_detalle_compra'] !== '') {
+                    $idDetVal = filter_var($det['id_detalle_compra'], FILTER_VALIDATE_INT);
+                    if ($idDetVal === false || $idDetVal <= 0) {
+                        throw InventarioException::validacion(["detalle_{$numLinea}" => "El identificador de línea (id_detalle_compra) en la línea {$numLinea} no es válido."]);
+                    }
+                    $idDetalleRecibido = (int)$idDetVal;
+                }
+
                 $detallesNormalizados[] = [
+                    'tiene_id_detalle_compra' => $tieneIdDetalle,
+                    'id_detalle_compra' => $idDetalleRecibido,
                     'id_producto' => (int)$idProd,
                     'id_presentacion' => (int)$idPres,
                     'cantidad_presentaciones' => $cantPres,
@@ -363,12 +394,76 @@ class CompraService {
                 $unidadesVigentesPorProducto = [];
                 $idsProductosVigentes = [];
                 $mapaDetalleVigentePorProducto = [];
+                $vigentesPorId = [];
+                $vigentesPorProducto = [];
                 foreach ($detallesVigentes as $dv) {
                     $idProd = (int)$dv['id_producto'];
+                    $idDetVig = (int)$dv['id_detalle_compra'];
                     $idsProductosVigentes[] = $idProd;
                     $unidadesVigentesPorProducto[$idProd] = ($unidadesVigentesPorProducto[$idProd] ?? 0) + (int)$dv['cantidad_base'];
-                    $mapaDetalleVigentePorProducto[$idProd] = (int)$dv['id_detalle_compra'];
+                    $mapaDetalleVigentePorProducto[$idProd] = $idDetVig;
+                    $vigentesPorId[$idDetVig] = $dv;
+                    $vigentesPorProducto[$idProd][] = $dv;
                 }
+
+                // Resolver correspondencia exacta de cada línea (corregida vs nueva) sin ambigüedad
+                $idsVigentesUsados = [];
+                foreach ($detallesNormalizados as $idx => &$detRef) {
+                    $numLinea = $idx + 1;
+                    $idProd = $detRef['id_producto'];
+                    if ($detRef['id_detalle_compra'] !== null) {
+                        $idDetOrig = $detRef['id_detalle_compra'];
+                        if (!isset($vigentesPorId[$idDetOrig])) {
+                            throw InventarioException::validacion([
+                                "detalle_{$numLinea}" => "La línea {$numLinea} referencia un detalle (#{$idDetOrig}) que no pertenece a esta compra o ya no está vigente."
+                            ]);
+                        }
+                        if (isset($idsVigentesUsados[$idDetOrig])) {
+                            throw InventarioException::validacion([
+                                "detalle_{$numLinea}" => "El identificador de línea #{$idDetOrig} no puede reutilizarse más de una vez en la misma corrección."
+                            ]);
+                        }
+                        $idsVigentesUsados[$idDetOrig] = true;
+                        // Si el producto cambió en la misma fila (A -> B), retirar la línea de A y crear identidad nueva para B
+                        if ((int)$vigentesPorId[$idDetOrig]['id_producto'] !== $idProd) {
+                            $detRef['_id_detalle_origen'] = null;
+                            $detRef['_id_linea_compra'] = 0;
+                        } else {
+                            $detRef['_id_detalle_origen'] = $idDetOrig;
+                            $detRef['_id_linea_compra'] = (int)($vigentesPorId[$idDetOrig]['id_linea_compra'] ?? $idDetOrig);
+                        }
+                    } elseif ($detRef['tiene_id_detalle_compra']) {
+                        // id_detalle_compra === null explícito -> línea nueva agregada en la corrección
+                        $detRef['_id_detalle_origen'] = null;
+                        $detRef['_id_linea_compra'] = 0;
+                    } else {
+                        // Compatibilidad con clientes sin id_detalle_compra: solo permitido si no hay ambigüedad por producto
+                        $candidatos = $vigentesPorProducto[$idProd] ?? [];
+                        if (count($candidatos) > 1) {
+                            throw new InventarioException(
+                                "La compra tiene múltiples líneas vigentes del mismo producto (ID {$idProd}). Envíe id_detalle_compra por cada línea para identificar cuál se corrige sin ambigüedad.",
+                                'AMBIGUOUS_PURCHASE_LINE',
+                                422,
+                                ["detalle_{$numLinea}" => 'Línea ambigua: indique id_detalle_compra.']
+                            );
+                        }
+                        if (count($candidatos) === 1) {
+                            $candId = (int)$candidatos[0]['id_detalle_compra'];
+                            if (!isset($idsVigentesUsados[$candId])) {
+                                $idsVigentesUsados[$candId] = true;
+                                $detRef['_id_detalle_origen'] = $candId;
+                                $detRef['_id_linea_compra'] = (int)($candidatos[0]['id_linea_compra'] ?? $candId);
+                            } else {
+                                $detRef['_id_detalle_origen'] = null;
+                                $detRef['_id_linea_compra'] = 0;
+                            }
+                        } else {
+                            $detRef['_id_detalle_origen'] = null;
+                            $detRef['_id_linea_compra'] = 0;
+                        }
+                    }
+                }
+                unset($detRef);
 
                 // Unir todos los IDs de productos involucrados (vigentes + nuevos)
                 $todosIdsProductos = array_values(array_unique(array_merge($idsProductosVigentes, array_keys($unidadesNuevasPorProducto))));
@@ -408,15 +503,22 @@ class CompraService {
                 $stmtReemplazar = $pdo->prepare('UPDATE detalle_compra SET es_vigente = 0, reemplazado_en = NOW() WHERE id_compra = ? AND es_vigente = 1');
                 $stmtReemplazar->execute([$id_compra]);
 
-                // 2. Insertar nuevos detalles con versión incrementada y enlace a versión anterior
-                $stmtNuevoDetalle = $pdo->prepare('INSERT INTO detalle_compra (id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea, numero_lote, fecha_vencimiento, version_detalle, es_vigente, id_detalle_origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)');
+                // 2. Insertar nuevos detalles con versión incrementada, identidad estable id_linea_compra y sincronización de avisos
+                $stmtNuevoDetalle = $pdo->prepare('INSERT INTO detalle_compra (id_linea_compra, id_compra, id_producto, id_presentacion, cantidad_presentaciones, equivalencia_aplicada, cantidad_base, importe_final_linea, numero_lote, fecha_vencimiento, version_detalle, es_vigente, id_detalle_origen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)');
+                $stmtSetLinea = $pdo->prepare('UPDATE detalle_compra SET id_linea_compra = ? WHERE id_detalle_compra = ?');
+                $stmtLockAviso = $pdo->prepare('SELECT id_aviso, fecha_vencimiento_vigente, estado FROM aviso_vencimiento WHERE id_linea_compra = ? FOR UPDATE');
+                $stmtInsertAviso = $pdo->prepare('INSERT INTO aviso_vencimiento (id_linea_compra, id_compra, id_detalle_compra_vigente, fecha_vencimiento_vigente, estado) VALUES (?, ?, ?, ?, "ACTIVO")');
+                $stmtReabrirAviso = $pdo->prepare('UPDATE aviso_vencimiento SET id_detalle_compra_vigente = ?, fecha_vencimiento_vigente = ?, estado = "ACTIVO", cerrado_en = NULL, cerrado_por = NULL WHERE id_aviso = ?');
+                $stmtMantenerAviso = $pdo->prepare('UPDATE aviso_vencimiento SET id_detalle_compra_vigente = ? WHERE id_aviso = ?');
 
                 $mapaNuevoDetallePorProducto = [];
                 foreach ($detallesNormalizados as $det) {
                     $idProd = $det['id_producto'];
-                    $idDetalleOrigen = $mapaDetalleVigentePorProducto[$idProd] ?? null;
+                    $idDetalleOrigen = $det['_id_detalle_origen'];
+                    $idLinea = (int)$det['_id_linea_compra'];
 
                     $stmtNuevoDetalle->execute([
+                        $idLinea,
                         $id_compra,
                         $idProd,
                         $det['id_presentacion'],
@@ -430,8 +532,29 @@ class CompraService {
                         $idDetalleOrigen
                     ]);
                     $idNuevoDet = (int)$pdo->lastInsertId();
+                    if ($idLinea === 0) {
+                        $idLinea = $idNuevoDet;
+                        $stmtSetLinea->execute([$idLinea, $idNuevoDet]);
+                    }
                     if (!isset($mapaNuevoDetallePorProducto[$idProd])) {
                         $mapaNuevoDetallePorProducto[$idProd] = $idNuevoDet;
+                    }
+
+                    // Sincronizar aviso de vencimiento por id_linea_compra estable
+                    $nuevaFecha = $det['fecha_vencimiento'];
+                    $stmtLockAviso->execute([$idLinea]);
+                    $avisoExistente = $stmtLockAviso->fetch(PDO::FETCH_ASSOC);
+
+                    if ($avisoExistente) {
+                        if ($nuevaFecha !== null && (string)$avisoExistente['fecha_vencimiento_vigente'] !== $nuevaFecha) {
+                            // La fecha cambió: actualizar fecha vigente y reabrir el aviso conservando revisiones previas
+                            $stmtReabrirAviso->execute([$idNuevoDet, $nuevaFecha, (int)$avisoExistente['id_aviso']]);
+                        } else {
+                            // Fecha sin cambio (o retirada): enlazar al nuevo detalle vigente preservando estado (CERRADO sigue CERRADO)
+                            $stmtMantenerAviso->execute([$idNuevoDet, (int)$avisoExistente['id_aviso']]);
+                        }
+                    } elseif ($nuevaFecha !== null) {
+                        $stmtInsertAviso->execute([$idLinea, $id_compra, $idNuevoDet, $nuevaFecha]);
                     }
                 }
 

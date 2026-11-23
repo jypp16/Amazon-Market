@@ -19,8 +19,9 @@ final class DefinicionMovimiento {
     public const ORIGEN_ANULACION_VENTA   = 'ANULACION_VENTA';
     public const ORIGEN_BAJA_DANO         = 'BAJA_DANO';
     public const ORIGEN_BAJA_VENCIMIENTO  = 'BAJA_VENCIMIENTO';
-    public const ORIGEN_AJUSTE_POSITIVO   = 'AJUSTE_POSITIVO';
-    public const ORIGEN_AJUSTE_NEGATIVO   = 'AJUSTE_NEGATIVO';
+    public const ORIGEN_AJUSTE_POSITIVO       = 'AJUSTE_POSITIVO';
+    public const ORIGEN_AJUSTE_NEGATIVO       = 'AJUSTE_NEGATIVO';
+    public const ORIGEN_CORRECCION_INVENTARIO = 'CORRECCION_INVENTARIO';
 
     // Sentidos canónicos del movimiento
     public const SENTIDO_INCREMENTO  = 'INCREMENTO';
@@ -37,8 +38,10 @@ final class DefinicionMovimiento {
     public const LOTE_NO_APLICA      = 'NO_APLICA';
 
     // Tipos de operación para control_solicitud_idempotencia
-    public const SOLICITUD_BAJA              = 'BAJA';
-    public const SOLICITUD_AJUSTE            = 'AJUSTE';
+    public const SOLICITUD_BAJA                  = 'BAJA';
+    public const SOLICITUD_AJUSTE                = 'AJUSTE';
+    public const SOLICITUD_CORRECCION_INVENTARIO = 'CORRECCION_INVENTARIO';
+    public const SOLICITUD_REVISION_AVISO        = 'REVISION_AVISO_VENCIMIENTO';
     public const SOLICITUD_COMPRA            = 'COMPRA';
     public const SOLICITUD_CORRECCION_COMPRA = 'CORRECCION_COMPRA';
     public const SOLICITUD_ANULACION_COMPRA  = 'ANULACION_COMPRA';
@@ -106,6 +109,12 @@ final class DefinicionMovimiento {
             'etiqueta' => 'Ajuste negativo',
             'es_variacion' => true,
             'categoria_operacion' => self::CATEGORIA_AJUSTE,
+            'referencia_requerida' => 'OPERACION_INVENTARIO',
+        ],
+        self::ORIGEN_CORRECCION_INVENTARIO => [
+            'sentidos_permitidos' => [self::SENTIDO_INCREMENTO, self::SENTIDO_DISMINUCION],
+            'etiqueta' => 'Corrección de inventario',
+            'es_variacion' => false,
             'referencia_requerida' => 'OPERACION_INVENTARIO',
         ],
     ];

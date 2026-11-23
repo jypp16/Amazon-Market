@@ -407,7 +407,46 @@ document.addEventListener('DOMContentLoaded', function() {
         var selectedStock = null;
         var validationAttempted = false;
         var searchSequence = 0;
+        var scanSequence = 0;
+        var scanInProgress = false;
+        var DEMORA_AVISO_MS = 2000;
         var searchTimer;
+
+        var scanStatus = document.getElementById('stock-adjustment-scan-status');
+        if (!scanStatus && productError && productError.parentNode) {
+            scanStatus = document.createElement('div');
+            scanStatus.id = 'stock-adjustment-scan-status';
+            scanStatus.className = 'inventory-scan-status';
+            scanStatus.setAttribute('role', 'status');
+            scanStatus.setAttribute('aria-live', 'polite');
+            scanStatus.hidden = true;
+            scanStatus.style.marginTop = '6px';
+            scanStatus.style.fontSize = '0.88rem';
+            productError.insertAdjacentElement('afterend', scanStatus);
+        }
+
+        function setScanStatus(type, text) {
+            if (!scanStatus) return;
+            if (!text) {
+                scanStatus.hidden = true;
+                scanStatus.textContent = '';
+                scanStatus.className = 'inventory-scan-status';
+                return;
+            }
+            scanStatus.hidden = false;
+            scanStatus.className = 'inventory-scan-status is-' + type;
+            scanStatus.style.color = type === 'error' ? '#b91c1c' : (type === 'warn' ? '#b45309' : (type === 'ok' ? '#15803d' : '#1d4ed8'));
+            scanStatus.textContent = text;
+        }
+
+        function checkZeroStockExitWarning() {
+            if (selectedProduct && selectedStock === 0 && getDirection() === 'exit') {
+                setScanStatus('warn', 'El producto "' + selectedProduct.nombre + '" no tiene existencias (stock 0). No se permite registrar una salida positiva.');
+                setError(quantity, quantityError, 'No hay existencias disponibles (stock 0). No puedes registrar una salida mayor a 0.');
+                return true;
+            }
+            return false;
+        }
         var summary = {
             name: document.getElementById('stock-adjustment-summary-name'),
             category: document.getElementById('stock-adjustment-summary-category'),
@@ -610,7 +649,13 @@ document.addEventListener('DOMContentLoaded', function() {
             productResults.hidden = false;
         }
 
-        function selectAdjustmentProduct(product) {
+        function selectAdjustmentProduct(product, fromScan) {
+            if (!fromScan) {
+                // Selección manual posterior invalida cualquier consulta por código tardía
+                scanSequence++;
+                scanInProgress = false;
+                productInput.removeAttribute('aria-busy');
+            }
             selectedProduct = product;
             productInput.value = product.nombre || '';
             summary.name.textContent = product.nombre || '---';
@@ -623,7 +668,71 @@ document.addEventListener('DOMContentLoaded', function() {
             productResults.hidden = true;
             setError(productInput, productError, '');
             updateBalance();
+            if (!checkZeroStockExitWarning()) {
+                if (fromScan) {
+                    setScanStatus('ok', 'Producto identificado: ' + (product.nombre || '') + ' (Stock: ' + formatQuantity(selectedStock || 0) + ' unidades). Completa el sentido, cantidad y motivo.');
+                } else {
+                    setScanStatus('', '');
+                }
+            }
             if (validationAttempted) validate();
+        }
+
+        async function identifyAdjustmentByBarcode(codigo) {
+            if (scanInProgress) return;
+            window.clearTimeout(searchTimer);
+            searchSequence++;
+            productResults.replaceChildren();
+            productResults.hidden = true;
+
+            var mySeq = ++scanSequence;
+            scanInProgress = true;
+            productInput.setAttribute('aria-busy', 'true');
+            setError(productInput, productError, '');
+            setScanStatus('loading', 'Buscando producto por código…');
+
+            var delayTimer = window.setTimeout(function() {
+                if (mySeq === scanSequence) {
+                    setScanStatus('loading', 'La consulta está tardando más de lo normal. El código y los datos del formulario se conservan; espera un momento o busca manualmente.');
+                }
+            }, DEMORA_AVISO_MS);
+
+            try {
+                var response = await Api.get('productos/codigo/' + encodeURIComponent(codigo));
+                if (mySeq !== scanSequence) return; // respuesta tardía descartada si el usuario ya cambió de selección
+                if (response === null) return;
+                if (!response.ok || !response.data || response.data.status !== true || !response.data.data) {
+                    throw new Error((response.data && response.data.message) || 'No se pudo consultar el producto.');
+                }
+
+                var payload = response.data.data;
+                var estado = payload.estado_busqueda || 'no_existe';
+                var producto = payload.producto || null;
+
+                if (estado === 'no_existe' || !producto) {
+                    setError(productInput, productError, 'No se encontró ningún producto con el código ' + codigo + '. Puedes buscarlo manualmente por nombre.');
+                    setScanStatus('error', 'Código no encontrado: ' + codigo + '. Continúa con la búsqueda manual.');
+                    return;
+                }
+
+                if (estado === 'inactivo' || Number(producto.estado) !== 1) {
+                    setError(productInput, productError, 'El producto "' + (producto.nombre || codigo) + '" está inactivo y no puede seleccionarse para el ajuste.');
+                    setScanStatus('error', 'Producto inactivo: ' + (producto.nombre || codigo) + '.');
+                    return;
+                }
+
+                selectAdjustmentProduct(producto, true);
+            } catch (err) {
+                if (mySeq !== scanSequence) return;
+                setError(productInput, productError, 'No se pudo consultar el servidor. Se conservan los datos ingresados; puedes buscar el producto manualmente.');
+                setScanStatus('error', 'Error de comunicación al consultar el código ' + codigo + '.');
+            } finally {
+                window.clearTimeout(delayTimer);
+                if (mySeq === scanSequence) {
+                    scanInProgress = false;
+                    productInput.removeAttribute('aria-busy');
+                }
+            }
         }
 
         async function searchAdjustmentProducts(query, sequence) {
@@ -663,6 +772,9 @@ document.addEventListener('DOMContentLoaded', function() {
         function reset() {
             window.clearTimeout(searchTimer);
             searchSequence++;
+            scanSequence++;
+            scanInProgress = false;
+            productInput.removeAttribute('aria-busy');
             validationAttempted = false;
             selectedProduct = null;
             selectedStock = null;
@@ -677,19 +789,32 @@ document.addEventListener('DOMContentLoaded', function() {
             setError(productInput, productError, '');
             setError(quantity, quantityError, '');
             setError(justification, justificationError, '');
+            setScanStatus('', '');
             productResults.replaceChildren();
             productResults.hidden = true;
             updateBalance();
         }
 
+        productInput.addEventListener('keydown', function(event) {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            var codigo = productInput.value.trim();
+            if (!codigo || /\s/.test(codigo)) return;
+            identifyAdjustmentByBarcode(codigo);
+        });
+
         productInput.addEventListener('input', function() {
             window.clearTimeout(searchTimer);
             var query = productInput.value.trim();
             var sequence = ++searchSequence;
+            scanSequence++;
+            scanInProgress = false;
+            productInput.removeAttribute('aria-busy');
             selectedProduct = null;
             selectedStock = null;
             Object.keys(summary).forEach(function(key) { summary[key].textContent = '---'; });
             setError(productInput, productError, '');
+            setScanStatus('', '');
             updateBalance();
             if (!query) {
                 productResults.replaceChildren();
@@ -717,6 +842,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     item.closest('.inventory-direction-option').classList.toggle('is-selected', item.checked);
                 });
                 updateBalance();
+                if (!checkZeroStockExitWarning()) {
+                    if (selectedProduct && selectedStock === 0) {
+                        setScanStatus('ok', 'Producto activo con stock 0 seleccionado para entrada.');
+                        setError(quantity, quantityError, '');
+                    }
+                }
                 if (validationAttempted) validate();
             });
         });

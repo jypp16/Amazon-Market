@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', function() {
             option.setAttribute('aria-selected', 'false');
 
             var estadoLabel = (product.estado === 0 || product.etiqueta_estado === 'Inactivo') ? ' [Inactivo]' : '';
-            option.textContent = (product.codigo_barra || '') + ' · ' + (product.nombre || '') + estadoLabel;
+            option.textContent = (product.codigo_barra || 'Sin código') + ' · ' + (product.nombre || '') + estadoLabel;
 
             option.addEventListener('click', function() {
                 selectedProduct = product;
@@ -281,7 +281,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var productName = document.createElement('strong');
             productName.textContent = movement.producto_nombre || movement.producto || 'Producto';
             var productCode = document.createElement('small');
-            productCode.textContent = movement.codigo_barra || '';
+            productCode.textContent = movement.codigo_barra || 'Sin código';
             productCell.appendChild(productName);
             productCell.appendChild(document.createElement('br'));
             productCell.appendChild(productCode);

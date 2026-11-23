@@ -6,11 +6,15 @@
         <a href="<?= BASE_URL ?>/Producto" class="btn btn-secondary"><i class="fa-solid fa-arrow-left-long"></i> Volver</a>
     </div>
     
-    <form action="<?= BASE_URL ?>/Producto/actualizar/<?= $data['producto']['id_producto'] ?>" method="POST" class="form-grid" id="form_producto_editar">
+    <form action="<?= BASE_URL ?>/Producto/actualizar/<?= $data['producto']['id_producto'] ?>" method="POST" class="form-grid" id="form_producto_editar" data-codigo-original="<?= e($data['producto']['codigo_barra'] ?? '') ?>" data-producto-nombre="<?= e($data['producto']['nombre'] ?? '') ?>">
         <?php csrf_field(); ?>
         <div class="form-group col-6">
-            <label for="codigo_barra">Código de Barra <span class="required">*</span></label>
-            <input type="text" id="codigo_barra" name="codigo_barra" value="<?= e($data['producto']['codigo_barra']) ?>" required>
+            <label for="codigo_barra">Código de Barra <span class="pcb-optional">(opcional)</span></label>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input type="text" id="codigo_barra" name="codigo_barra" value="<?= e($data['producto']['codigo_barra'] ?? '') ?>" placeholder="Escanea o escribe el código (8 a 14 dígitos)" autocomplete="off" inputmode="numeric" style="flex:1;">
+                <button type="button" id="btn_quitar_codigo_barra" class="btn btn-secondary" title="Quitar código de barras">Quitar</button>
+            </div>
+            <small id="codigo_barra_error" class="form-error-msg" role="alert" style="display:none; color:#dc3545; margin-top:4px;"></small>
         </div>
         
         <div class="form-group col-6">

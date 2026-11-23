@@ -95,12 +95,20 @@ class VentaService {
         $idTipoComp = (int)$idTipoComp;
 
         if (!array_key_exists('id_metodo_pago', $input) || $input['id_metodo_pago'] === null || $input['id_metodo_pago'] === '') {
-            throw InventarioException::validacion(['id_metodo_pago' => 'Debe seleccionar un método de pago válido.']);
+            throw InventarioException::validacion(
+                ['id_metodo_pago' => 'Seleccione un método de pago válido para continuar'],
+                'Seleccione un método de pago válido para continuar'
+            );
         }
         $rawMetodoPago = $input['id_metodo_pago'];
-        $idMetodoPago = is_bool($rawMetodoPago) ? false : filter_var($rawMetodoPago, FILTER_VALIDATE_INT);
-        if ($idMetodoPago === false || $idMetodoPago <= 0) {
-            throw InventarioException::validacion(['id_metodo_pago' => 'Debe seleccionar un método de pago válido.']);
+        $idMetodoPago = (is_bool($rawMetodoPago) || is_array($rawMetodoPago) || is_object($rawMetodoPago))
+            ? false
+            : filter_var($rawMetodoPago, FILTER_VALIDATE_INT);
+        if ($idMetodoPago === false || !in_array((int)$idMetodoPago, MetodoPagoModel::IDS_PERMITIDOS_POS, true)) {
+            throw InventarioException::validacion(
+                ['id_metodo_pago' => 'Seleccione un método de pago válido para continuar'],
+                'Seleccione un método de pago válido para continuar'
+            );
         }
         $idMetodoPago = (int)$idMetodoPago;
 
@@ -193,11 +201,20 @@ class VentaService {
                 }
 
                 // Validar método de pago activo y permitido (1=Efectivo, 2=Tarjeta, 3=Yape/Plin)
-                $stmtMetodo = $pdo->prepare('SELECT id_metodo_pago, nombre FROM metodo_pago WHERE id_metodo_pago = :id AND estado = 1 LIMIT 1');
+                $stmtMetodo = $pdo->prepare('SELECT id_metodo_pago, nombre, estado FROM metodo_pago WHERE id_metodo_pago = :id LIMIT 1');
                 $stmtMetodo->execute([':id' => $idMetodoPago]);
                 $metodoPagoRow = $stmtMetodo->fetch(PDO::FETCH_ASSOC);
-                if (!$metodoPagoRow || !in_array((int)$metodoPagoRow['id_metodo_pago'], [1, 2, 3], true)) {
-                    throw InventarioException::validacion(['id_metodo_pago' => 'Debe seleccionar un método de pago válido.']);
+                if (!$metodoPagoRow || !in_array((int)$metodoPagoRow['id_metodo_pago'], MetodoPagoModel::IDS_PERMITIDOS_POS, true)) {
+                    throw InventarioException::validacion(
+                        ['id_metodo_pago' => 'Seleccione un método de pago válido para continuar'],
+                        'Seleccione un método de pago válido para continuar'
+                    );
+                }
+                if ((int)$metodoPagoRow['estado'] !== 1) {
+                    throw InventarioException::validacion(
+                        ['id_metodo_pago' => 'El método de pago seleccionado ya no está disponible. Seleccione otro método de pago válido para continuar.'],
+                        'El método de pago seleccionado ya no está disponible. Seleccione otro método de pago válido para continuar.'
+                    );
                 }
 
                 // (3) Bloquear productos involucrados en orden ascendente

@@ -49,6 +49,20 @@ if (!function_exists('guardar_imagen_producto')) {
     }
 }
 
+if (!function_exists('guardar_imagen_producto_por_id')) {
+    function guardar_imagen_producto_por_id(array $file, int $idProducto): array {
+        $storage = new \Services\StorageService();
+        return $storage->guardarImagenPorProducto($file, $idProducto);
+    }
+}
+
+if (!function_exists('promover_imagen_producto_a_id')) {
+    function promover_imagen_producto_a_id(int $idProducto, ?string $codigoBarraAnterior): array {
+        $storage = new \Services\StorageService();
+        return $storage->promoverImagenAClaveProducto($idProducto, $codigoBarraAnterior);
+    }
+}
+
 if (!function_exists('renombrar_imagen_producto')) {
     function renombrar_imagen_producto(string $oldCodigo, string $newCodigo): void {
         $storage = new \Services\StorageService();

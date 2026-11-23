@@ -4,6 +4,8 @@ namespace Controllers;
 
 use Libraries\Core\Controller;
 use Libraries\Core\InventarioException;
+use Libraries\Middleware\AuthMiddleware;
+use Libraries\Middleware\RBACMiddleware;
 use Services\InventarioService;
 use Services\AlertaService;
 use Throwable;
@@ -22,12 +24,38 @@ class InventarioController extends Controller {
     }
 
     public function ajustes() {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                header('Content-Type: application/json');
+                http_response_code(401);
+                echo json_encode(['status' => false, 'code' => 'AUTH_REQUIRED', 'message' => 'Sesión no válida.']);
+                exit;
+            }
+            header('Location: ' . BASE_URL . '/Auth');
+            exit;
+        }
+
+        $rol = (int)$usuario['id_rol'];
+        $esAdmin = ($rol === 1 && RBACMiddleware::tienePermiso(1, 'inventario.ajustes'));
+        $puedeBajaVenc = RBACMiddleware::tienePermisoAsignado($rol, 'inventario.bajas_vencimiento');
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            header('Content-Type: application/json');
+            if (!$esAdmin) {
+                http_response_code(403);
+                echo json_encode([
+                    'status' => false,
+                    'code' => 'FORBIDDEN_ADMIN_ONLY',
+                    'message' => 'Solo el Administrador puede registrar ajustes de stock.'
+                ]);
+                exit;
+            }
+
             $input = json_decode(file_get_contents('php://input'), true) ?: $_POST;
             $refHeader = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
-            $idUsuario = (int)($_SESSION['idUser'] ?? 0);
+            $idUsuario = (int)$usuario['id_usuario'];
 
-            header('Content-Type: application/json');
             try {
                 $resultado = $this->service->registrarAjuste($input, $refHeader, $idUsuario);
                 http_response_code(!empty($resultado['idempotent_replay']) ? 200 : 201);
@@ -42,19 +70,43 @@ class InventarioController extends Controller {
             exit;
         }
 
-        $data = ['page_title' => 'Ajustes de inventario - Amazon Market'];
+        if (!$esAdmin && !$puedeBajaVenc) {
+            $_SESSION['error'] = 'No tienes permisos para acceder a esta sección.';
+            header('Location: ' . BASE_URL . '/Home');
+            exit;
+        }
+
+        $data = [
+            'page_title' => $esAdmin ? 'Ajustes de inventario - Amazon Market' : 'Baja por vencimiento - Amazon Market',
+            'solo_baja_vencimiento' => !$esAdmin,
+        ];
         $this->views->render($this, 'ajustes', $data);
     }
 
     public function bajas() {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            header('Content-Type: application/json');
+            $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+            if ($usuario === null) {
+                http_response_code(401);
+                echo json_encode(['status' => false, 'code' => 'AUTH_REQUIRED', 'message' => 'Sesión no válida.']);
+                exit;
+            }
+            $rol = (int)$usuario['id_rol'];
+            $esAdmin = ($rol === 1 && RBACMiddleware::tienePermiso(1, 'inventario.ajustes'));
+            $puedeBajaVenc = RBACMiddleware::tienePermisoAsignado($rol, 'inventario.bajas_vencimiento');
+            if (!$esAdmin && !$puedeBajaVenc) {
+                http_response_code(403);
+                echo json_encode(['status' => false, 'code' => 'FORBIDDEN', 'message' => 'No tienes permisos para registrar bajas.']);
+                exit;
+            }
+
             $input = json_decode(file_get_contents('php://input'), true) ?: $_POST;
             $refHeader = $_SERVER['HTTP_X_REQUEST_REFERENCE'] ?? $_SERVER['HTTP_X_IDEMPOTENCY_KEY'] ?? null;
-            $idUsuario = (int)($_SESSION['idUser'] ?? 0);
+            $idUsuario = (int)$usuario['id_usuario'];
 
-            header('Content-Type: application/json');
             try {
-                $resultado = $this->service->registrarBaja($input, $refHeader, $idUsuario);
+                $resultado = $this->service->registrarBaja($input, $refHeader, $idUsuario, !$esAdmin);
                 http_response_code(!empty($resultado['idempotent_replay']) ? 200 : 201);
                 echo json_encode($resultado);
             } catch (InventarioException $e) {
@@ -69,21 +121,32 @@ class InventarioController extends Controller {
     }
 
     public function vencimientos() {
-        if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            header('Location: ' . BASE_URL . '/Auth');
+            exit;
+        }
+        $rol = (int)$usuario['id_rol'];
+        if (!RBACMiddleware::tienePermiso($rol, 'inventario.vencimientos')) {
+            $_SESSION['error'] = 'No tienes permisos para consultar los avisos de vencimiento.';
             header('Location: ' . BASE_URL . '/Home');
             exit;
         }
 
-        $alertaService = new AlertaService();
         $data = [
             'page_title' => 'Avisos de vencimiento - Amazon Market',
-            'vencimientos' => $alertaService->obtenerAlertasVencimiento(15),
         ];
         $this->views->render($this, 'vencimientos', $data);
     }
 
-        private function exigirAdministrador(): void {
-        if ((int)($_SESSION['rol'] ?? 0) !== 1) {
+    private function exigirAdministrador(): void {
+        $usuario = AuthMiddleware::verificarUsuarioActivoEnSesion();
+        if ($usuario === null) {
+            header('Location: ' . BASE_URL . '/Auth');
+            exit;
+        }
+        if ((int)$usuario['id_rol'] !== 1 || !RBACMiddleware::tienePermiso(1, 'inventario.ajustes')) {
+            $_SESSION['error'] = 'Acceso denegado. Esta sección está reservada al Administrador con permisos de Inventario.';
             header('Location: ' . BASE_URL . '/Home');
             exit;
         }

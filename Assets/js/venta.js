@@ -12,6 +12,9 @@ let metodosNoDisponibles = {};
 let ventaEnProceso = false;
 let escaneoEnCurso = false;
 let colaEscaneo = [];
+let escaneoGeneracion = 0;
+let escaneoSeq = 0;
+let posInputVersion = 0;
 let fallosEscaneoSimulados = 0;
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -59,7 +62,11 @@ async function cargarPagos() {
         pagosLista = apiData(await Api.get('pagos'));
         fillSelect('id_metodo_pago', pagosLista, 'id_metodo_pago', 'nombre');
         renderMetodosPago(true);
-    } catch(e) { console.error(e); }
+    } catch(e) {
+        console.error(e);
+        pagosLista = [];
+        renderMetodosPago(true);
+    }
 }
 async function cargarCategorias() {
     try { categoriasLista = apiData(await Api.get('categorias')); renderChips(); }
@@ -87,13 +94,18 @@ function initPos() {
     var search = document.getElementById('pos_search');
     search.addEventListener('input', debounce(function() { renderProductos(search.value.trim()); }, 200));
 
-    search.addEventListener('input', function() { marcarEntradaEscaneo(false); });
+    search.addEventListener('input', function() {
+        posInputVersion++;
+        marcarEntradaEscaneo(false);
+    });
     search.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
             manejarEntradaEscaneo(search.value.trim());
         } else if (e.key === 'Escape') {
+            cancelarEscaneosPendientes();
             search.value = '';
+            posInputVersion++;
             ocultarEstadoEscaneo();
             renderProductos('');
         }
@@ -225,16 +237,20 @@ function renderProductos(query) {
 
         var img = document.createElement('div');
         img.className = 'pos-item-img';
-        var pic = document.createElement('img');
-        pic.alt = '';
-        pic.loading = 'lazy';
-        pic.src = BaseUrl + '/Assets/img/productos/' + encodeURIComponent(safeCode) + '.jpg';
-        pic.addEventListener('error', function fallback() {
-            if (!pic.dataset.t) { pic.dataset.t = '1'; pic.src = BaseUrl + '/Assets/img/productos/' + encodeURIComponent(safeCode) + '.png'; }
-            else if (pic.dataset.t === '1') { pic.dataset.t = '2'; pic.src = BaseUrl + '/Assets/img/productos/' + encodeURIComponent(safeCode) + '.webp'; }
-            else { pic.remove(); img.classList.add('no-img'); }
-        });
-        img.appendChild(pic);
+        var imgUrl = p.imagen_url || (p.tiene_imagen ? (API_URL + '/imagenes/producto/' + encodeURIComponent(p.id_producto)) : null);
+        if (imgUrl) {
+            var pic = document.createElement('img');
+            pic.alt = '';
+            pic.loading = 'lazy';
+            pic.src = imgUrl;
+            pic.addEventListener('error', function() {
+                pic.remove();
+                img.classList.add('no-img');
+            });
+            img.appendChild(pic);
+        } else {
+            img.classList.add('no-img');
+        }
 
         if (agotado) {
             var badge = document.createElement('span');
@@ -336,7 +352,7 @@ function renderCarrito() {
 
     carrito.forEach(function(item, idx) {
         var prodRef = productosLista.find(function(p) { return p.id_producto == item.id_producto; });
-        var code = prodRef ? String(prodRef.codigo_barra || '').replace(/[^a-zA-Z0-9_\-]/g, '_') : '';
+        var thumbUrl = prodRef && (prodRef.imagen_url || (prodRef.tiene_imagen ? (API_URL + '/imagenes/producto/' + encodeURIComponent(prodRef.id_producto)) : null));
 
         var line = document.createElement('div');
         line.className = 'pos-line';
@@ -350,15 +366,14 @@ function renderCarrito() {
         letter.textContent = (item.nombre || '?').charAt(0).toUpperCase();
         thumb.appendChild(letter);
 
-        if (code) {
+        if (thumbUrl) {
             var ti = document.createElement('img');
             ti.alt = '';
-            ti.src = BaseUrl + '/Assets/img/productos/' + encodeURIComponent(code) + '.jpg';
+            ti.src = thumbUrl;
             ti.addEventListener('load', function() { letter.style.display = 'none'; });
             ti.addEventListener('error', function() {
-                if (!ti.dataset.t) { ti.dataset.t = '1'; ti.src = BaseUrl + '/Assets/img/productos/' + encodeURIComponent(code) + '.png'; }
-                else if (ti.dataset.t === '1') { ti.dataset.t = '2'; ti.src = BaseUrl + '/Assets/img/productos/' + encodeURIComponent(code) + '.webp'; }
-                else { ti.remove(); letter.style.display = ''; }
+                ti.remove();
+                letter.style.display = '';
             });
             thumb.appendChild(ti);
         }
@@ -609,9 +624,6 @@ async function procesarVenta() {
         if (!id_mp) { actualizarEstadoPago(); return; }
     if (!carrito.length) { Modal.warning('Carrito vacío', 'Agregue al menos un producto.'); return; }
 
-    // El servidor vuelve a validar el método al confirmar; esta consulta evita enviar uno ya desactivado.
-    if (!(await verificarMetodoDisponible(id_mp))) { marcarMetodoNoDisponible(id_mp); return; }
-
     var ok = await Modal.confirm('Procesar venta', '¿Confirmar venta por S/. ' + totalCarrito().toFixed(2) + '?', 'warning');
     if (!ok || btn.disabled) return;
 
@@ -639,7 +651,7 @@ async function procesarVenta() {
              var tipoComprobante = document.getElementById('id_tipo_comprobante');
             var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex] ? tipoComprobante.options[tipoComprobante.selectedIndex].text : 'Boleta';
             var metodoPago = document.getElementById('id_metodo_pago');
-            var mpNombre = metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '';
+            var mpNombre = d.metodo_pago || (metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '');
             var clienteNombre = clienteSeleccionado ? clienteSeleccionado.nombre : 'Cliente general';
             var datosTicket = { serie: d.serie, numero: d.numero, total: d.total, tipo: tipoNombre };
 
@@ -713,7 +725,7 @@ function renderMetodosPago(preseleccionar) {
     var cont = document.getElementById('pos_pay_methods');
     if (!cont) return;
     if (preseleccionar && !metodoSeleccionado) {
-        var ef = pagosLista.find(function(p) { return claseMetodo(p.nombre) === 'efectivo'; });
+        var ef = pagosLista.find(function(p) { return String(p.id_metodo_pago) === '1'; });
         metodoSeleccionado = ef ? String(ef.id_metodo_pago) : '';
     }
     var sel = document.getElementById('id_metodo_pago');
@@ -778,7 +790,7 @@ function actualizarEstadoPago() {
     var btn = document.getElementById('btn_procesar');
     if (btn) btn.disabled = !valido || ventaEnProceso;
     var req = document.getElementById('pos_pay_required');
-    if (req) req.hidden = valido || !pagosLista.length;
+    if (req) req.hidden = valido;
     var caja = document.getElementById('pos_cash');
     if (caja) {
         var esEf = valido && metodoEsEfectivo(metodoSeleccionado);
@@ -787,20 +799,6 @@ function actualizarEstadoPago() {
             // Solo el efectivo usa recibido y vuelto; así no queda un monto de otra selección.
             document.getElementById('monto_recibido').value = '';
         }
-    }
-}
-
-async function verificarMetodoDisponible(id) {
-    // Simulación para probar el diseño sin backend: ?mockMetodoOff=3 trata ese método como desactivado al confirmar.
-    var simulado = new URLSearchParams(window.location.search).get('mockMetodoOff');
-    if (simulado && String(simulado) === String(id)) return false;
-    try {
-        var r = await Api.get('pagos');
-        if (!r || !r.ok) return true; // si la consulta falla, decide el servidor al confirmar
-        var lista = (r.data && r.data.data) || [];
-        return lista.some(function(p) { return String(p.id_metodo_pago) === String(id); });
-    } catch (e) {
-        return true;
     }
 }
 
@@ -839,92 +837,146 @@ function marcarEntradaEscaneo(invalida) {
     if (invalida) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
 }
 
+function cancelarEscaneosPendientes() {
+    escaneoGeneracion++;
+    colaEscaneo = [];
+    escaneoEnCurso = false;
+}
+
 function manejarEntradaEscaneo(texto) {
     // Un texto con espacios es una búsqueda por nombre: el filtro del catálogo ya la atiende.
     if (!texto || /\s/.test(texto)) return;
-    colaEscaneo.push(texto);
-    procesarColaEscaneo();
+    colaEscaneo.push({
+        codigo: texto,
+        gen: escaneoGeneracion,
+        seq: ++escaneoSeq,
+        inputVersionAtSubmit: posInputVersion
+    });
+    procesarColaEscaneo(escaneoGeneracion);
 }
 
-async function procesarColaEscaneo() {
+async function procesarColaEscaneo(gen) {
     if (escaneoEnCurso) return;
     escaneoEnCurso = true;
     try {
-        while (colaEscaneo.length) await resolverCodigo(colaEscaneo.shift());
+        while (colaEscaneo.length && gen === escaneoGeneracion) {
+            var item = colaEscaneo.shift();
+            if (!item || item.gen !== escaneoGeneracion) continue;
+            await resolverCodigo(item);
+        }
     } finally {
-        escaneoEnCurso = false;
+        if (gen === escaneoGeneracion) {
+            escaneoEnCurso = false;
+        }
     }
 }
 
 async function buscarProductoPorCodigo(codigo) {
-    // Simulación para probar el diseño sin backend: ?mockScan=error provoca un fallo de conexión en la primera lectura.
-    if (new URLSearchParams(window.location.search).get('mockScan') === 'error' && fallosEscaneoSimulados === 0) {
-        fallosEscaneoSimulados++;
-        await new Promise(function(r) { setTimeout(r, 400); });
-        throw new Error('Conexión simulada');
+    var res = await Api.get('productos/codigo/' + encodeURIComponent(codigo));
+    if (res === null) {
+        return { estado: 'interrumpido', producto: null };
     }
-    // TODO backend: confirmar un endpoint por código que distinga inexistente de inactivo (hoy solo se lista lo activo).
-    var res = await Api.get('productos?q=' + encodeURIComponent(codigo) + '&limit=10');
-    if (!res || !res.ok) throw new Error('Consulta fallida');
-    var lista = (res.data && res.data.data) || [];
-    var p = lista.find(function(x) { return String(x.codigo_barra || '').trim() === codigo; }) || null;
-    if (p) {
+    if (!res.ok || !res.data || res.data.status !== true || !res.data.data) {
+        var errMsg = (res.data && res.data.message) || 'Consulta fallida';
+        throw new Error(errMsg);
+    }
+    var payload = res.data.data;
+    var estado = payload.estado_busqueda || 'no_existe';
+    var p = payload.producto || null;
+    if (estado === 'encontrado' && p) {
         var i = productosLista.findIndex(function(x) { return x.id_producto == p.id_producto; });
-        if (i >= 0) productosLista[i] = Object.assign({}, productosLista[i], p); else productosLista.push(p);
+        if (i >= 0) productosLista[i] = Object.assign({}, productosLista[i], p);
+        else productosLista.push(p);
     }
-    return p;
+    return { estado: estado, producto: p };
 }
 
-async function resolverCodigo(codigo) {
-    var input = document.getElementById('pos_search');
-    marcarEntradaEscaneo(false);
-    mostrarEstadoEscaneo('loading', ['Buscando producto…']);
+async function resolverCodigo(item) {
+    var codigo = typeof item === 'string' ? item : item.codigo;
+    var gen = typeof item === 'string' ? escaneoGeneracion : item.gen;
+    var seq = typeof item === 'string' ? escaneoSeq : item.seq;
+    var inputVersionAtSubmit = typeof item === 'string' ? posInputVersion : item.inputVersionAtSubmit;
 
-    var p;
+    var input = document.getElementById('pos_search');
+    if (gen !== escaneoGeneracion) return;
+    if (posInputVersion === inputVersionAtSubmit) {
+        marcarEntradaEscaneo(false);
+    }
+    if (escaneoSeq === seq) {
+        mostrarEstadoEscaneo('loading', ['Buscando producto…']);
+    }
+
+    var resultado;
     try {
-        p = await buscarProductoPorCodigo(codigo);
+        resultado = await buscarProductoPorCodigo(codigo);
     } catch (e) {
-        // La venta no cambia y el código queda en el campo para reintentar o corregirlo.
-        mostrarEstadoEscaneo('error', [
-            { tag: 'strong', text: 'No se pudo consultar la información.' },
-            ' No se agregó nada a la venta. Vuelve a escanear o digita el código.'
-        ]);
-        marcarEntradaEscaneo(true);
+        if (gen !== escaneoGeneracion) return;
+        var editoErr = (posInputVersion !== inputVersionAtSubmit) || (input && input.value.trim() !== '' && input.value.trim() !== codigo);
+        if (escaneoSeq === seq) {
+            // La venta no cambia y el código queda en el campo para reintentar o corregirlo.
+            mostrarEstadoEscaneo('error', [
+                { tag: 'strong', text: 'No se pudo consultar la información.' },
+                ' No se agregó nada a la venta. Vuelve a escanear o digita el código.'
+            ]);
+            if (!editoErr) marcarEntradaEscaneo(true);
+        }
         return;
     }
 
-    if (!p) {
-        if (/^\d+$/.test(codigo)) {
+    // Si el usuario pulsó Escape mientras la consulta estaba en vuelo, descartar sin alterar carrito ni entrada.
+    if (gen !== escaneoGeneracion) return;
+
+    var usuarioEditoEntrada = (posInputVersion !== inputVersionAtSubmit) || (input && input.value.trim() !== '' && input.value.trim() !== codigo);
+    var hayLecturaPosterior = (escaneoSeq > seq);
+
+    if (!resultado || resultado.estado === 'interrumpido') {
+        // Lectura interrumpida: el carrito no se modifica y se permite reintentar
+        if (!hayLecturaPosterior) {
+            mostrarEstadoEscaneo('warn', ['La lectura se interrumpió antes de identificar el producto. Vuelve a escanear o digita el código.']);
+        }
+        return;
+    }
+
+    if (resultado.estado === 'no_existe' || !resultado.producto) {
+        if (!hayLecturaPosterior) {
             mostrarEstadoEscaneo('error', [
                 { tag: 'strong', text: 'No se pudo identificar el código ' },
                 { tag: 'code', text: codigo },
                 '. No se agregó nada a la venta. Digítalo de nuevo o busca el producto por nombre.'
             ]);
-            marcarEntradaEscaneo(true);
-        } else {
-            ocultarEstadoEscaneo();
+            if (!usuarioEditoEntrada) marcarEntradaEscaneo(true);
         }
         return;
     }
 
-    if (p.estado !== undefined && Number(p.estado) !== 1) {
-        mostrarEstadoEscaneo('warn', [{ tag: 'strong', text: p.nombre }, ' está inactivo. No se agregó a la venta.']);
+    var p = resultado.producto;
+
+    if (resultado.estado === 'inactivo' || (p.estado !== undefined && Number(p.estado) !== 1)) {
+        if (!hayLecturaPosterior) {
+            mostrarEstadoEscaneo('warn', [{ tag: 'strong', text: p.nombre }, ' está inactivo. No se agregó a la venta.']);
+        }
         return;
     }
 
     var r = intentarAgregar(p);
     if (!r.ok) {
-        mostrarEstadoEscaneo('warn', r.motivo === 'sin_stock'
-            ? [{ tag: 'strong', text: p.nombre }, ' no tiene stock. No se agregó a la venta.']
-            : [{ tag: 'strong', text: p.nombre }, ' · solo quedan ' + r.stock + ' en stock y ya están en el carrito.']);
+        if (!hayLecturaPosterior) {
+            mostrarEstadoEscaneo('warn', r.motivo === 'sin_stock'
+                ? [{ tag: 'strong', text: p.nombre }, ' no tiene stock. No se agregó a la venta.']
+                : [{ tag: 'strong', text: p.nombre }, ' · solo quedan ' + r.stock + ' en stock y ya están en el carrito.']);
+        }
         return;
     }
 
-    mostrarEstadoEscaneo('ok', r.nueva
-        ? ['Leído: ', { tag: 'strong', text: p.nombre }, ' · agregado al carrito.']
-        : ['Leído: ', { tag: 'strong', text: p.nombre }, ' · ya hay ' + r.cantidad + ' unidades en el carrito.']);
-    input.value = '';
-    renderProductos('');
+    if (!hayLecturaPosterior) {
+        mostrarEstadoEscaneo('ok', r.nueva
+            ? ['Leído: ', { tag: 'strong', text: p.nombre }, ' · agregado al carrito.']
+            : ['Leído: ', { tag: 'strong', text: p.nombre }, ' · ya hay ' + r.cantidad + ' unidades en el carrito.']);
+    }
+    if (!usuarioEditoEntrada && !hayLecturaPosterior && input) {
+        input.value = '';
+        renderProductos('');
+    }
 }
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }

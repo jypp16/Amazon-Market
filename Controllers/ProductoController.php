@@ -62,7 +62,7 @@ class ProductoController extends Controller {
             $resultado = $this->service->crear($input);
 
             if ($isJson) {
-                $statusCode = $resultado['status'] ? 201 : 400;
+                $statusCode = $resultado['status'] ? 201 : (!empty($resultado['errors']) ? 422 : 400);
                 $this->respond($resultado, $statusCode);
             }
 
@@ -115,7 +115,14 @@ class ProductoController extends Controller {
             $resultado = $this->service->actualizar($id, $input);
 
             if ($isJson) {
-                $statusCode = $resultado['status'] ? 200 : 400;
+                $errCode = $resultado['code'] ?? '';
+                $statusCode = $resultado['status']
+                    ? 200
+                    : ($errCode === 'NOT_FOUND'
+                        ? 404
+                        : ($errCode === 'LEGACY_IMAGE_PRESERVATION_FAILED'
+                            ? 409
+                            : (!empty($resultado['errors']) ? 422 : 400)));
                 $this->respond($resultado, $statusCode);
             }
 

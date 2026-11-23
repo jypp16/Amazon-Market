@@ -156,10 +156,14 @@ const ModalForm = {
 
                 if (result && result.ok) {
                     this._close();
-                    await Modal.success('Éxito', result.data.message || 'Operación completada.');
+                    if (result.data && result.data.warning === 'IMAGE_SAVE_FAILED') {
+                        await Modal.warning('Guardado con advertencia', result.data.message || 'El producto se guardó, pero la imagen no pudo actualizarse.');
+                    } else {
+                        await Modal.success('Éxito', result.data.message || 'Operación completada.');
+                    }
                     if (config.onSuccess) config.onSuccess();
                 } else {
-                    if(config.onErro && config.onError(result, form)){
+                    if (config.onError && config.onError(result, form)) {
                         submitBtn.disabled = false;
                         submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> ' + (config.btnText || 'Guardar');
                         return;

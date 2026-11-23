@@ -9,8 +9,8 @@
     <form action="<?= BASE_URL ?>/Producto/guardar" method="POST" class="form-grid" id="form_producto_nuevo">
         <?php csrf_field(); ?>
         <div class="form-group col-6">
-            <label for="codigo_barra">Código de Barra <span class="required">*</span></label>
-            <input type="text" id="codigo_barra" name="codigo_barra" placeholder="Escriba o escanee el código" required>
+            <label for="codigo_barra">Código de Barra <span class="pcb-optional">(opcional)</span></label>
+            <input type="text" id="codigo_barra" name="codigo_barra" placeholder="Escanea o escribe el código (8 a 14 dígitos)" autocomplete="off" inputmode="numeric">
         </div>
         
         <div class="form-group col-6">

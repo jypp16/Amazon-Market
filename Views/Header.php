@@ -92,9 +92,9 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
                         <a href="<?= BASE_URL ?>/Producto" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Producto') !== false) ? 'active' : '' ?>">
                             <i class="fa-solid fa-border-all"></i><span>Productos</span>
                         </a>
-                        <?php if ($rol == 1 && in_array('inventario.ajustes', $slugs)): ?>
+                        <?php if (($rol == 1 && in_array('inventario.ajustes', $slugs)) || in_array('inventario.bajas_vencimiento', $slugsOperativos)): ?>
                         <a href="<?= BASE_URL ?>/Inventario/ajustes" class="menu-sublink <?= (strpos($_GET['url'] ?? '', 'Inventario/ajustes') === 0) ? 'active' : '' ?>">
-                            <i class="fa-solid fa-sliders"></i><span>Ajustes de inventario</span>
+                            <i class="fa-solid fa-sliders"></i><span><?= ($rol == 1) ? 'Ajustes de inventario' : 'Baja por vencimiento' ?></span>
                         </a>
                         <?php endif; ?>
                         <?php if ($rol == 1): ?>
@@ -102,7 +102,7 @@ $esCajaConsultaPropia = $esCajaConsultar && (string)($_GET['propia'] ?? '') === 
                             <i class="fa-solid fa-arrow-right-arrow-left"></i><span>Movimientos</span>
                         </a>
                         <?php endif; ?>
-                        <?php if ($rol == 1): ?>
+                        <?php if (in_array('inventario.vencimientos', $slugs)): ?>
                         <a href="<?= BASE_URL ?>/Inventario/vencimientos" class="menu-sublink <?= $esInventarioVencimientos ? 'active' : '' ?>">
                             <i class="fa-solid fa-clock"></i><span>Avisos de vencimiento</span>
                         </a>

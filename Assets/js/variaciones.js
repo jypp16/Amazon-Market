@@ -228,7 +228,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var productName = document.createElement('strong');
             productName.textContent = item.producto_nombre || 'Producto';
             var productCode = document.createElement('small');
-            productCode.textContent = item.codigo_barra || '';
+            productCode.textContent = item.codigo_barra || 'Sin código';
             productCell.appendChild(productName);
             productCell.appendChild(productCode);
             tr.appendChild(productCell);
@@ -336,7 +336,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var name = document.createElement('strong');
             name.textContent = prod.producto_nombre;
             var code = document.createElement('small');
-            code.textContent = prod.codigo_barra || '';
+            code.textContent = prod.codigo_barra || 'Sin código';
             nameCell.append(name, code);
             row.appendChild(nameCell);
 

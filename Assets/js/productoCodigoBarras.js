@@ -226,5 +226,55 @@ window.ProductoCodigoBarras = (function () {
         return false;
     }
 
-    return { montar: montar, confirmarCambio: confirmarCambio, manejarErrorServidor: manejarErrorServidor };
+    function montarCrear(form) {
+        var input = form.querySelector('#mf_codigo_barra');
+        var labelCodigo = form.querySelector('label[for="mf_codigo_barra"]');
+        if (!input || !labelCodigo) return;
+
+        labelCodigo.appendChild(crear('span', 'pcb-optional', ' (opcional)'));
+
+        var error = crear('p', 'pcb-error');
+        error.id = 'pcb_error';
+        error.setAttribute('role', 'alert');
+        error.hidden = true;
+
+        var grupoCodigo = input.closest('.form-group');
+        var grupoSiguiente = grupoCodigo ? grupoCodigo.nextElementSibling : null;
+        (grupoSiguiente || grupoCodigo).insertAdjacentElement('afterend', error);
+        input.setAttribute('aria-describedby', 'pcb_error');
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('inputmode', 'numeric');
+
+        input.addEventListener('input', function () { limpiarError(form); });
+        input.addEventListener('keydown', function (ev) {
+            if (ev.key !== 'Enter') return;
+            ev.preventDefault();
+            var siguiente = form.querySelector('#mf_nombre');
+            if (siguiente) siguiente.focus();
+        });
+    }
+
+    async function validarCrear(form) {
+        var input = form.querySelector('#mf_codigo_barra');
+        if (!input) return true;
+        var nuevo = input.value.trim();
+        input.value = nuevo;
+        limpiarError(form);
+
+        if (nuevo === '') return true;
+        if (!FORMATO.test(nuevo)) {
+            mostrarError(form, MSG_FORMATO);
+            return false;
+        }
+        return true;
+    }
+
+    return {
+        montar: montar,
+        montarCrear: montarCrear,
+        validarCrear: validarCrear,
+        confirmarCambio: confirmarCambio,
+        manejarErrorServidor: manejarErrorServidor,
+        dialogo: dialogo
+    };
 })();
