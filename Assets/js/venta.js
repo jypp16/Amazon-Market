@@ -6,13 +6,6 @@ let categoriasLista = [];
 let chipCategoriaActiva = '';
 let clienteSeleccionado = null;
 const LIMITE_CONSUMIDOR_FINAL = 700;
-const CONSUMIDOR_FINAL = {
-    id_cliente: null,
-    nombre: 'Consumidor final',
-    tipo_documento: '',
-    nro_documento: '',
-    es_consumidor_final: true
-};
 let paydocMap = { 'id_tipo_comprobante': {}, 'id_metodo_pago': {} };
 let pagosLista = [];
 let metodoSeleccionado = '';
@@ -108,7 +101,7 @@ function initPos() {
     });
 
     document.getElementById('pos_client_box').addEventListener('click', toggleClientDD);
-    document.getElementById('pos_client_cf').addEventListener('click', function() { selectClient(CONSUMIDOR_FINAL); });
+    document.getElementById('pos_client_cf').addEventListener('click', function() { clearClient(); closeClientDD(); });
     document.getElementById('pos_client_clear').addEventListener('click', clearClient);
     document.getElementById('pos_client_search').addEventListener('input', debounce(function() {
         renderClientResults(document.getElementById('pos_client_search').value.trim());
@@ -498,44 +491,102 @@ function renderClientResults(query) {
     }
 }
 
-function esConsumidorFinal() {
-    return !!(clienteSeleccionado && clienteSeleccionado.es_consumidor_final);
+/* ---------- Cliente / Consumidor final (HU: ventas a clientes no identificados) ---------- */
+
+// Sin cliente seleccionado = Consumidor final (estado por defecto).
+function esConsumidorFinal() { return !clienteSeleccionado; }
+
+function clienteTieneRUC(c) {
+    if (!c) return false;
+    return String(c.id_tipo_documento) === '2' || /ruc/i.test(String(c.tipo_documento || ''));
 }
 
-function aplicarRestriccionConsumidorFinal() {
-    var boletaBtn = document.querySelector('.pos-paydoc-btn[data-target="id_tipo_comprobante"][data-key="boleta"]');
-    var facturaBtn = document.querySelector('.pos-paydoc-btn[data-target="id_tipo_comprobante"][data-key="factura"]');
+function esFacturaActiva() {
+    var b = document.querySelector('.pos-paydoc-btn[data-target="id_tipo_comprobante"][data-key="factura"]');
+    return !!(b && b.classList.contains('active'));
+}
+
+// Exactamente S/ 700.00 sí se permite; solo se bloquea si es mayor.
+function excedeLimiteConsumidorFinal() {
+    return Math.round(totalCarrito() * 100) > Math.round(LIMITE_CONSUMIDOR_FINAL * 100);
+}
+
+// Devuelve null si se puede continuar, o { tipo, mensaje } si falta identificar al comprador.
+function validarIdentificacion() {
+    if (esFacturaActiva() && !clienteTieneRUC(clienteSeleccionado)) {
+        return {
+            tipo: 'factura',
+            mensaje: clienteSeleccionado
+                ? 'El cliente seleccionado no tiene RUC. Para emitir factura elige un cliente con RUC.'
+                : 'Para emitir factura selecciona un cliente con RUC.'
+        };
+    }
+    if (esConsumidorFinal() && excedeLimiteConsumidorFinal()) {
+        return { tipo: 'limite', mensaje: 'El importe supera S/ 700.00. Selecciona un cliente para continuar.' };
+    }
+    return null;
+}
+
+function renderIdentificacion() {
     var cf = esConsumidorFinal();
-    if (facturaBtn) {
-        facturaBtn.disabled = cf;
-        facturaBtn.title = cf ? 'Consumidor final solo admite boleta' : '';
-        if (cf && facturaBtn.classList.contains('active') && boletaBtn) boletaBtn.click();
+    var err = validarIdentificacion();
+    var box = document.getElementById('pos_client_box');
+    var sel = document.getElementById('pos_client_sel');
+    var note = document.getElementById('pos_ident_note');
+    var txt = document.getElementById('pos_ident_note_txt');
+    var tag = document.getElementById('pos_client_tag');
+    var sub = document.getElementById('pos_client_sub');
+    if (!box || !sel || !note || !txt) return;
+
+    box.classList.toggle('hidden', !cf);
+    sel.classList.toggle('active', !cf);
+    box.classList.toggle('is-error', !!err && cf);
+    sel.classList.toggle('is-error', !!err && !cf);
+
+    var cfItem = document.getElementById('pos_client_cf');
+    if (cfItem) cfItem.classList.toggle('is-current', cf);
+
+    if (tag) {
+        tag.textContent = err ? 'Requiere cliente' : 'Predeterminado';
+        tag.classList.toggle('is-error', !!err);
+    }
+    if (sub) sub.textContent = err ? 'Requiere identificar al comprador' : 'Venta sin datos del comprador';
+
+    note.classList.remove('is-error', 'is-ok');
+    var ico = note.querySelector('i');
+    if (err) {
+        note.classList.add('is-error');
+        ico.className = 'fa-solid fa-triangle-exclamation';
+        txt.textContent = err.mensaje;
+    } else if (cf) {
+        ico.className = 'fa-solid fa-circle-info';
+        txt.innerHTML = 'Boleta hasta <b>S/ 700.00</b>. Para factura o montos mayores, selecciona un cliente.';
+    } else {
+        note.classList.add('is-ok');
+        ico.className = 'fa-solid fa-circle-check';
+        txt.innerHTML = 'Al quitar el cliente, la venta vuelve a <b>Consumidor final</b> sin perder los productos.';
     }
 }
 
 function selectClient(c) {
     clienteSeleccionado = c;
     document.getElementById('id_cliente').value = c.id_cliente == null ? '' : c.id_cliente;
-    document.getElementById('pos_client_sel').classList.add('active');
-    document.getElementById('pos_client_box').classList.add('hidden');
-    document.getElementById('pos_client_avatar').textContent = c.es_consumidor_final ? 'CF' : (c.nombre || '?').charAt(0).toUpperCase();
+    document.getElementById('pos_client_avatar').textContent = (c.nombre || '?').charAt(0).toUpperCase();
     document.getElementById('pos_client_name2').textContent = c.nombre;
-    document.getElementById('pos_client_doc').textContent = c.es_consumidor_final
-        ? 'Venta sin datos del comprador'
-        : (c.tipo_documento || 'Doc') + ': ' + (c.nro_documento || '—');
+    document.getElementById('pos_client_doc').textContent = (c.tipo_documento || 'Doc') + ': ' + (c.nro_documento || '—');
     closeClientDD();
-    aplicarRestriccionConsumidorFinal();
-    validarFacturaRUC();
+    actualizarEstadoPago();
 }
 
+// Quitar la selección = volver a Consumidor final (no toca productos ni total).
 function clearClient() {
     clienteSeleccionado = null;
     document.getElementById('id_cliente').value = '';
-    document.getElementById('pos_client_sel').classList.remove('active');
-    document.getElementById('pos_client_box').classList.remove('hidden');
-    aplicarRestriccionConsumidorFinal();
-    validarFacturaRUC();
+    actualizarEstadoPago();
 }
+
+// initPaydoc() la sigue llamando al cambiar Boleta/Factura.
+function validarFacturaRUC() { actualizarEstadoPago(); }
 
 function initPaydoc() {
     var wrap = document.getElementById('pos_paydoc');
@@ -567,14 +618,6 @@ function initPaydoc() {
     });
 
     validarFacturaRUC();
-}
-
-function validarFacturaRUC() {
-    var facturaBtn = document.querySelector('.pos-paydoc-btn[data-target="id_tipo_comprobante"][data-key="factura"]');
-    var hint = document.getElementById('cliente-hint');
-    if (!hint) return;
-    var esFactura = facturaBtn && facturaBtn.classList.contains('active');
-    hint.style.display = esFactura ? 'flex' : 'none';
 }
 
 function openCartMobile() { document.getElementById('pos_cart').classList.add('open'); }
@@ -638,12 +681,12 @@ async function procesarVenta() {
     var id_cliente = document.getElementById('id_cliente').value;
     var id_tc = document.getElementById('id_tipo_comprobante').value;
     var id_mp = metodoSeleccionado;
-    if (!id_cliente && !esConsumidorFinal()) { Modal.warning('Falta cliente', 'Seleccione o registre un cliente.'); return; }
     if (!id_tc) { Modal.warning('Falta comprobante', 'Seleccione un tipo de comprobante.'); return; }
         if (!id_mp) { actualizarEstadoPago(); return; }
     if (!carrito.length) { Modal.warning('Carrito vacío', 'Agregue al menos un producto.'); return; }
-    if (esConsumidorFinal() && totalCarrito() > LIMITE_CONSUMIDOR_FINAL) {
-        Modal.warning('Supera el límite', 'Consumidor final solo admite ventas hasta S/. 700.00. Seleccione un cliente registrado.');
+    var ident = validarIdentificacion();
+    if (ident) {
+        Modal.warning(ident.tipo === 'factura' ? 'Falta identificar al comprador' : 'Supera el límite', ident.mensaje);
         return;
     }
     // El servidor vuelve a validar el método al confirmar; esta consulta evita enviar uno ya desactivado.
@@ -656,11 +699,16 @@ async function procesarVenta() {
     ventaEnProceso = true;
     btn.disabled = true;
     try {
+
+        var cf= esConsumidorFinal();
         var payload = {
-            id_cliente: parseInt(id_cliente, 10),
+            id_cliente: cf ? null: parseInt(id_cliente, 10),
+            consumidor_final: cf,
             id_tipo_comprobante: parseInt(id_tc, 10),
             id_metodo_pago: parseInt(id_mp, 10),
-            productos: carrito.map(function(i) { return { id_cliente: esConsumidorFinal() ? null : parseInt(id_cliente, 10),consumidor_final: esConsumidorFinal(), cantidad: parseInt(i.cantidad, 10) }; })
+            productos: carrito.map(function(i) {
+                return { id_producto: parseInt(i.id_producto, 10), cantidad: parseInt(i.cantidad, 10) };
+            })
         };
         payload.referencia_solicitud = await Api.referenciaSolicitud('venta-procesar', payload);
         var res = await Api.post('ventas', payload);
@@ -677,7 +725,7 @@ async function procesarVenta() {
             var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex] ? tipoComprobante.options[tipoComprobante.selectedIndex].text : 'Boleta';
             var metodoPago = document.getElementById('id_metodo_pago');
             var mpNombre = metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '';
-            var clienteNombre = clienteSeleccionado ? clienteSeleccionado.nombre : 'Cliente general';
+            var clienteNombre = clienteSeleccionado ? clienteSeleccionado.nombre : 'Consumidor final';
             var datosTicket = { serie: d.serie, numero: d.numero, total: d.total, tipo: tipoNombre };
 
             // Dejar la pantalla lista antes de avisar al vendedor.
@@ -811,9 +859,10 @@ function marcarMetodoNoDisponible(id) {
 }
 
 function actualizarEstadoPago() {
+    renderIdentificacion();
     var valido = !!metodoSeleccionado && !metodosNoDisponibles[metodoSeleccionado];
     var btn = document.getElementById('btn_procesar');
-    if (btn) btn.disabled = !valido || ventaEnProceso;
+    if (btn) btn.disabled = !valido || ventaEnProceso || !!validarIdentificacion();
     var req = document.getElementById('pos_pay_required');
     if (req) req.hidden = valido || !pagosLista.length;
     var caja = document.getElementById('pos_cash');
