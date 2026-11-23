@@ -5,6 +5,14 @@ let tiposDocumentoLista = [];
 let categoriasLista = [];
 let chipCategoriaActiva = '';
 let clienteSeleccionado = null;
+const LIMITE_CONSUMIDOR_FINAL = 700;
+const CONSUMIDOR_FINAL = {
+    id_cliente: null,
+    nombre: 'Consumidor final',
+    tipo_documento: '',
+    nro_documento: '',
+    es_consumidor_final: true
+};
 let paydocMap = { 'id_tipo_comprobante': {}, 'id_metodo_pago': {} };
 let pagosLista = [];
 let metodoSeleccionado = '';
@@ -100,6 +108,7 @@ function initPos() {
     });
 
     document.getElementById('pos_client_box').addEventListener('click', toggleClientDD);
+    document.getElementById('pos_client_cf').addEventListener('click', function() { selectClient(CONSUMIDOR_FINAL); });
     document.getElementById('pos_client_clear').addEventListener('click', clearClient);
     document.getElementById('pos_client_search').addEventListener('input', debounce(function() {
         renderClientResults(document.getElementById('pos_client_search').value.trim());
@@ -463,9 +472,15 @@ function closeClientDD() { document.getElementById('pos_client_dd').classList.re
 function renderClientResults(query) {
     var dd = document.getElementById('pos_client_results');
     dd.textContent = '';
-    var items = query ? clientesLista.filter(function(c) {
-        return (c.nombre || '').toLowerCase().includes(query.toLowerCase()) || (c.nro_documento || '').toLowerCase().includes(query.toLowerCase());
+    var q = (query || '').toLowerCase();
+    var items = q ? clientesLista.filter(function(c) {
+        return (c.nombre || '').toLowerCase().includes(q) || (c.nro_documento || '').toLowerCase().includes(q);
     }).slice(0, 12) : clientesLista.slice(0, 12);
+
+    var cf = document.getElementById('pos_client_cf');
+    var sec = document.getElementById('pos_client_section');
+    if (cf) cf.style.display = (!q || 'consumidor final'.includes(q)) ? '' : 'none';
+    if (sec) sec.style.display = items.length ? '' : 'none';
 
     items.forEach(function(c) {
         var el = document.createElement('div');
@@ -478,20 +493,38 @@ function renderClientResults(query) {
         dd.appendChild(el);
     });
 
-    if (query && !items.length) {
+    if (q && !items.length && cf && cf.style.display === 'none') {
         dd.innerHTML = '<div class="pos-dd-empty"><i class="fa-solid fa-user-slash"></i> Sin coincidencias</div>';
+    }
+}
+
+function esConsumidorFinal() {
+    return !!(clienteSeleccionado && clienteSeleccionado.es_consumidor_final);
+}
+
+function aplicarRestriccionConsumidorFinal() {
+    var boletaBtn = document.querySelector('.pos-paydoc-btn[data-target="id_tipo_comprobante"][data-key="boleta"]');
+    var facturaBtn = document.querySelector('.pos-paydoc-btn[data-target="id_tipo_comprobante"][data-key="factura"]');
+    var cf = esConsumidorFinal();
+    if (facturaBtn) {
+        facturaBtn.disabled = cf;
+        facturaBtn.title = cf ? 'Consumidor final solo admite boleta' : '';
+        if (cf && facturaBtn.classList.contains('active') && boletaBtn) boletaBtn.click();
     }
 }
 
 function selectClient(c) {
     clienteSeleccionado = c;
-    document.getElementById('id_cliente').value = c.id_cliente;
+    document.getElementById('id_cliente').value = c.id_cliente == null ? '' : c.id_cliente;
     document.getElementById('pos_client_sel').classList.add('active');
     document.getElementById('pos_client_box').classList.add('hidden');
-    document.getElementById('pos_client_avatar').textContent = (c.nombre || '?').charAt(0).toUpperCase();
+    document.getElementById('pos_client_avatar').textContent = c.es_consumidor_final ? 'CF' : (c.nombre || '?').charAt(0).toUpperCase();
     document.getElementById('pos_client_name2').textContent = c.nombre;
-    document.getElementById('pos_client_doc').textContent = (c.tipo_documento || 'Doc') + ': ' + (c.nro_documento || '—');
+    document.getElementById('pos_client_doc').textContent = c.es_consumidor_final
+        ? 'Venta sin datos del comprador'
+        : (c.tipo_documento || 'Doc') + ': ' + (c.nro_documento || '—');
     closeClientDD();
+    aplicarRestriccionConsumidorFinal();
     validarFacturaRUC();
 }
 
@@ -500,6 +533,7 @@ function clearClient() {
     document.getElementById('id_cliente').value = '';
     document.getElementById('pos_client_sel').classList.remove('active');
     document.getElementById('pos_client_box').classList.remove('hidden');
+    aplicarRestriccionConsumidorFinal();
     validarFacturaRUC();
 }
 
@@ -604,11 +638,14 @@ async function procesarVenta() {
     var id_cliente = document.getElementById('id_cliente').value;
     var id_tc = document.getElementById('id_tipo_comprobante').value;
     var id_mp = metodoSeleccionado;
-    if (!id_cliente) { Modal.warning('Falta cliente', 'Seleccione o registre un cliente.'); return; }
+    if (!id_cliente && !esConsumidorFinal()) { Modal.warning('Falta cliente', 'Seleccione o registre un cliente.'); return; }
     if (!id_tc) { Modal.warning('Falta comprobante', 'Seleccione un tipo de comprobante.'); return; }
         if (!id_mp) { actualizarEstadoPago(); return; }
     if (!carrito.length) { Modal.warning('Carrito vacío', 'Agregue al menos un producto.'); return; }
-
+    if (esConsumidorFinal() && totalCarrito() > LIMITE_CONSUMIDOR_FINAL) {
+        Modal.warning('Supera el límite', 'Consumidor final solo admite ventas hasta S/. 700.00. Seleccione un cliente registrado.');
+        return;
+    }
     // El servidor vuelve a validar el método al confirmar; esta consulta evita enviar uno ya desactivado.
     if (!(await verificarMetodoDisponible(id_mp))) { marcarMetodoNoDisponible(id_mp); return; }
 
@@ -623,7 +660,7 @@ async function procesarVenta() {
             id_cliente: parseInt(id_cliente, 10),
             id_tipo_comprobante: parseInt(id_tc, 10),
             id_metodo_pago: parseInt(id_mp, 10),
-            productos: carrito.map(function(i) { return { id_producto: parseInt(i.id_producto, 10), cantidad: parseInt(i.cantidad, 10) }; })
+            productos: carrito.map(function(i) { return { id_cliente: esConsumidorFinal() ? null : parseInt(id_cliente, 10),consumidor_final: esConsumidorFinal(), cantidad: parseInt(i.cantidad, 10) }; })
         };
         payload.referencia_solicitud = await Api.referenciaSolicitud('venta-procesar', payload);
         var res = await Api.post('ventas', payload);
@@ -636,7 +673,7 @@ async function procesarVenta() {
             carrito = [];
             Api.confirmarSolicitud('venta-procesar');
             renderCarrito();
-             var tipoComprobante = document.getElementById('id_tipo_comprobante');
+            var tipoComprobante = document.getElementById('id_tipo_comprobante');
             var tipoNombre = tipoComprobante.options[tipoComprobante.selectedIndex] ? tipoComprobante.options[tipoComprobante.selectedIndex].text : 'Boleta';
             var metodoPago = document.getElementById('id_metodo_pago');
             var mpNombre = metodoPago.options[metodoPago.selectedIndex] ? metodoPago.options[metodoPago.selectedIndex].text : '';
